@@ -1,0 +1,13 @@
+# Déploiement statique : le jeu est la racine du site publié.
+# Aucune étape de build — c'est du HTML, du CSS et des modules ES.
+
+[build]
+  publish = "hop"
+  command = ""
+
+# Le jeu de données Montréal ne change qu'à chaque nouvel extrait OSM :
+# on le laisse en cache longtemps, contrairement au code.
+[[headers]]
+  for = "/data/*.json"
+  [headers.values]
+    Cache-Control = "public, max-age=604800"
