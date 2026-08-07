@@ -331,7 +331,9 @@ export class World {
       materials: this.materials.props,
       shadows: !!this.settings.shadows && this.settings.quality === 'high',
       opts: {
-        parkedCars: this.settings.quality !== 'low',
+        // Parked cars are off until there is a reason for other vehicles to
+        // exist: right now they only narrow the street and get hit.
+        parkedCars: false,
         trees: true,
         lamps: true,
       },

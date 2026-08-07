@@ -19,6 +19,7 @@ import { EngineAudio } from './vehicle/audio.js';
 import { TimeTrial, TrialState } from './game/timetrial.js';
 import { Hud } from './ui/hud.js';
 import { Menu } from './ui/menu.js';
+import { buildMapImage, paintMap, marker, carMarker } from './ui/map.js';
 
 const DEFAULT_PLACE = { lat: 45.5265, lon: -73.5795, label: 'Plateau-Mont-Royal, Montréal' };
 
@@ -80,6 +81,7 @@ class Game {
 
     this.menu = new Menu(root, {
       settings: this.settings,
+      input: this.input,
       onHop: (lat, lon, label) => this.hop(lat, lon, label),
       onSettings: (s, key) => this._applySettings(s, key),
     });
@@ -119,7 +121,13 @@ class Game {
     // A bundled dataset makes the first hop instant; its absence is fine.
     this.source.loadDataset(new URL('./data/montreal.json', document.baseURI).href)
       .then((ok) => {
-        if (ok) this.menu.setHint('Jeu de données Montréal embarqué — départ instantané.');
+        if (ok) {
+          this.menu.setHint('Jeu de données Montréal embarqué — départ instantané.');
+          // Rasterise the whole city once; the menu picker and the full map
+          // both blit this image rather than redrawing 7 000 streets.
+          this.mapImage = buildMapImage(this.source.dataset.elements, 2048);
+          this.menu.setMapImage(this.mapImage);
+        }
         else if (this.offline) this.menu.setHint('Mode hors-ligne : Montréal générée.');
         else this.menu.setHint('Données OpenStreetMap en direct.');
       });
@@ -160,11 +168,20 @@ class Game {
       this.root.querySelector('#touch').classList.add('visible');
     }
 
+    // Full-screen map
+    this.mapEl = this.root.querySelector('#mapview');
+    this.mapCanvas = this.root.querySelector('#mapview-canvas');
+    this.mapOpen = false;
+    this.root.querySelector('#mapview-close').addEventListener('click', () => this.closeMap());
+    this.root.querySelector('#minimap').addEventListener('click', () => this.toggleMap());
+    this.mapCanvas.addEventListener('click', (e) => this._mapClick(e));
+    window.addEventListener('resize', () => { if (this.mapOpen) this.drawFullMap(); });
+
     window.addEventListener('keydown', (e) => {
-      if (e.code === 'Escape') {
-        if (this.menu.visible && this.spawned) { this.menu.hide(); this.audio.resume(); }
-        else this.menu.show();
-      }
+      if (e.code !== 'Escape') return;
+      if (this.mapOpen) { this.closeMap(); return; }
+      if (this.menu.visible && this.spawned) { this.menu.hide(); this.audio.resume(); }
+      else this.menu.show();
     });
   }
 
@@ -288,7 +305,7 @@ class Game {
   update(dt) {
     this.input.sample(dt);
 
-    if (!this.menu.visible && this.spawned) {
+    if (!this.menu.visible && !this.mapOpen && this.spawned) {
       const grids = this.world.gridsNear(this.vehicle.x, this.vehicle.z);
       this.vehicle.step(dt, {
         throttle: this.input.throttle,
@@ -320,10 +337,11 @@ class Game {
     const v = this.vehicle;
 
     // --- keyboard actions --------------------------------------------------
-    if (this.input.justPressed('KeyG') && this.trial && this.spawned && !this.menu.visible) {
+    if (this.input.justPressed('gate') && this.trial && this.spawned && !this.menu.visible) {
       this.trial.placeGate(v.x, v.z, v.yaw);
     }
-    if (this.input.justPressed('KeyX') && this.trial) {
+    if (this.input.justPressed('map') && this.spawned) this.toggleMap();
+    if (this.input.justPressed('clearCourse') && this.trial) {
       this.trial.clear();
       this.hud.toast('Parcours effacé.');
     }
@@ -355,7 +373,7 @@ class Game {
     // --- car ---------------------------------------------------------------
     this.car.group.position.set(v.x, 0, v.z);
     this.car.group.rotation.set(v.bodyPitch, v.yaw, -v.bodyRoll, 'YXZ');
-    this.car.setSteer(-v.steerAngle);
+    this.car.setSteer(v.steerAngle);
     this.car.setSpin(v.wheelSpin);
     const nightLights = this.headlightsOn || this.sky.night > 0.35;
     this.car.setLights(nightLights, this.input.brake > 0.1 && v.u > 0.5);
@@ -391,6 +409,65 @@ class Game {
     this.renderer.render(this.scene, this.camera);
     this.input.endFrame();
     void alpha;
+  }
+
+  toggleMap() {
+    if (this.mapOpen) this.closeMap();
+    else this.openMap();
+  }
+
+  openMap() {
+    if (!this.mapImage || !this.spawned) {
+      this.hud.toast('La carte demande le jeu de données Montréal embarqué.');
+      return;
+    }
+    this.mapOpen = true;
+    this.mapEl.classList.add('visible');
+    this.drawFullMap();
+  }
+
+  closeMap() {
+    this.mapOpen = false;
+    this.mapEl.classList.remove('visible');
+  }
+
+  drawFullMap() {
+    if (!this.mapImage) return;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    this.mapCanvas.width = Math.round(window.innerWidth * dpr);
+    this.mapCanvas.height = Math.round(window.innerHeight * dpr);
+    const view = paintMap(this.mapCanvas, this.mapImage);
+    this._mapView = view;
+
+    const ctx = this.mapCanvas.getContext('2d');
+    const proj = this.world.projection;
+    if (!proj) return;
+
+    if (this.trial && this.trial.start) {
+      const ll = proj.toLatLon(this.trial.start.x, this.trial.start.z);
+      const p = view.toPixel(ll.lat, ll.lon);
+      marker(ctx, p.px, p.py, '#35c46a', 'Départ', 5);
+    }
+    if (this.trial && this.trial.finish) {
+      const ll = proj.toLatLon(this.trial.finish.x, this.trial.finish.z);
+      const p = view.toPixel(ll.lat, ll.lon);
+      marker(ctx, p.px, p.py, '#e8503a', 'Arrivée', 5);
+    }
+
+    const here = proj.toLatLon(this.vehicle.x, this.vehicle.z);
+    const p = view.toPixel(here.lat, here.lon);
+    if (view.contains(p.px, p.py)) carMarker(ctx, p.px, p.py, this.vehicle.yaw);
+  }
+
+  _mapClick(e) {
+    if (!this._mapView) return;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const px = e.clientX * dpr;
+    const py = e.clientY * dpr;
+    if (!this._mapView.contains(px, py)) return;
+    const { lat, lon } = this._mapView.toGeo(px, py);
+    this.closeMap();
+    this.hop(lat, lon, this.placeLabel || 'Montréal', true);
   }
 
   _respawn() {

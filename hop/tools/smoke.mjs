@@ -112,6 +112,32 @@ async function main() {
   }
   note('jeu démarré');
 
+  // --- menu: key bindings and the city map picker ---------------------------
+  await page.waitForTimeout(2500);
+  const menuUi = await page.evaluate(() => {
+    const rows = document.querySelectorAll('#keybinds .keybind').length;
+    const cv = document.querySelector('#menu-map');
+    let painted = 0;
+    if (cv && cv.width > 4) {
+      const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
+      for (let i = 0; i < d.length; i += 4 * 97) {
+        if (d[i] > 40 || d[i + 1] > 40 || d[i + 2] > 40) painted++;
+      }
+    }
+    return {
+      rows, painted,
+      mapShown: cv ? getComputedStyle(cv.parentElement).display !== 'none' : false,
+      presets: document.querySelectorAll('#presets .preset').length,
+      presetLabels: [...document.querySelectorAll('#presets .preset strong')].map((e) => e.textContent),
+    };
+  });
+  note(`menu : ${menuUi.rows} touches remappables, ${menuUi.presets} raccourcis, carte ${menuUi.mapShown ? 'affichée' : 'masquée'} (${menuUi.painted} échantillons de rue)`);
+  if (menuUi.rows < 10) problem(`panneau de commandes incomplet (${menuUi.rows} lignes)`);
+  if (!menuUi.mapShown || menuUi.painted < 20) problem('la carte du menu ne dessine pas les rues');
+  if (menuUi.presetLabels.some((l) => /Paris|Manhattan|Québec/.test(l))) {
+    problem('des raccourcis pointent hors du jeu de données embarqué');
+  }
+
   // --- hop into the fixture -------------------------------------------------
   await page.click('#hop-default');
 
@@ -182,12 +208,17 @@ async function main() {
     v.reset(saved.x, saved.z, saved.yaw);
     for (let i = 0; i < 120 * 6; i++) v.step(1 / 120, flat, []);
     const turn = { throttle: 0.35, brake: 0, steer: 1, handbrake: false };
+    const yaw0 = v.yaw;
     let maxYaw = 0;
     for (let i = 0; i < 120 * 4; i++) {
       v.step(1 / 120, turn, []);
       maxYaw = Math.max(maxYaw, Math.abs(v.yawRate));
     }
     const corneringSpeed = v.speedKmh;
+    // steer = +1 must turn right on screen. The camera's right vector for a
+    // heading psi is (-cos psi, sin psi); dotting it with the new forward
+    // gives sin(yaw0 - yaw1), so a right turn means the dot is positive.
+    const turnedRight = Math.sin(yaw0 - v.yaw) > 0;
 
     // Handbrake should break rear grip and build slip angle.
     const slide = { throttle: 0.5, brake: 0, steer: 1, handbrake: true };
@@ -198,7 +229,7 @@ async function main() {
     }
 
     v.reset(saved.x, saved.z, saved.yaw);
-    return { ...marks, top, topGear, brakeDist, maxYaw, corneringSpeed, maxSlip };
+    return { ...marks, top, topGear, brakeDist, maxYaw, corneringSpeed, maxSlip, turnedRight };
   });
 
   note(`0-50 ${bench.to50 ? bench.to50.toFixed(1) + ' s' : '—'} · 0-100 ${bench.to100 ? bench.to100.toFixed(1) + ' s' : '—'} · pointe ${bench.top.toFixed(0)} km/h en ${bench.topGear}e`);
@@ -208,6 +239,8 @@ async function main() {
   if (!bench.to100 || bench.to100 > 20) problem(`0-100 km/h trop lent (${bench.to100 ? bench.to100.toFixed(1) : '∞'} s)`);
   if (bench.top < 140 || bench.top > 260) problem(`vitesse de pointe irréaliste (${bench.top.toFixed(0)} km/h)`);
   if (bench.brakeDist < 20 || bench.brakeDist > 220) problem(`distance de freinage irréaliste (${bench.brakeDist.toFixed(0)} m)`);
+  if (!bench.turnedRight) problem('la direction est inversée : « droite » fait tourner à gauche');
+  else note('direction : « droite » tourne bien à droite à l’écran');
   if (bench.maxYaw < 0.25) problem(`la voiture ne tourne pas (${bench.maxYaw.toFixed(2)} rad/s)`);
   if (bench.maxSlip < 0.12) problem(`le frein à main ne décroche pas l’arrière (${bench.maxSlip.toFixed(2)} rad)`);
 
@@ -316,6 +349,36 @@ async function main() {
   }
   await page.waitForTimeout(500);
   await page.screenshot({ path: path.join(SHOTS, '07-gates.png') });
+
+  // --- full-screen map ------------------------------------------------------
+  const fullMap = await page.evaluate(() => {
+    const g = window.__ruelle;
+    g.openMap();
+    const open = g.mapOpen && document.querySelector('#mapview').classList.contains('visible');
+    const cv = document.querySelector('#mapview-canvas');
+    let painted = 0;
+    if (cv && cv.width > 4) {
+      const d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
+      for (let i = 0; i < d.length; i += 4 * 397) {
+        if (d[i] > 40 || d[i + 1] > 40 || d[i + 2] > 40) painted++;
+      }
+    }
+    g.closeMap();
+    return { open, painted, closed: !g.mapOpen };
+  });
+  note(`carte plein écran : ouverture ${fullMap.open}, ${fullMap.painted} échantillons, fermeture ${fullMap.closed}`);
+  if (!fullMap.open || fullMap.painted < 20 || !fullMap.closed) problem('la carte plein écran ne fonctionne pas');
+
+  // --- no other vehicles ----------------------------------------------------
+  const traffic = await page.evaluate(() => {
+    let instances = 0;
+    for (const t of window.__ruelle.world.tiles.values()) {
+      if (t.propMeshes) instances += t.propMeshes.colliders.length;
+    }
+    return instances;
+  });
+  if (traffic > 0) problem(`des voitures garées sont encore générées (${traffic / 4} objets)`);
+  else note('aucun autre véhicule dans le monde');
 
   // --- frame rate ----------------------------------------------------------
   const fps = await page.evaluate(() => window.__ruelle.loop.fps);

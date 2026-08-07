@@ -140,7 +140,11 @@ export class Vehicle {
     // --- steering ----------------------------------------------------------
     const speed = Math.abs(this.u);
     const steerLimit = S.maxSteer * (0.32 + 0.68 / (1 + speed / 17));
-    const targetSteer = clampAbs(input.steer, 1) * steerLimit;
+    // The model's lateral axis, (cos ψ, −sin ψ), is screen-LEFT: the camera's
+    // right vector is forward × up = (−cos ψ, sin ψ). So a positive yaw rate
+    // steers left on screen, and the driver's input has to be mirrored on the
+    // way in. Everything downstream of here stays in the model's own frame.
+    const targetSteer = -clampAbs(input.steer, 1) * steerLimit;
     // Rate-limit the rack so flicks cannot teleport the slip angle.
     const maxRate = 5.2 * dt;
     this.steerAngle += clampAbs(targetSteer - this.steerAngle, maxRate);

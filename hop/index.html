@@ -80,6 +80,11 @@
       <div id="search-results"></div>
     </div>
 
+    <div id="menu-map-wrap">
+      <canvas id="menu-map"></canvas>
+      <p class="map-caption">Clique n’importe où sur Montréal pour y démarrer.</p>
+    </div>
+
     <div id="presets"></div>
 
     <div class="menu-actions">
@@ -93,11 +98,12 @@
       <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>conduire</span></div>
       <div><kbd>Espace</kbd><span>frein à main</span></div>
       <div><kbd>G</kbd><span>poser départ / arrivée</span></div>
+      <div><kbd>M</kbd><span>carte plein écran</span></div>
       <div><kbd>R</kbd><span>replacer sur la route</span></div>
       <div><kbd>C</kbd><span>caméra</span></div>
       <div><kbd>L</kbd><span>phares</span></div>
-      <div><kbd>X</kbd><span>effacer le parcours</span></div>
       <div><kbd>Échap</kbd><span>menu</span></div>
+      <div class="keys-note">Tout est remappable dans ⚙ Réglages.</div>
     </div>
 
     <footer>
@@ -161,6 +167,22 @@
       <input type="checkbox" id="set-fps">
       <span>Afficher les images par seconde</span>
     </label>
+
+    <div class="settings-head" style="margin-top:22px">
+      <h2>Commandes</h2>
+      <button id="reset-keys" class="small-btn">Par défaut</button>
+    </div>
+    <p class="hint">Clique sur une touche puis appuie sur la nouvelle. Échap annule.</p>
+    <div id="keybinds"></div>
+  </div>
+</div>
+
+<!-- ── Full map ──────────────────────────────────────────────────────── -->
+<div id="mapview">
+  <canvas id="mapview-canvas"></canvas>
+  <div id="mapview-bar">
+    <span id="mapview-hint">Clique sur une rue pour t’y téléporter</span>
+    <button id="mapview-close" aria-label="Fermer la carte">✕</button>
   </div>
 </div>
 

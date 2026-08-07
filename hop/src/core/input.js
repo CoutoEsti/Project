@@ -4,7 +4,9 @@
 // still gives a usable analogue-ish feel. Gamepad axes bypass the smoothing
 // because the stick is already analogue.
 
-const KEY_BINDINGS = {
+import { load, save } from './store.js';
+
+const DEFAULT_BINDINGS = {
   throttle: ['KeyW', 'ArrowUp'],
   brake: ['KeyS', 'ArrowDown'],
   left: ['KeyA', 'ArrowLeft'],
@@ -12,12 +14,44 @@ const KEY_BINDINGS = {
   handbrake: ['Space'],
   reset: ['KeyR'],
   camera: ['KeyC'],
-  horn: ['KeyH'],
   lights: ['KeyL'],
+  gate: ['KeyG'],
+  clearCourse: ['KeyX'],
+  map: ['KeyM'],
 };
+
+/** Human labels, in the order the settings panel shows them. */
+export const BINDABLE = [
+  ['throttle', 'Accélérer'],
+  ['brake', 'Freiner / reculer'],
+  ['left', 'Tourner à gauche'],
+  ['right', 'Tourner à droite'],
+  ['handbrake', 'Frein à main'],
+  ['reset', 'Replacer sur la route'],
+  ['camera', 'Changer de caméra'],
+  ['lights', 'Phares'],
+  ['gate', 'Poser une porte'],
+  ['clearCourse', 'Effacer le parcours'],
+  ['map', 'Carte'],
+];
+
+/** "KeyW" -> "W", "ArrowUp" -> "↑", "Space" -> "Espace". */
+export function keyLabel(code) {
+  if (!code) return '—';
+  if (code === 'Space') return 'Espace';
+  if (code.startsWith('Key')) return code.slice(3);
+  if (code.startsWith('Digit')) return code.slice(5);
+  if (code.startsWith('Numpad')) return `Pavé ${code.slice(6)}`;
+  const arrows = { ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→' };
+  if (arrows[code]) return arrows[code];
+  return code.replace(/^(Shift|Control|Alt|Meta)(Left|Right)$/, '$1');
+}
 
 export class Input {
   constructor(target = window) {
+    this.bindings = this._loadBindings();
+    this.capture = null;       // set to an action name to rebind the next key
+    this.onCapture = null;
     this.keys = new Set();
     this.pressed = new Set();      // edge-triggered, cleared each frame
     this.throttle = 0;
@@ -30,6 +64,15 @@ export class Input {
     this._gamepadIndex = null;
 
     this._onKeyDown = (e) => {
+      // Rebinding swallows the very next key, whatever it is.
+      if (this.capture) {
+        e.preventDefault();
+        const action = this.capture;
+        this.capture = null;
+        if (e.code !== 'Escape') this.setBinding(action, e.code);
+        if (this.onCapture) this.onCapture(action);
+        return;
+      }
       if (!this.enabled) return;
       if (e.target instanceof HTMLElement) {
         const tag = e.target.tagName;
@@ -49,14 +92,54 @@ export class Input {
     window.addEventListener('gamepaddisconnected', () => { this._gamepadIndex = null; });
   }
 
+  _loadBindings() {
+    const saved = load('bindings', null);
+    const out = {};
+    for (const key of Object.keys(DEFAULT_BINDINGS)) {
+      const v = saved && Array.isArray(saved[key]) && saved[key].length
+        ? saved[key].filter((c) => typeof c === 'string')
+        : null;
+      out[key] = v && v.length ? v : DEFAULT_BINDINGS[key].slice();
+    }
+    return out;
+  }
+
+  /** Rebind an action, taking the key away from whoever else held it. */
+  setBinding(action, code) {
+    if (!this.bindings[action]) return;
+    for (const other of Object.keys(this.bindings)) {
+      if (other === action) continue;
+      this.bindings[other] = this.bindings[other].filter((c) => c !== code);
+      if (!this.bindings[other].length) this.bindings[other] = ['Unbound'];
+    }
+    this.bindings[action] = [code];
+    save('bindings', this.bindings);
+  }
+
+  resetBindings() {
+    this.bindings = {};
+    for (const k of Object.keys(DEFAULT_BINDINGS)) this.bindings[k] = DEFAULT_BINDINGS[k].slice();
+    save('bindings', this.bindings);
+  }
+
+  /** Start listening for the next key press, to assign it to `action`. */
+  beginCapture(action, done) {
+    this.capture = action;
+    this.onCapture = done;
+  }
+
+  codesFor(action) {
+    return this.bindings[action] || [action];
+  }
+
   /** True once, on the frame a key went down. */
   justPressed(action) {
-    const codes = KEY_BINDINGS[action] || [action];
+    const codes = this.codesFor(action);
     return codes.some((c) => this.pressed.has(c));
   }
 
   held(action) {
-    const codes = KEY_BINDINGS[action] || [action];
+    const codes = this.codesFor(action);
     return codes.some((c) => this.keys.has(c));
   }
 
@@ -141,4 +224,4 @@ const SWALLOW = new Set([
   'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space',
 ]);
 
-export { KEY_BINDINGS };
+export { DEFAULT_BINDINGS };

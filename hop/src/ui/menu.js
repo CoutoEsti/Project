@@ -1,18 +1,22 @@
-// Start screen, place search and settings.
+// Start screen, place search, key bindings and the city map picker.
 //
 // Search goes through Nominatim, which asks for at most one request a second
 // and a genuine identifying Referer — a browser supplies the latter on its
 // own, and the debounce below supplies the former.
 
+import { paintMap, marker } from './map.js';
+import { BINDABLE, keyLabel } from '../core/input.js';
+
+// Only places the bundled Montréal extract actually covers. Anywhere else
+// would depend on a live Overpass round-trip, which is not something to put
+// behind a one-click button that looks like it will just work.
 const PRESETS = [
-  { name: 'Plateau-Mont-Royal', sub: 'Montréal', lat: 45.5265, lon: -73.5795 },
-  { name: 'Vieux-Montréal', sub: 'Montréal', lat: 45.5065, lon: -73.5540 },
-  { name: 'Mile End', sub: 'Montréal', lat: 45.5230, lon: -73.5990 },
-  { name: 'Saint-Léonard', sub: 'Montréal', lat: 45.5880, lon: -73.5940 },
-  { name: 'Centre-ville', sub: 'Montréal', lat: 45.5015, lon: -73.5700 },
-  { name: 'Québec', sub: 'Vieux-Québec', lat: 46.8130, lon: -71.2080 },
-  { name: 'Paris', sub: 'Le Marais', lat: 48.8590, lon: 2.3600 },
-  { name: 'Manhattan', sub: 'New York', lat: 40.7420, lon: -73.9890 },
+  { name: 'Plateau-Mont-Royal', sub: 'Parc La Fontaine', lat: 45.5265, lon: -73.5795 },
+  { name: 'Mile End', sub: 'Saint-Viateur', lat: 45.5230, lon: -73.5990 },
+  { name: 'Vieux-Montréal', sub: 'Place Jacques-Cartier', lat: 45.5065, lon: -73.5540 },
+  { name: 'Centre-ville', sub: 'Sainte-Catherine', lat: 45.5015, lon: -73.5700 },
+  { name: 'Rosemont', sub: 'Beaubien', lat: 45.5400, lon: -73.5830 },
+  { name: 'Saint-Léonard', sub: 'Grandes-Prairies', lat: 45.5880, lon: -73.5940 },
 ];
 
 const NOMINATIM = 'https://nominatim.openstreetmap.org/search';
@@ -27,9 +31,11 @@ export class Menu {
     this.settings = opts.settings;
     this.onHop = opts.onHop;
     this.onSettings = opts.onSettings || (() => {});
+    this.input = opts.input;
+    this.mapImage = null;
 
     this.el = root.querySelector('#menu');
-    this.input = root.querySelector('#search-input');
+    this.searchEl = root.querySelector('#search-input');
     this.results = root.querySelector('#search-results');
     this.presetsEl = root.querySelector('#presets');
     this.hint = root.querySelector('#menu-hint');
@@ -40,9 +46,16 @@ export class Menu {
     this._searchAbort = null;
     this._lastQuery = '';
 
+    this.mapCanvas = root.querySelector('#menu-map');
+    this.mapWrap = root.querySelector('#menu-map-wrap');
+    this.mapWrap.style.display = 'none';
+
     this._buildPresets();
     this._bindSearch();
     this._bindSettings();
+    this._buildKeybinds();
+    this._bindMap();
+    window.addEventListener('resize', () => this.drawMap());
 
     root.querySelector('#open-settings').addEventListener('click', () => {
       this.panel.classList.toggle('visible');
@@ -64,8 +77,8 @@ export class Menu {
   }
 
   _bindSearch() {
-    this.input.addEventListener('input', () => {
-      const q = this.input.value.trim();
+    this.searchEl.addEventListener('input', () => {
+      const q = this.searchEl.value.trim();
       clearTimeout(this._searchTimer);
       if (q.length < 3) {
         this.results.innerHTML = '';
@@ -75,12 +88,12 @@ export class Menu {
       this._searchTimer = setTimeout(() => this._search(q), 420);
     });
 
-    this.input.addEventListener('keydown', (e) => {
+    this.searchEl.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();
         const first = this.results.querySelector('button');
         if (first) first.click();
-        else this._search(this.input.value.trim(), true);
+        else this._search(this.searchEl.value.trim(), true);
       }
     });
   }
@@ -154,6 +167,73 @@ export class Menu {
     bind('#set-time', 'timeOfDay', Number, 'input');
     bind('#set-autotime', 'autoTime');
     bind('#set-fps', 'showFps');
+  }
+
+  /** Attach the rasterised city map, once the dataset has loaded. */
+  setMapImage(image) {
+    this.mapImage = image;
+    this.mapWrap.style.display = image ? 'flex' : 'none';
+    this.drawMap();
+  }
+
+  drawMap() {
+    if (!this.mapImage || !this.mapCanvas || this.mapWrap.style.display === 'none') return;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const rect = this.mapCanvas.getBoundingClientRect();
+    if (!rect.width) return;
+    this.mapCanvas.width = Math.round(rect.width * dpr);
+    this.mapCanvas.height = Math.round(rect.height * dpr);
+    this._view = paintMap(this.mapCanvas, this.mapImage);
+
+    const ctx = this.mapCanvas.getContext('2d');
+    for (const p of PRESETS) {
+      const { px, py } = this._view.toPixel(p.lat, p.lon);
+      if (!this._view.contains(px, py)) continue;
+      marker(ctx, px, py, '#ffc857', p.name, 4);
+    }
+  }
+
+  _bindMap() {
+    this.mapCanvas.addEventListener('click', (e) => {
+      if (!this._view) return;
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const rect = this.mapCanvas.getBoundingClientRect();
+      const px = (e.clientX - rect.left) * dpr;
+      const py = (e.clientY - rect.top) * dpr;
+      if (!this._view.contains(px, py)) return;
+      const { lat, lon } = this._view.toGeo(px, py);
+      this.onHop(lat, lon, 'Montréal');
+    });
+  }
+
+  _buildKeybinds() {
+    const host = this.root.querySelector('#keybinds');
+    if (!host || !this.input) return;
+
+    const render = () => {
+      host.innerHTML = '';
+      for (const [action, label] of BINDABLE) {
+        const row = document.createElement('div');
+        row.className = 'keybind';
+        const name = document.createElement('span');
+        name.textContent = label;
+        const btn = document.createElement('button');
+        btn.textContent = this.input.codesFor(action).map(keyLabel).join(' / ');
+        btn.addEventListener('click', () => {
+          btn.classList.add('capturing');
+          btn.textContent = 'appuie…';
+          this.input.beginCapture(action, () => render());
+        });
+        row.append(name, btn);
+        host.appendChild(row);
+      }
+    };
+
+    render();
+    const reset = this.root.querySelector('#reset-keys');
+    if (reset) {
+      reset.addEventListener('click', () => { this.input.resetBindings(); render(); });
+    }
   }
 
   setHint(text) {
