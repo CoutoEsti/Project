@@ -13,6 +13,19 @@ const FLOOR_PX = 64;
 let cached = null;
 
 /**
+ * Glass, top-down: dark where it looks into the room, lighter at the bottom
+ * where the pane catches the sky. Multiplied by the building's vertex colour,
+ * so it tints with the brick rather than fighting it.
+ */
+function glassGradient(ctx, x, y, h) {
+  const g = ctx.createLinearGradient(x, y, x, y + h);
+  g.addColorStop(0, 'rgba(74,96,120,0.78)');
+  g.addColorStop(0.45, 'rgba(34,42,54,0.88)');
+  g.addColorStop(1, 'rgba(52,64,80,0.82)');
+  return g;
+}
+
+/**
  * Facade textures.
  *  - `map` is mostly white (so the per-building vertex colour shows through)
  *    with darker glass and a hint of brick coursing.
@@ -66,7 +79,7 @@ export function facadeTextures(THREE) {
       if (groundFloor) {
         // Shopfront: wide glazing, a stall riser, a doorway on some bays.
         const gx = x + 6, gy = y + 14, gw = BAY_PX - 12, gh = FLOOR_PX - 26;
-        dg.fillStyle = 'rgba(28,32,38,0.80)';
+        dg.fillStyle = glassGradient(dg, gx, gy, gh);
         dg.fillRect(gx, gy, gw, gh);
         dg.fillStyle = 'rgba(255,255,255,0.10)';
         dg.fillRect(gx, gy, gw, 5);
@@ -87,8 +100,23 @@ export function facadeTextures(THREE) {
         const ww = 17, wh = 30;
         const wx = x + 9 + half * 29;
         const wy = y + 16;
-        dg.fillStyle = 'rgba(26,30,36,0.86)';
+        dg.fillStyle = glassGradient(dg, wx, wy, wh);
         dg.fillRect(wx, wy, ww, wh);
+        // A slanted highlight reads as a reflection and stops the pane from
+        // looking like a hole punched in the wall.
+        dg.save();
+        dg.beginPath();
+        dg.rect(wx, wy, ww, wh);
+        dg.clip();
+        dg.fillStyle = 'rgba(200,222,245,0.16)';
+        dg.beginPath();
+        dg.moveTo(wx - 2, wy + wh * 0.72);
+        dg.lineTo(wx + ww * 0.66, wy - 2);
+        dg.lineTo(wx + ww + 2, wy - 2);
+        dg.lineTo(wx + ww + 2, wy + wh * 0.30);
+        dg.closePath();
+        dg.fill();
+        dg.restore();
         // Frame highlight and a glazing bar.
         dg.fillStyle = 'rgba(255,255,255,0.30)';
         dg.fillRect(wx - 2, wy - 2, ww + 4, 2);

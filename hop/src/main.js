@@ -14,6 +14,7 @@ import { World } from './world/tiles.js';
 import { Sky } from './world/sky.js';
 import { nearestRoadPoint } from './world/roads.js';
 import { Vehicle } from './vehicle/physics.js';
+import { rayClearance } from './vehicle/collision.js';
 import { createCar, CAR_COLORS } from './vehicle/model.js';
 import { EngineAudio } from './vehicle/audio.js';
 import { TimeTrial, TrialState } from './game/timetrial.js';
@@ -522,8 +523,18 @@ class Game {
     this._camPos.z += (targetZ - this._camPos.z) * k;
     this._camPos.y += (height - this._camPos.y) * (1 - Math.pow(0.004, dt));
 
-    // Never let the camera sink into the road or clip through a wall behind.
-    this.camera.position.set(this._camPos.x, Math.max(1.4, this._camPos.y), this._camPos.z);
+    // Never let the camera sink into the road, and never let it end up inside
+    // the building behind you — pull it in to the last clear point instead.
+    let cx = this._camPos.x, cz = this._camPos.z;
+    const grids = this.world.gridsNear(v.x, v.z);
+    if (grids.length) {
+      const t = rayClearance(grids, v.x, v.z, cx, cz);
+      if (t < 1) {
+        cx = v.x + (cx - v.x) * t;
+        cz = v.z + (cz - v.z) * t;
+      }
+    }
+    this.camera.position.set(cx, Math.max(1.4, this._camPos.y), cz);
     this._camLook.set(v.x + fx * 7, 1.35, v.z + fz * 7);
     this.camera.lookAt(this._camLook);
     this.camera.fov = 60 + speedT * 12;

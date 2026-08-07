@@ -155,4 +155,48 @@ export function resolveCollisions(car, yaw, grids) {
   return impact;
 }
 
+/**
+ * How far along the segment a->b you can travel before hitting a wall.
+ *
+ * Used to keep the chase camera out of buildings: in a Montréal back alley the
+ * camera's resting position is often inside the triplex behind you, and the
+ * fix is to pull it in rather than to let the view clip through brick.
+ *
+ * @returns {number} t in [0,1]; 1 means the whole segment is clear.
+ */
+export function rayClearance(grids, ax, az, bx, bz, padding = 0.55) {
+  const dx = bx - ax, dz = bz - az;
+  const len = Math.hypot(dx, dz);
+  if (len < 1e-4 || !grids.length) return 1;
+  let best = 1;
+
+  // Probe from a few points along the ray so the uniform grid's cell radius
+  // covers the whole span, however long it is.
+  const probes = Math.max(2, Math.ceil(len / 10));
+  for (let p = 0; p <= probes; p++) {
+    const t = p / probes;
+    const px = ax + dx * t, pz = az + dz * t;
+    for (let g = 0; g < grids.length; g++) {
+      grids[g].forEachNear(px, pz, (sx, sz, ex, ez) => {
+        const hit = segmentHit(ax, az, dx, dz, sx, sz, ex, ez);
+        if (hit >= 0 && hit < best) best = hit;
+      });
+    }
+  }
+  if (best >= 1) return 1;
+  return Math.max(0, best - padding / len);
+}
+
+/** Parametric position along (a + t·d) where it crosses segment s->e. */
+function segmentHit(ax, az, dx, dz, sx, sz, ex, ez) {
+  const wx = ex - sx, wz = ez - sz;
+  const denom = dx * wz - dz * wx;
+  if (Math.abs(denom) < 1e-9) return -1;
+  const rx = sx - ax, rz = sz - az;
+  const t = (rx * wz - rz * wx) / denom;
+  const u = (rx * dz - rz * dx) / denom;
+  if (t < 0 || t > 1 || u < 0 || u > 1) return -1;
+  return t;
+}
+
 export { PROBE_RADIUS };

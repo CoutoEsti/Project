@@ -27,18 +27,53 @@ Un serveur est nécessaire : le jeu est en modules ES et `file://` les bloque.
 - Recyclage des tuiles après 3,6 km de route (pas de fuite mémoire).
 - Zéro erreur console, zéro erreur de page.
 
-**Ce qui reste à faire**, par ordre d'importance :
+**Corrigé depuis** : les vitres reflètent le ciel au lieu d'être des trous
+noirs, et la caméra de poursuite ne traverse plus les murs — elle se rapproche
+jusqu'au dernier point dégagé.
 
-1. Les vitres des bâtiments sont noires opaques — il leur faut un reflet de
-   ciel pour ne pas ressembler à des trous.
-2. La caméra de poursuite traverse les murs dans les ruelles étroites ; il
-   faut un raycast entre la voiture et la caméra.
-3. Les arbres sont des icosaèdres à 20 faces : très anguleux de près. Un
-   niveau de détail selon la distance réglerait le compromis.
-4. Le relief est ignoré (Montréal est plate ; ailleurs il faudra draper les
-   routes sur un MNT).
-5. Pas de trafic ni de piétons — écarté volontairement pour cette étape.
-6. Le fantôme n'est pas encore partagé par le lien, seulement le parcours.
+---
+
+## Prochaine session : le réalisme, par ordre de rendement
+
+Le classement est fait au rapport « effet perçu / coût », pas par difficulté.
+
+**1. Montréal en entier, en PMTiles.** Aujourd'hui le jeu télécharge 10,6 Mo
+d'un coup pour 11 × 9 km. Un fichier PMTiles interrogé par requêtes HTTP Range
+ne charge que les tuiles sous les roues : l'île complète tiendrait dans
+150-250 Mo hébergés pour ~200 Ko par tuile, et la même architecture monte
+jusqu'à la planète. C'est le prérequis de tout le reste, parce que ça libère le
+budget mémoire que les points suivants vont dépenser.
+
+**2. Sortir la construction des tuiles dans un Web Worker.** Le budget de 8 ms
+par image est ce qui plafonne la densité. Avec `OffscreenCanvas`, la peinture du
+sol et la construction des maillages partent d'un fil séparé et reviennent en
+`ImageBitmap` et en `ArrayBuffer` transférables. Le fil principal ne fait plus
+que du rendu.
+
+**3. Éclairage.** C'est là que se joue le gros de la sensation de réel, pas dans
+le nombre de polygones. Dans l'ordre : occlusion ambiante en espace écran, pour
+que les bâtiments touchent enfin le sol ; cartes d'ombres en cascade, pour des
+ombres nettes de près et lointaines à la fois ; puis une carte d'environnement
+recalculée selon l'heure, qui donnera aux vitres un vrai reflet plutôt qu'un
+dégradé peint.
+
+**4. Matériaux.** Passer les façades en PBR avec des cartes de rugosité et de
+normales générées, ajouter l'asphalte mouillé et les flaques, salir les bas de
+murs. Cher en travail d'auteur, mais sans risque architectural.
+
+**5. Relief.** Les tuiles Terrarium d'AWS (ouvertes, sans clé) donnent une
+altitude tous les 30 m. Montréal est plate, donc le gain local se limite au
+mont Royal — mais c'est ce qui débloque San Francisco et les Laurentides. Piège
+connu : à 30 m de résolution, il faut draper puis lisser les routes sur le
+modèle, sinon la voiture tressaute à chaque sommet.
+
+**6. Le véhicule.** Suspension par raycast sur quatre roues au lieu du modèle
+bicyclette, transfert de charge latéral, et un moteur audio à couches
+croisées par régime. À faire seulement une fois qu'il y a du relief : sans
+dénivelé, une vraie suspension ne se voit pas.
+
+Volontairement écartés pour l'instant : trafic, piétons, et toute imagerie
+satellite.
 
 ---
 
