@@ -82,14 +82,18 @@ function getPrototypes(THREE) {
   tint(THREE, head, [1, 0.86, 0.62]);
 
   // --- tree ---------------------------------------------------------------
-  const trunk = new THREE.CylinderGeometry(0.14, 0.21, 2.6, 6);
+  // Trees are by far the most numerous prop — a dense Montréal tile holds
+  // thousands — so every triangle here is multiplied by four figures. A
+  // detail-0 icosahedron is 20 triangles and, at street scale under a canopy
+  // colour, indistinguishable from the smoother version.
+  const trunk = new THREE.CylinderGeometry(0.14, 0.21, 2.6, 5, 1, true);
   trunk.translate(0, 1.3, 0);
   tint(THREE, trunk, [0.30, 0.24, 0.19]);
 
-  const blobA = new THREE.IcosahedronGeometry(1.55, 1);
+  const blobA = new THREE.IcosahedronGeometry(1.55, 0);
   blobA.translate(0, 3.9, 0);
   blobA.scale(1, 0.92, 1);
-  const blobB = new THREE.IcosahedronGeometry(1.05, 1);
+  const blobB = new THREE.IcosahedronGeometry(1.05, 0);
   blobB.translate(0.75, 3.1, 0.35);
   const canopy = merge(THREE, [tint(THREE, blobA, [1, 1, 1]), tint(THREE, blobB, [1, 1, 1])]);
 

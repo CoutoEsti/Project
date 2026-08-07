@@ -95,10 +95,14 @@ class MeshBuilder {
     const len = Math.hypot(dx, dz);
     if (len < 0.05) return;
     const nx = dz / len, nz = -dx / len;
-    const u0 = uStart / BAY_WIDTH;
-    const u1 = (uStart + len) / BAY_WIDTH;
-    const v0 = y0 / FLOOR_HEIGHT;
-    const v1 = y1 / FLOOR_HEIGHT;
+    // The texture holds TEX_BAYS bays and TEX_FLOORS floors, so one UV unit
+    // spans the whole sheet — not a single bay.
+    const uSpan = BAY_WIDTH * TEX_BAYS;
+    const vSpan = FLOOR_HEIGHT * TEX_FLOORS;
+    const u0 = uStart / uSpan;
+    const u1 = (uStart + len) / uSpan;
+    const v0 = y0 / vSpan;
+    const v1 = y1 / vSpan;
     const [r, g, b] = colour;
     const i = this.count;
     this.vertex(ax, y0, az, nx, 0, nz, r, g, b, u0, v0);
@@ -194,7 +198,7 @@ export function buildBuildings(THREE, buildings, roads, opts = {}) {
 
     // Parapet: a thin lip around flat roofs. Cheap, and it stops the roofline
     // from looking like a sheet of paper.
-    if (height > 5 && area > 40) {
+    if (height > 5 && area > 150) {
       const parapetColour = [roofColour[0] * 1.15, roofColour[1] * 1.15, roofColour[2] * 1.15];
       for (let i = 0; i < ordered.length; i++) {
         const a = ordered[i];
@@ -319,7 +323,7 @@ function addStaircase(mb, ring, roads, wallColour, seed) {
   const yaw = Math.atan2(nz, nx);
   const rise = 3.05;
   const run = 2.9;
-  const steps = 9;
+  const steps = 6;
   const stepColour = [0.52, 0.50, 0.48];
   const railColour = [
     Math.min(1, wallColour[0] * 0.45 + 0.10),
@@ -333,21 +337,23 @@ function addStaircase(mb, ring, roads, wallColour, seed) {
   const baseX = mx + ax * along;
   const baseZ = mz + az * along;
 
+  // Each tread is a solid block from the ground up, so the flight reads as a
+  // staircase rather than as a stack of floating slabs.
   for (let i = 0; i < steps; i++) {
     const t = (i + 0.5) / steps;
-    const y = rise * ((i + 1) / steps) - 0.09;
+    const top = rise * ((i + 1) / steps);
     const outward = run * (1 - t);
-    mb.box(baseX + nx * outward, y, baseZ + nz * outward,
-           1.35, 0.18, run / steps + 0.12, yaw, stepColour);
+    mb.box(baseX + nx * outward, top / 2, baseZ + nz * outward,
+           1.35, top, run / steps + 0.06, yaw, stepColour);
   }
 
   // Small landing at the door.
-  mb.box(baseX + nx * 0.42, rise, baseZ + nz * 0.42, 1.6, 0.18, 0.9, yaw, stepColour);
+  mb.box(baseX + nx * 0.30, rise + 0.09, baseZ + nz * 0.30, 1.5, 0.18, 0.85, yaw, stepColour);
 
   // Two inclined railings, approximated by three short segments each.
   for (const side of [-1, 1]) {
-    for (let k = 0; k < 3; k++) {
-      const t0 = k / 3, t1 = (k + 1) / 3;
+    for (let k = 0; k < 2; k++) {
+      const t0 = k / 2, t1 = (k + 1) / 2;
       const y0 = 0.55 + rise * t0, y1 = 0.55 + rise * t1;
       const o0 = run * (1 - t0), o1 = run * (1 - t1);
       const cx = baseX + nx * (o0 + o1) / 2 + ax * side * 0.66;

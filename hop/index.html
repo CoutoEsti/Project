@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0e1216">
+<title>Ruelle — conduis le vrai monde</title>
+<meta name="description" content="Un jeu de conduite dans le navigateur, sur les vraies rues d'OpenStreetMap. Roule n'importe où, pose un départ et une arrivée, bats ton propre fantôme.">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="css/style.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three.module.min.js"
+  }
+}
+</script>
+</head>
+<body>
+
+<canvas id="viewport"></canvas>
+
+<!-- ── HUD ───────────────────────────────────────────────────────────── -->
+<div id="hud">
+  <div id="place"></div>
+  <div id="fps"></div>
+
+  <div id="trial">
+    <span id="timer-label"></span>
+    <strong id="timer"></strong>
+    <span id="best"></span>
+  </div>
+
+  <div id="status"></div>
+  <div id="toast"></div>
+
+  <div id="minimap-wrap">
+    <canvas id="minimap" width="200" height="200"></canvas>
+  </div>
+
+  <div id="cluster">
+    <canvas id="dial" width="180" height="180"></canvas>
+    <div id="readout">
+      <strong id="speed-value">0</strong>
+      <span id="speed-unit">km/h</span>
+    </div>
+    <div id="gear">N</div>
+  </div>
+
+  <div id="actions">
+    <button id="open-settings" title="Réglages" aria-label="Réglages">⚙</button>
+    <button id="share" title="Copier le lien" aria-label="Partager">↗</button>
+  </div>
+</div>
+
+<!-- ── Touch controls ────────────────────────────────────────────────── -->
+<div id="touch">
+  <div class="pad-group left">
+    <button id="pad-left" aria-label="Gauche">◀</button>
+    <button id="pad-right" aria-label="Droite">▶</button>
+  </div>
+  <div class="pad-group right">
+    <button id="pad-handbrake" aria-label="Frein à main">⌷</button>
+    <button id="pad-brake" aria-label="Frein">▼</button>
+    <button id="pad-throttle" aria-label="Accélérer">▲</button>
+  </div>
+</div>
+
+<!-- ── Menu ──────────────────────────────────────────────────────────── -->
+<div id="menu">
+  <div class="menu-inner">
+    <header>
+      <h1>Ruelle</h1>
+      <p class="tagline">Conduis le vrai monde. Tes vraies rues, générées en direct depuis OpenStreetMap.</p>
+    </header>
+
+    <div class="search-block">
+      <input id="search-input" type="search" placeholder="Une ville, une rue, une adresse…"
+             autocomplete="off" spellcheck="false" aria-label="Chercher un lieu">
+      <div id="search-results"></div>
+    </div>
+
+    <div id="presets"></div>
+
+    <div class="menu-actions">
+      <button id="hop-default" class="primary">Hop — Plateau-Mont-Royal</button>
+      <button id="resume" class="ghost">Reprendre</button>
+    </div>
+
+    <p id="menu-hint" class="hint"></p>
+
+    <div class="keys">
+      <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>conduire</span></div>
+      <div><kbd>Espace</kbd><span>frein à main</span></div>
+      <div><kbd>G</kbd><span>poser départ / arrivée</span></div>
+      <div><kbd>R</kbd><span>replacer sur la route</span></div>
+      <div><kbd>C</kbd><span>caméra</span></div>
+      <div><kbd>L</kbd><span>phares</span></div>
+      <div><kbd>X</kbd><span>effacer le parcours</span></div>
+      <div><kbd>Échap</kbd><span>menu</span></div>
+    </div>
+
+    <footer>
+      <span>Données cartographiques © les contributeurs d’<a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> — ODbL</span>
+      <span class="made">Made with Claude</span>
+    </footer>
+  </div>
+</div>
+
+<!-- ── Settings ──────────────────────────────────────────────────────── -->
+<div id="settings">
+  <div class="settings-inner">
+    <div class="settings-head">
+      <h2>Réglages</h2>
+      <button id="close-settings" aria-label="Fermer">✕</button>
+    </div>
+
+    <label>
+      <span>Qualité</span>
+      <select id="set-quality">
+        <option value="low">Basse</option>
+        <option value="medium">Moyenne</option>
+        <option value="high">Haute</option>
+      </select>
+    </label>
+
+    <label class="check">
+      <input type="checkbox" id="set-shadows">
+      <span>Ombres</span>
+    </label>
+
+    <label class="check">
+      <input type="checkbox" id="set-audio">
+      <span>Son</span>
+    </label>
+
+    <label>
+      <span>Volume</span>
+      <input type="range" id="set-volume" min="0" max="1" step="0.05">
+    </label>
+
+    <label>
+      <span>Unités</span>
+      <select id="set-units">
+        <option value="kmh">km/h</option>
+        <option value="mph">mph</option>
+      </select>
+    </label>
+
+    <label>
+      <span>Heure</span>
+      <input type="range" id="set-time" min="0" max="24" step="0.25">
+    </label>
+
+    <label class="check">
+      <input type="checkbox" id="set-autotime">
+      <span>Cycle jour/nuit automatique</span>
+    </label>
+
+    <label class="check">
+      <input type="checkbox" id="set-fps">
+      <span>Afficher les images par seconde</span>
+    </label>
+  </div>
+</div>
+
+<!-- ── Fatal error ───────────────────────────────────────────────────── -->
+<div id="fatal">
+  <div class="fatal-inner">
+    <h2 id="fatal-message"></h2>
+    <p id="fatal-detail"></p>
+  </div>
+</div>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
