@@ -401,16 +401,29 @@ function drawDashedLine(points, windows, offset, width, colour, out, dash, gap) 
 // ---------------------------------------------------------------------------
 
 /**
- * Nearest drivable point on the road network, with a heading along the road.
- * Used to drop the car onto an actual street rather than into a wall.
+ * A place to put the car: on a real street, pointing along it.
+ *
+ * Nearest is not good enough. In the Plateau the nearest carriageway to an
+ * arbitrary point is usually a back lane between two triplexes, where the
+ * chase camera opens against a brick wall a metre away. So distance is
+ * weighted by how narrow the road is: a boulevard a hundred metres off beats
+ * a service road right under your feet.
+ *
+ * @param {object} opts {preferWide:boolean, maxDistance:number}
  */
-export function nearestRoadPoint(roads, x, z) {
+export function nearestRoadPoint(roads, x, z, opts = {}) {
+  const preferWide = opts.preferWide !== false;
+  const maxDistance = opts.maxDistance ?? 600;
   let best = null;
-  let bestDist = Infinity;
+  let bestScore = Infinity;
   for (const road of roads) {
     const spec = road.spec;
     if (!spec || spec.kind === 'alley') continue;
     if (spec.highway === 'motorway' || spec.highway === 'pedestrian') continue;
+    // Narrower than a two-lane street: penalise hard. Wider: small bonus.
+    const widthPenalty = preferWide
+      ? 1 + Math.max(0, 10.5 - spec.width) * 0.9 - Math.min(spec.width, 16) * 0.02
+      : 1;
     const pts = road.points;
     for (let i = 1; i < pts.length; i++) {
       const ax = pts[i - 1].x, az = pts[i - 1].z;
@@ -421,13 +434,17 @@ export function nearestRoadPoint(roads, x, z) {
       let t = ((x - ax) * dx + (z - az) * dz) / l2;
       t = Math.max(0, Math.min(1, t));
       const px = ax + dx * t, pz = az + dz * t;
-      const d = (px - x) * (px - x) + (pz - z) * (pz - z);
-      if (d < bestDist) {
-        bestDist = d;
+      const d = Math.hypot(px - x, pz - z);
+      if (d > maxDistance) continue;
+      const score = d * widthPenalty;
+      if (score < bestScore) {
+        bestScore = score;
         const len = Math.sqrt(l2);
         best = {
           x: px, z: pz,
-          heading: Math.atan2(dx / len, -dz / len),
+          // World forward is (sin yaw, cos yaw), so the heading that points
+          // along (dx, dz) is atan2(dx, dz) — not atan2(dx, -dz).
+          heading: Math.atan2(dx / len, dz / len),
           spec,
           dirX: dx / len, dirZ: dz / len,
         };

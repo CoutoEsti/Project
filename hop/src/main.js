@@ -318,7 +318,8 @@ class Game {
   _trySpawn() {
     const roads = this.world.allRoads();
     if (!roads.length) return;
-    const target = nearestRoadPoint(roads, this.vehicle.x, this.vehicle.z);
+    const target = nearestRoadPoint(roads, this.vehicle.x, this.vehicle.z,
+      { preferWide: true, maxDistance: 500 });
     if (!target) return;
 
     // Sit in the right-hand lane rather than on the centre line.
@@ -552,7 +553,10 @@ class Game {
 
   _respawn() {
     const roads = this.world.allRoads();
-    const target = nearestRoadPoint(roads, this.vehicle.x, this.vehicle.z);
+    // Respawning is a rescue, not a fresh start: take the closest road so you
+    // come back where you crashed, not three streets away.
+    const target = nearestRoadPoint(roads, this.vehicle.x, this.vehicle.z,
+      { preferWide: false, maxDistance: 200 });
     if (!target) return;
     const offset = Math.max(1.6, target.spec.width / 4);
     const nx = -target.dirZ, nz = target.dirX;
