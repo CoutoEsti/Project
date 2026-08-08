@@ -139,9 +139,24 @@ export function paintTile(ctx, size, bounds, roads, areas, footprints, rails) {
     }
   }
 
-  // --- building footprints --------------------------------------------------
-  // Painted before the streetscape so kerbs and sidewalks always win where
-  // they overlap a badly-drawn footprint.
+  // --- building footprints, with a contact shadow ---------------------------
+  // The single cheapest thing that makes a city stop looking like flat shapes
+  // sitting on a plane: a soft dark halo where each building meets the ground.
+  // It is ambient occlusion, baked at paint time — no depth buffer, no extra
+  // pass, and it survives at any frame rate.
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,0.62)';
+  ctx.shadowBlur = Math.max(2, 4.5 * mToPx);
+  ctx.fillStyle = C.footprint;
+  for (const f of footprints) {
+    if (f.points.length < 3) continue;
+    tracePolygon(ctx, f.points, px, py);
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // Second pass without the shadow, so the footprint itself stays clean rather
+  // than being darkened by its own halo.
   ctx.fillStyle = C.footprint;
   for (const f of footprints) {
     if (f.points.length < 3) continue;
