@@ -9,8 +9,25 @@ import { hash01, ringArea, ringCentroid } from '../core/geo.js';
 
 const FLOOR_HEIGHT = 3.2;
 const BAY_WIDTH = 3.6;        // one window bay, metres — must match the texture
-const TEX_BAYS = 8;
+const TEX_BAYS = 16;
 const TEX_FLOORS = 16;
+const STYLE_BANDS = 4;
+const BAND_WIDTH = (BAY_WIDTH * TEX_BAYS) / STYLE_BANDS;   // metres per family
+
+/** Which façade family a building belongs to. */
+function facadeBand(tags, seed, height) {
+  const t = tags.building;
+  if (t === 'retail' || t === 'supermarket' || tags.shop) return 2;
+  if (t === 'commercial' || t === 'office' || t === 'industrial'
+      || t === 'warehouse' || height > 22) return 3;
+  const material = tags['building:material'];
+  if (material === 'stone' || material === 'limestone') return 1;
+  const r = hash01(seed * 41 + 7);
+  if (r < 0.52) return 0;
+  if (r < 0.74) return 1;
+  if (r < 0.88) return 2;
+  return 3;
+}
 
 function num(v) {
   if (v == null) return NaN;
@@ -89,32 +106,59 @@ class MeshBuilder {
     return this.count - 1;
   }
 
-  /** A vertical wall quad, UV-mapped in bays and floors. */
-  wall(ax, az, bx, bz, y0, y1, uStart, colour) {
+  /**
+   * A wall, UV-mapped into one façade family's band of the atlas.
+   *
+   * The band is only BAND_WIDTH metres of texture, so a wall longer than that
+   * has to be cut into pieces that each restart at the band's left edge.
+   * Without the cut, a wide building would walk across the sheet and change
+   * architectural style halfway along its own facade.
+   *
+   * @param {number} bandStart metres offset of this family in the atlas
+   * @param {number} occ 0 = open to the sky, 1 = wedged against a neighbour
+   */
+  wall(ax, az, bx, bz, y0, y1, uStart, bandStart, colour, occ = 0) {
     const dx = bx - ax, dz = bz - az;
     const len = Math.hypot(dx, dz);
     if (len < 0.05) return;
     const nx = dz / len, nz = -dx / len;
-    // The texture holds TEX_BAYS bays and TEX_FLOORS floors, so one UV unit
-    // spans the whole sheet — not a single bay.
     const uSpan = BAY_WIDTH * TEX_BAYS;
     const vSpan = FLOOR_HEIGHT * TEX_FLOORS;
-    const u0 = uStart / uSpan;
-    const u1 = (uStart + len) / uSpan;
     const v0 = y0 / vSpan;
     const v1 = y1 / vSpan;
+
+    // A wall facing a neighbour a few metres away sees almost no sky. This is
+    // the single biggest thing separating a street from a set of loose boxes.
+    const shade = 1 - occ * 0.38;
     const [r, g, b] = colour;
-    // Ambient occlusion at the foot of the wall, baked into vertex colour:
-    // the ground bounces less light onto the base than the sky pours on top,
-    // and the linear interpolation up the quad turns that into a gradient.
-    const ao = y0 < 0.5 ? 0.74 : 1;
-    const i = this.count;
-    this.vertex(ax, y0, az, nx, 0, nz, r * ao, g * ao, b * ao, u0, v0);
-    this.vertex(bx, y0, bz, nx, 0, nz, r * ao, g * ao, b * ao, u1, v0);
-    this.vertex(bx, y1, bz, nx, 0, nz, r, g, b, u1, v1);
-    this.vertex(ax, y1, az, nx, 0, nz, r, g, b, u0, v1);
-    this.tri(i, i + 1, i + 2);
-    this.tri(i, i + 2, i + 3);
+    const rt = r * shade, gt = g * shade, bt = b * shade;
+    // Ground contact stays darker still: the pavement bounces less light up
+    // than the sky pours down, and interpolating up the quad gives a gradient.
+    const foot = 0.74;
+    const rb = rt * foot, gb = gt * foot, bb = bt * foot;
+
+    let done = 0;
+    let off = ((uStart % BAND_WIDTH) + BAND_WIDTH) % BAND_WIDTH;
+    while (done < len - 1e-4) {
+      const chunk = Math.min(len - done, BAND_WIDTH - off);
+      const t0 = done / len, t1 = (done + chunk) / len;
+      const cx0 = ax + dx * t0, cz0 = az + dz * t0;
+      const cx1 = ax + dx * t1, cz1 = az + dz * t1;
+      const u0 = (bandStart + off) / uSpan;
+      const u1 = (bandStart + off + chunk) / uSpan;
+
+      const i = this.count;
+      this.vertex(cx0, y0, cz0, nx, 0, nz, rb, gb, bb, u0, v0);
+      this.vertex(cx1, y0, cz1, nx, 0, nz, rb, gb, bb, u1, v0);
+      this.vertex(cx1, y1, cz1, nx, 0, nz, rt, gt, bt, u1, v1);
+      this.vertex(cx0, y1, cz0, nx, 0, nz, rt, gt, bt, u0, v1);
+      this.tri(i, i + 1, i + 2);
+      this.tri(i, i + 2, i + 3);
+
+      done += chunk;
+      off += chunk;
+      if (off >= BAND_WIDTH - 1e-6) off = 0;
+    }
   }
 
   /** An axis-aligned box, used for parapets, steps and railings. */
@@ -169,29 +213,45 @@ export function buildBuildings(THREE, buildings, roads, opts = {}) {
   const colliders = [];
   let built = 0;
 
+  // --- pass 1: measure ------------------------------------------------------
+  // Geometry cannot be emitted until every neighbour is known, because how
+  // dark a wall should be depends on what is standing in front of it.
+  const prepared = [];
   for (const b of buildings) {
     const ring = dedupeRing(b.points);
     if (ring.length < 3) continue;
-
     const area = Math.abs(ringArea(ring));
     if (area < 6) continue;                 // sheds and mapping noise
 
+    const tags = b.tags || {};
     const seed = hashId(b.id);
-    const height = heightFor(b.tags || {});
-    const colour = wallColor(b.tags || {}, seed);
+    const height = heightFor(tags);
+    prepared.push({
+      ring: ringArea(ring) > 0 ? ring : ring.slice().reverse(),
+      area, seed, height, tags,
+      colour: wallColor(tags, seed),
+      bandStart: facadeBand(tags, seed, height) * BAND_WIDTH,
+    });
+  }
 
-    // Walls, tracking cumulative distance so window bays run continuously
-    // around the building instead of restarting at every corner.
-    let u = hash01(seed * 3 + 5) * BAY_WIDTH * TEX_BAYS;
-    const ccw = ringArea(ring) > 0;
-    const ordered = ccw ? ring : ring.slice().reverse();
+  const neighbours = new EdgeGrid(prepared);
+
+  // --- pass 2: emit ---------------------------------------------------------
+  for (let bi = 0; bi < prepared.length; bi++) {
+    const { ring: ordered, area, seed, height, colour, bandStart } = prepared[bi];
+    const b = { tags: prepared[bi].tags, id: seed };
+
+    // Cumulative distance keeps window bays running around corners rather
+    // than restarting at each one.
+    let u = hash01(seed * 3 + 5) * BAND_WIDTH;
 
     for (let i = 0; i < ordered.length; i++) {
       const a = ordered[i];
       const c = ordered[(i + 1) % ordered.length];
       const len = Math.hypot(c.x - a.x, c.z - a.z);
       if (len < 0.05) continue;
-      walls.wall(a.x, a.z, c.x, c.z, 0, height, u, colour);
+      const occ = neighbours.occlusion(a, c, len, bi);
+      walls.wall(a.x, a.z, c.x, c.z, 0, height, u, bandStart, colour, occ);
       u += len;
       colliders.push(a.x, a.z, c.x, c.z);
     }
@@ -245,6 +305,68 @@ export function buildBuildings(THREE, buildings, roads, opts = {}) {
     colliders: new Float32Array(colliders),
     count: built,
   };
+}
+
+/**
+ * A uniform grid of every building edge, used to ask "is anything standing
+ * just outside this wall?".
+ *
+ * A true ambient-occlusion bake would trace rays against the neighbours; that
+ * is minutes of work per tile, not milliseconds. Counting how much geometry
+ * sits within a few metres of a probe point in front of the wall captures most
+ * of the same signal — alleys go dark, courtyards go dark, a facade on an open
+ * boulevard stays bright — for one grid lookup per wall.
+ */
+class EdgeGrid {
+  constructor(buildings, cell = 12) {
+    this.cell = cell;
+    this.cells = new Map();
+    for (let bi = 0; bi < buildings.length; bi++) {
+      const ring = buildings[bi].ring;
+      for (let i = 0; i < ring.length; i++) {
+        const a = ring[i];
+        const c = ring[(i + 1) % ring.length];
+        const mx = (a.x + c.x) / 2, mz = (a.z + c.z) / 2;
+        this._push(mx, mz, bi);
+        // Long edges need more than their midpoint to be findable.
+        const len = Math.hypot(c.x - a.x, c.z - a.z);
+        for (let d = cell; d < len; d += cell) {
+          const t = d / len;
+          this._push(a.x + (c.x - a.x) * t, a.z + (c.z - a.z) * t, bi);
+        }
+      }
+    }
+  }
+
+  _push(x, z, bi) {
+    const k = `${Math.floor(x / this.cell)}|${Math.floor(z / this.cell)}`;
+    let list = this.cells.get(k);
+    if (!list) { list = []; this.cells.set(k, list); }
+    list.push(x, z, bi);
+  }
+
+  /** 0 when the wall faces open space, 1 when it is boxed in. */
+  occlusion(a, c, len, self) {
+    // Probe a few metres out from the middle of the wall, along its normal.
+    const nx = (c.z - a.z) / len, nz = -(c.x - a.x) / len;
+    const px = (a.x + c.x) / 2 + nx * 4.5;
+    const pz = (a.z + c.z) / 2 + nz * 4.5;
+
+    const cx = Math.floor(px / this.cell), cz = Math.floor(pz / this.cell);
+    let near = 0;
+    for (let i = -1; i <= 1; i++) {
+      for (let j = -1; j <= 1; j++) {
+        const list = this.cells.get(`${cx + i}|${cz + j}`);
+        if (!list) continue;
+        for (let k = 0; k < list.length; k += 3) {
+          if (list[k + 2] === self) continue;
+          const dx = list[k] - px, dz = list[k + 1] - pz;
+          if (dx * dx + dz * dz < 49) near++;      // within 7 m
+        }
+      }
+    }
+    return Math.min(1, near / 4);
+  }
 }
 
 function hashId(id) {

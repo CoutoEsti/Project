@@ -128,6 +128,16 @@ export function facadeTextures(THREE) {
     return seed / 4294967296;
   };
 
+  // Four façade families, four bays each, side by side in one sheet. A
+  // building picks a band; one texture and one draw call still cover the
+  // whole city, but a row of triplexes stops looking rubber-stamped.
+  //
+  //   0 red brick, sash windows      — the Plateau triplex
+  //   1 grey limestone, tall openings — the older stone terrace
+  //   2 commercial, wide glazing      — Mont-Royal, Saint-Denis
+  //   3 post-war block, ribbon strip  — everything built after 1960
+  const bandOf = (bay) => Math.floor(bay / (TEX_BAYS / 4));
+
   for (let f = 0; f < TEX_FLOORS; f++) {
     // Canvas y grows downward; three.js flips textures, so the bottom row of
     // the canvas is v≈0 — which is where we want the ground floor.
@@ -136,6 +146,15 @@ export function facadeTextures(THREE) {
 
     for (let bx = 0; bx < TEX_BAYS; bx++) {
       const x = bx * BAY_PX;
+      const band = bandOf(bx);
+
+      // Per-family window geometry, in pixels within a 64-wide bay.
+      const style = [
+        { count: 2, w: 17, h: 30, top: 16, sill: true },    // sash pair
+        { count: 1, w: 26, h: 40, top: 10, sill: true },    // tall stone
+        { count: 2, w: 19, h: 26, top: 18, sill: false },   // commercial upper
+        { count: 1, w: 46, h: 20, top: 22, sill: false },   // ribbon strip
+      ][band];
 
       if (groundFloor) {
         // Shopfront: wide glazing, a stall riser, a doorway on some bays.
@@ -166,11 +185,11 @@ export function facadeTextures(THREE) {
         continue;
       }
 
-      // Two sash windows per bay, which is roughly the Plateau rhythm.
-      for (const half of [0, 1]) {
-        const ww = 17, wh = 30;
-        const wx = x + 9 + half * 29;
-        const wy = y + 16;
+      for (let k = 0; k < style.count; k++) {
+        const ww = style.w, wh = style.h;
+        const spread = style.count > 1 ? 29 : 0;
+        const wx = x + (BAY_PX - ww * style.count - spread * (style.count - 1)) / 2 + k * (ww + spread);
+        const wy = y + style.top;
         dg.fillStyle = glassGradient(dg, wx, wy, wh);
         dg.fillRect(wx, wy, ww, wh);
         // A slanted highlight reads as a reflection and stops the pane from
@@ -193,8 +212,10 @@ export function facadeTextures(THREE) {
         // it and a lintel over — the two edges that catch a low sun.
         hg.fillStyle = '#2a2a2a';
         hg.fillRect(wx, wy, ww, wh);
-        hg.fillStyle = '#e6e6e6';
-        hg.fillRect(wx - 3, wy + wh, ww + 6, 4);
+        if (style.sill) {
+          hg.fillStyle = '#e6e6e6';
+          hg.fillRect(wx - 3, wy + wh, ww + 6, 4);
+        }
         hg.fillStyle = '#b0b0b0';
         hg.fillRect(wx - 2, wy - 4, ww + 4, 4);
         rg.fillRect(wx, wy, ww, wh);
