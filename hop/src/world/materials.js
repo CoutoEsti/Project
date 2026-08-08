@@ -26,6 +26,41 @@ function glassGradient(ctx, x, y, h) {
 }
 
 /**
+ * Sobel-differentiate a height canvas into a tangent-space normal map.
+ * Cheap, runs once at startup, and needs no authored art.
+ */
+function heightToNormal(heightCanvas, strength) {
+  const w = heightCanvas.width, h = heightCanvas.height;
+  const src = heightCanvas.getContext('2d').getImageData(0, 0, w, h).data;
+  const out = document.createElement('canvas');
+  out.width = w; out.height = h;
+  const ctx = out.getContext('2d');
+  const img = ctx.createImageData(w, h);
+
+  const at = (x, y) => {
+    const xi = (x + w) % w;
+    const yi = (y + h) % h;
+    return src[(yi * w + xi) * 4] / 255;
+  };
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const dx = (at(x + 1, y) - at(x - 1, y)) * strength;
+      const dy = (at(x, y + 1) - at(x, y - 1)) * strength;
+      // Normal of the height field, packed into 0..255.
+      const len = Math.hypot(dx, dy, 1);
+      const i = (y * w + x) * 4;
+      img.data[i] = Math.round(((-dx / len) * 0.5 + 0.5) * 255);
+      img.data[i + 1] = Math.round(((dy / len) * 0.5 + 0.5) * 255);
+      img.data[i + 2] = Math.round(((1 / len) * 0.5 + 0.5) * 255);
+      img.data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return out;
+}
+
+/**
  * Facade textures.
  *  - `map` is mostly white (so the per-building vertex colour shows through)
  *    with darker glass and a hint of brick coursing.
@@ -54,6 +89,23 @@ export function facadeTextures(THREE) {
   const rg = rough.getContext('2d');
   rg.fillStyle = '#dcdcdc';
   rg.fillRect(0, 0, w, h);
+
+  // Height field: mid grey is the wall plane, darker is recessed, lighter is
+  // proud of it. This is the whole trick — a flat extruded prism reads as a
+  // building the moment light rakes across recessed openings and protruding
+  // sills, and a normal map buys that without a single extra triangle.
+  const height = document.createElement('canvas');
+  height.width = w; height.height = h;
+  const hg = height.getContext('2d');
+  hg.fillStyle = '#808080';
+  hg.fillRect(0, 0, w, h);
+  // Brick coursing: a shallow ripple so bare wall is never perfectly flat.
+  for (let y = 0; y < h; y += 8) {
+    hg.fillStyle = 'rgba(0,0,0,0.10)';
+    hg.fillRect(0, y, w, 1);
+    hg.fillStyle = 'rgba(255,255,255,0.07)';
+    hg.fillRect(0, y + 1, w, 1);
+  }
 
   dg.fillStyle = '#ffffff';
   dg.fillRect(0, 0, w, h);
@@ -96,6 +148,13 @@ export function facadeTextures(THREE) {
         dg.fillRect(x, y + FLOOR_PX - 10, BAY_PX, 10);
 
         rg.fillStyle = '#585858';
+        // Shopfront: deep reveal, heavy lintel above, stall riser below.
+        hg.fillStyle = '#3a3a3a';
+        hg.fillRect(gx, gy, gw, gh);
+        hg.fillStyle = '#c8c8c8';
+        hg.fillRect(gx - 4, gy - 6, gw + 8, 6);
+        hg.fillStyle = '#b4b4b4';
+        hg.fillRect(gx - 3, gy + gh, gw + 6, 5);
         rg.fillRect(gx, gy, gw, gh);
 
         const lit = rand() < 0.72;
@@ -130,6 +189,14 @@ export function facadeTextures(THREE) {
         dg.fill();
         dg.restore();
         rg.fillStyle = '#525252';
+        // Sash window: pane sunk into the wall, stone sill sticking out under
+        // it and a lintel over — the two edges that catch a low sun.
+        hg.fillStyle = '#2a2a2a';
+        hg.fillRect(wx, wy, ww, wh);
+        hg.fillStyle = '#e6e6e6';
+        hg.fillRect(wx - 3, wy + wh, ww + 6, 4);
+        hg.fillStyle = '#b0b0b0';
+        hg.fillRect(wx - 2, wy - 4, ww + 4, 4);
         rg.fillRect(wx, wy, ww, wh);
         // Frame highlight and a glazing bar.
         dg.fillStyle = 'rgba(255,255,255,0.30)';
@@ -152,10 +219,13 @@ export function facadeTextures(THREE) {
     }
   }
 
+  const normal = heightToNormal(height, 4.2);
+
   const map = new THREE.CanvasTexture(day);
   const emissiveMap = new THREE.CanvasTexture(night);
   const roughnessMap = new THREE.CanvasTexture(rough);
-  for (const t of [map, emissiveMap, roughnessMap]) {
+  const normalMap = new THREE.CanvasTexture(normal);
+  for (const t of [map, emissiveMap, roughnessMap, normalMap]) {
     t.wrapS = THREE.RepeatWrapping;
     t.wrapT = THREE.RepeatWrapping;
     t.anisotropy = 4;
@@ -164,16 +234,18 @@ export function facadeTextures(THREE) {
   map.colorSpace = THREE.SRGBColorSpace;
   emissiveMap.colorSpace = THREE.SRGBColorSpace;
 
-  cached = { map, emissiveMap, roughnessMap };
+  cached = { map, emissiveMap, roughnessMap, normalMap };
   return cached;
 }
 
 /** Material for building walls. Windows light up through `emissiveIntensity`. */
 export function makeWallMaterial(THREE) {
-  const { map, emissiveMap, roughnessMap } = facadeTextures(THREE);
+  const { map, emissiveMap, roughnessMap, normalMap } = facadeTextures(THREE);
   return new THREE.MeshStandardMaterial({
     map,
     roughnessMap,
+    normalMap,
+    normalScale: new THREE.Vector2(1.7, 1.7),
     roughness: 1,
     metalness: 0,
     emissiveMap,
@@ -240,5 +312,6 @@ export function disposeTextureCache() {
   cached.map.dispose();
   cached.emissiveMap.dispose();
   cached.roughnessMap.dispose();
+  cached.normalMap.dispose();
   cached = null;
 }

@@ -210,8 +210,12 @@ export function buildBuildings(THREE, buildings, roads, opts = {}) {
         const len = Math.hypot(c.x - a.x, c.z - a.z);
         if (len < 0.4) continue;
         const yaw = Math.atan2(c.z - a.z, c.x - a.x);
-        caps.box((a.x + c.x) / 2, height + 0.28, (a.z + c.z) / 2,
-                 len, 0.56, 0.34, yaw, parapetColour);
+        caps.box((a.x + c.x) / 2, height + 0.30, (a.z + c.z) / 2,
+                 len, 0.60, 0.52, yaw, parapetColour);
+        // Cornice: a second, wider band just under the roofline. Two boxes an
+        // edge is cheap, and it is what gives a row of triplexes a skyline.
+        caps.box((a.x + c.x) / 2, height - 0.34, (a.z + c.z) / 2,
+                 len, 0.34, 0.78, yaw, parapetColour);
       }
     }
 
