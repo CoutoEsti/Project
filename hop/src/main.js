@@ -44,7 +44,7 @@ class Game {
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.05;
+    this.renderer.toneMappingExposure = 1.0;
 
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(62, 1, 0.4, 5200);
@@ -71,6 +71,13 @@ class Game {
     this.vehicle = new Vehicle();
     this.car = createCar(THREE, { color: CAR_COLORS[0] });
     this.scene.add(this.car.group);
+
+    // One real spotlight for both headlamps: what makes night driving read is
+    // the pool of light sweeping the asphalt ahead, not the bulbs themselves.
+    this.headlight = new THREE.SpotLight(0xffe9c4, 0, 55, 0.62, 0.55, 1.2);
+    this.headlight.castShadow = false;
+    this.scene.add(this.headlight);
+    this.scene.add(this.headlight.target);
 
     this.audio = new EngineAudio();
     this.audio.setEnabled(!!this.settings.audio);
@@ -426,6 +433,7 @@ class Game {
     // --- world -------------------------------------------------------------
     this.sky.setTime(this.settings.timeOfDay);
     this.sky.follow(v.x, v.z);
+    this.sky.updateEnvironment(this.renderer, this.scene);
     this.world.setNight(this.sky.night);
 
     if (this.world.projection) {
@@ -444,6 +452,11 @@ class Game {
     this.car.setSpin(v.wheelSpin);
     const nightLights = this.headlightsOn || this.sky.night > 0.35;
     this.car.setLights(nightLights, this.input.brake > 0.1 && v.u > 0.5);
+    const fx2 = Math.sin(v.yaw), fz2 = Math.cos(v.yaw);
+    this.headlight.position.set(v.x + fx2 * 2.0, 0.9, v.z + fz2 * 2.0);
+    this.headlight.target.position.set(v.x + fx2 * 26, 0.1, v.z + fz2 * 26);
+    this.headlight.target.updateMatrixWorld();
+    this.headlight.intensity = nightLights ? 240 * Math.max(0.25, this.sky.night) : 0;
 
     this._updateCamera(dt);
 

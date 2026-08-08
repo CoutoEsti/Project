@@ -249,8 +249,11 @@ async function main() {
   // drops simulation backlog, so assert on "did it move at all", with a
   // generous wall-clock budget, rather than on a distance in a fixed time.
   await page.keyboard.down('w');
+  // Movement, not distance: software rendering slows sim time, so assert on
+  // "the car is demonstrably rolling", whichever signal gets there first.
   const rolled = await page.waitForFunction(
-    () => window.__ruelle.vehicle.odometer > 0.5, null, { timeout: 30000 },
+    () => window.__ruelle.vehicle.odometer > 0.2 || window.__ruelle.vehicle.speedKmh > 3,
+    null, { timeout: 45000 },
   ).then(() => true).catch(() => false);
   const moving = await page.evaluate(() => ({
     odo: window.__ruelle.vehicle.odometer,

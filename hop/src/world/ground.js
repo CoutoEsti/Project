@@ -206,6 +206,75 @@ export function paintTile(ctx, size, bounds, roads, areas, footprints, rails) {
   ctx.restore();
 }
 
+/**
+ * Paint the same tile as grayscale roughness: bright = matte, dark = glossy.
+ * Water comes out near-black, which is what makes it mirror the sky; asphalt
+ * sits in the middle so low sun raises a believable sheen off the road.
+ */
+export function paintRoughnessTile(ctx, size, bounds, roads, areas, footprints, rails) {
+  const spanX = bounds.x1 - bounds.x0;
+  const spanZ = bounds.z1 - bounds.z0;
+  const sx = size / spanX;
+  const sz = size / spanZ;
+  const mToPx = (sx + sz) / 2;
+  const px = (x) => (x - bounds.x0) * sx;
+  const py = (z) => (z - bounds.z0) * sz;
+
+  const R = {
+    base: '#efefef', grass: '#f4f4f4', water: '#242424', sand: '#e8e8e8',
+    asphalt: '#8a8a8a', asphaltMinor: '#949494', alley: '#a0a0a0',
+    sidewalk: '#c9c9c9', kerb: '#bebebe', footprint: '#d4d4d4', rail: '#b6b6b6',
+  };
+
+  ctx.save();
+  ctx.fillStyle = R.base;
+  ctx.fillRect(0, 0, size, size);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  const sorted = areas.slice().sort((a, b) => (AREA_ORDER[a.kind] ?? 0) - (AREA_ORDER[b.kind] ?? 0));
+  for (const area of sorted) {
+    if (area.points.length < 3) continue;
+    ctx.fillStyle = area.kind === 'water' ? R.water
+      : area.kind === 'sand' ? R.sand : R.grass;
+    tracePolygon(ctx, area.points, px, py);
+    ctx.fill();
+  }
+
+  if (rails && rails.length) {
+    ctx.strokeStyle = R.rail;
+    for (const r of rails) {
+      ctx.lineWidth = Math.max(1, 4.4 * mToPx);
+      tracePath(ctx, r.points, px, py);
+      ctx.stroke();
+    }
+  }
+
+  ctx.fillStyle = R.footprint;
+  for (const f of footprints) {
+    if (f.points.length < 3) continue;
+    tracePolygon(ctx, f.points, px, py);
+    ctx.fill();
+  }
+
+  const byRank = roads.slice().sort((a, b) => a.spec.rank - b.spec.rank);
+  strokePass(ctx, byRank, px, py, mToPx, (spec) => {
+    if (!spec.sidewalk) return null;
+    return { w: spec.width + 2 * spec.sidewalk, color: R.sidewalk };
+  });
+  strokePass(ctx, byRank, px, py, mToPx, (spec) => (
+    { w: spec.width + 0.7, color: R.kerb }
+  ));
+  strokePass(ctx, byRank, px, py, mToPx, (spec) => {
+    let color = R.asphaltMinor;
+    if (spec.kind === 'major') color = R.asphalt;
+    else if (spec.kind === 'alley') color = R.alley;
+    return { w: spec.width, color };
+  });
+
+  ctx.restore();
+}
+
 function strokePass(ctx, roads, px, py, mToPx, styleFor) {
   for (const road of roads) {
     if (road.points.length < 2) continue;

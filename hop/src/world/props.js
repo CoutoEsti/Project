@@ -468,8 +468,8 @@ function roadDirectionNear(roads, x, z) {
 /** Materials shared by every tile's props. Built once. */
 export function makePropMaterials(THREE) {
   return {
-    vertex: new THREE.MeshLambertMaterial({ vertexColors: true }),
-    metal: new THREE.MeshLambertMaterial({ vertexColors: true }),
+    vertex: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.88, metalness: 0 }),
+    metal: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.45, metalness: 0.8 }),
     lampHead: new THREE.MeshBasicMaterial({ vertexColors: true }),
     stopSign: new THREE.MeshBasicMaterial({
       map: getStopTexture(THREE), transparent: true, side: THREE.DoubleSide,

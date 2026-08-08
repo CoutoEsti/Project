@@ -40,6 +40,16 @@ html, body {
   display: block;
 }
 
+/* A quiet radial darkening at the frame edges. Costs nothing, and it pulls
+   the eye to the road the way every film grade does. */
+#vignette {
+  position: fixed;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  background: radial-gradient(125% 105% at 50% 42%, transparent 58%, rgba(5, 8, 11, 0.36) 100%);
+}
+
 /* ── HUD ──────────────────────────────────────────────────────────────── */
 
 #hud {

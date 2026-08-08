@@ -137,6 +137,20 @@ export class Sky {
     this.ambient = new THREE.HemisphereLight(0xbdd6f0, 0x6b6455, 0.6);
     scene.add(this.ambient);
 
+    // The sky is also the scene's light source: a second, small dome sharing
+    // the same shader material gets baked into a prefiltered environment map.
+    // That is what windows, water and car paint reflect — and it carries most
+    // of the ambient light, which is why the hemisphere fill stays low.
+    this._envScene = new THREE.Scene();
+    const envDome = new THREE.Mesh(new THREE.SphereGeometry(50, 24, 16), this.dome.material);
+    envDome.frustumCulled = false;
+    this._envScene.add(envDome);
+    this._pmrem = null;
+    this._envRT = null;
+    this._envBakedAt = -99;
+    this._envWallClock = 0;
+    this._hours = 12;
+
     this.fog = new THREE.Fog(0xb0c4d8, 60, 620);
     scene.fog = this.fog;
   }
@@ -147,6 +161,7 @@ export class Sky {
    */
   setTime(hours, dayOfYear = 180) {
     const h = ((hours % 24) + 24) % 24;
+    this._hours = h;
     // A simple solar position: good enough that noon is high and 6pm is low,
     // which is all the renderer needs.
     const decl = 23.44 * Math.PI / 180 * Math.sin((2 * Math.PI * (dayOfYear - 81)) / 365);
@@ -180,10 +195,11 @@ export class Sky {
     this.uniforms.uNight.value = this.night;
 
     this.sun.color.setRGB(p.light[0], p.light[1], p.light[2]);
-    this.sun.intensity = p.intensity;
+    this.sun.intensity = p.intensity * 0.85;
     this.sun.position.copy(dir).multiplyScalar(320);
 
-    this.ambient.intensity = p.ambient;
+    // IBL supplies most of the ambient now; the hemisphere is just fill.
+    this.ambient.intensity = p.ambient * 0.38;
     this.ambient.color.setRGB(
       lerp(0.28, 0.74, 1 - this.night), lerp(0.32, 0.84, 1 - this.night), lerp(0.48, 0.94, 1 - this.night),
     );
@@ -195,6 +211,29 @@ export class Sky {
     this.fog.color.setRGB(p.horizon[0], p.horizon[1], p.horizon[2]);
     this.fog.near = 70;
     this.fog.far = 560 + (1 - this.night) * 140;
+  }
+
+  /**
+   * Re-bake the environment map when the clock has moved enough to matter.
+   * Throttled on both game time and wall clock so dragging the time slider
+   * does not re-filter a cubemap every frame.
+   */
+  updateEnvironment(renderer, scene, force = false) {
+    const now = performance.now();
+    if (!force) {
+      if (Math.abs(this._hours - this._envBakedAt) < 0.1) return;
+      if (now - this._envWallClock < 300) return;
+    }
+    this._envBakedAt = this._hours;
+    this._envWallClock = now;
+    if (!this._pmrem) this._pmrem = new THREE.PMREMGenerator(renderer);
+    const rt = this._pmrem.fromScene(this._envScene, 0.03);
+    scene.environment = rt.texture;
+    // The env map is a light source on top of sun + hemisphere, so it enters
+    // at about half strength or the whole scene washes out to pastel.
+    scene.environmentIntensity = 0.45 - this.night * 0.12;
+    if (this._envRT) this._envRT.dispose();
+    this._envRT = rt;
   }
 
   /** Keep the sun's shadow frustum centred on the car. */
@@ -210,6 +249,8 @@ export class Sky {
   }
 
   dispose() {
+    if (this._envRT) this._envRT.dispose();
+    if (this._pmrem) this._pmrem.dispose();
     this.scene.remove(this.dome, this.sun, this.sun.target, this.ambient);
     this.dome.geometry.dispose();
     this.dome.material.dispose();

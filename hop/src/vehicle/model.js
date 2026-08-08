@@ -94,15 +94,20 @@ export function createCar(THREE, opts = {}) {
 
   const group = new THREE.Group();
 
+  // Clearcoat is what reads as "car paint": a glossy varnish layer over a
+  // mildly metallic base, so the sky sweeps across the body as you turn.
   const bodyMat = ghost
     ? new THREE.MeshBasicMaterial({ color: paint, transparent: true, opacity: 0.34, depthWrite: false })
-    : new THREE.MeshLambertMaterial({ color: paint });
+    : new THREE.MeshPhysicalMaterial({
+      color: paint, metalness: 0.15, roughness: 0.38,
+      clearcoat: 1.0, clearcoatRoughness: 0.06,
+    });
   const glassMat = ghost
     ? bodyMat
-    : new THREE.MeshLambertMaterial({ color: 0x1a2027 });
+    : new THREE.MeshPhysicalMaterial({ color: 0x10151b, metalness: 0.25, roughness: 0.05 });
   const trimMat = ghost
     ? bodyMat
-    : new THREE.MeshLambertMaterial({ color: 0x22262b });
+    : new THREE.MeshStandardMaterial({ color: 0x22262b, roughness: 0.55, metalness: 0.2 });
 
   const body = new THREE.Mesh(loft(THREE, BODY_SECTIONS), bodyMat);
   body.castShadow = !ghost;
@@ -143,8 +148,8 @@ export function createCar(THREE, opts = {}) {
   const rimGeo = new THREE.CylinderGeometry(0.20, 0.20, 0.25, 10);
   rimGeo.rotateZ(Math.PI / 2);
 
-  const tyreMat = ghost ? bodyMat : new THREE.MeshLambertMaterial({ color: 0x0e0f11 });
-  const rimMat = ghost ? bodyMat : new THREE.MeshLambertMaterial({ color: 0x9aa0a6 });
+  const tyreMat = ghost ? bodyMat : new THREE.MeshStandardMaterial({ color: 0x0e0f11, roughness: 0.95 });
+  const rimMat = ghost ? bodyMat : new THREE.MeshStandardMaterial({ color: 0xb8bec4, metalness: 0.85, roughness: 0.3 });
 
   const wheels = [];
   const positions = [

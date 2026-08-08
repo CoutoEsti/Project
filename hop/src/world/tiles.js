@@ -11,7 +11,7 @@ import {
   Projection, tileAt, tileBounds, tileKey, tileSizeMetres,
 } from '../core/geo.js';
 import { classifyRoad, findJunctions, buildMarkings, StripBuilder } from './roads.js';
-import { paintTile, areaKindFromTags, GROUND_COLORS } from './ground.js';
+import { paintTile, paintRoughnessTile, areaKindFromTags, GROUND_COLORS } from './ground.js';
 import { buildBuildings } from './buildings.js';
 import { buildProps, makePropMaterials } from './props.js';
 import {
@@ -55,7 +55,9 @@ export class World {
 
     this.backdrop = new THREE.Mesh(
       new THREE.PlaneGeometry(16000, 16000),
-      new THREE.MeshLambertMaterial({ color: new THREE.Color(GROUND_COLORS.base) }),
+      new THREE.MeshStandardMaterial({
+        color: new THREE.Color(GROUND_COLORS.base), roughness: 1, metalness: 0,
+      }),
     );
     this.backdrop.rotation.x = -Math.PI / 2;
     this.backdrop.position.y = -0.08;
@@ -268,11 +270,23 @@ export class World {
     texture.anisotropy = 8;
     texture.needsUpdate = true;
 
+    // Roughness at half resolution: it carries no edges the eye can track.
+    const rSize = size >> 1;
+    const rCanvas = document.createElement('canvas');
+    rCanvas.width = rCanvas.height = rSize;
+    const rCtx = rCanvas.getContext('2d', { alpha: false });
+    paintRoughnessTile(rCtx, rSize, tile.bounds, roads, areas, buildings, rails);
+    const roughTex = new THREE.CanvasTexture(rCanvas);
+    roughTex.wrapS = THREE.ClampToEdgeWrapping;
+    roughTex.wrapT = THREE.ClampToEdgeWrapping;
+    roughTex.anisotropy = 4;
+    tile.roughTexture = roughTex;
+
     const { width, height } = tileSizeMetres(ZOOM, tile.x, tile.y);
     const geo = new THREE.PlaneGeometry(Math.abs(tile.bounds.x1 - tile.bounds.x0),
                                         Math.abs(tile.bounds.z1 - tile.bounds.z0));
     void width; void height;
-    const mesh = new THREE.Mesh(geo, makeGroundMaterial(THREE, texture));
+    const mesh = new THREE.Mesh(geo, makeGroundMaterial(THREE, texture, roughTex));
     mesh.rotation.x = -Math.PI / 2;
     mesh.position.set((tile.bounds.x0 + tile.bounds.x1) / 2, 0,
                       (tile.bounds.z0 + tile.bounds.z1) / 2);
@@ -366,6 +380,7 @@ export class World {
         // own texture and must be released or memory climbs forever.
         if (child.material && child.material.map && child.material.map === tile.texture) {
           child.material.map.dispose();
+          if (child.material.roughnessMap) child.material.roughnessMap.dispose();
           child.material.dispose();
         }
       });
@@ -375,6 +390,7 @@ export class World {
     tile.parsed = null;
     tile.canvas = null;
     tile.texture = null;
+    tile.roughTexture = null;
   }
 
   /** All road pieces currently loaded, for spawning and the minimap. */

@@ -104,9 +104,13 @@ class MeshBuilder {
     const v0 = y0 / vSpan;
     const v1 = y1 / vSpan;
     const [r, g, b] = colour;
+    // Ambient occlusion at the foot of the wall, baked into vertex colour:
+    // the ground bounces less light onto the base than the sky pours on top,
+    // and the linear interpolation up the quad turns that into a gradient.
+    const ao = y0 < 0.5 ? 0.74 : 1;
     const i = this.count;
-    this.vertex(ax, y0, az, nx, 0, nz, r, g, b, u0, v0);
-    this.vertex(bx, y0, bz, nx, 0, nz, r, g, b, u1, v0);
+    this.vertex(ax, y0, az, nx, 0, nz, r * ao, g * ao, b * ao, u0, v0);
+    this.vertex(bx, y0, bz, nx, 0, nz, r * ao, g * ao, b * ao, u1, v0);
     this.vertex(bx, y1, bz, nx, 0, nz, r, g, b, u1, v1);
     this.vertex(ax, y1, az, nx, 0, nz, r, g, b, u0, v1);
     this.tri(i, i + 1, i + 2);

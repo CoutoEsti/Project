@@ -19,9 +19,9 @@ let cached = null;
  */
 function glassGradient(ctx, x, y, h) {
   const g = ctx.createLinearGradient(x, y, x, y + h);
-  g.addColorStop(0, 'rgba(74,96,120,0.78)');
-  g.addColorStop(0.45, 'rgba(34,42,54,0.88)');
-  g.addColorStop(1, 'rgba(52,64,80,0.82)');
+  g.addColorStop(0, 'rgba(40,54,70,0.96)');
+  g.addColorStop(0.45, 'rgba(14,19,26,0.97)');
+  g.addColorStop(1, 'rgba(30,42,56,0.96)');
   return g;
 }
 
@@ -45,6 +45,15 @@ export function facadeTextures(THREE) {
   const night = document.createElement('canvas');
   night.width = w; night.height = h;
   const ng = night.getContext('2d');
+
+  // Roughness: bright = matte masonry, dark = polished glass. This is what
+  // lets one wall material show sharp sky reflections in every window while
+  // the brick around them stays dead flat.
+  const rough = document.createElement('canvas');
+  rough.width = w; rough.height = h;
+  const rg = rough.getContext('2d');
+  rg.fillStyle = '#dcdcdc';
+  rg.fillRect(0, 0, w, h);
 
   dg.fillStyle = '#ffffff';
   dg.fillRect(0, 0, w, h);
@@ -86,6 +95,9 @@ export function facadeTextures(THREE) {
         dg.fillStyle = 'rgba(0,0,0,0.22)';
         dg.fillRect(x, y + FLOOR_PX - 10, BAY_PX, 10);
 
+        rg.fillStyle = '#585858';
+        rg.fillRect(gx, gy, gw, gh);
+
         const lit = rand() < 0.72;
         if (lit) {
           const warm = 200 + Math.floor(rand() * 55);
@@ -108,7 +120,7 @@ export function facadeTextures(THREE) {
         dg.beginPath();
         dg.rect(wx, wy, ww, wh);
         dg.clip();
-        dg.fillStyle = 'rgba(200,222,245,0.16)';
+        dg.fillStyle = 'rgba(190,214,240,0.10)';
         dg.beginPath();
         dg.moveTo(wx - 2, wy + wh * 0.72);
         dg.lineTo(wx + ww * 0.66, wy - 2);
@@ -117,6 +129,8 @@ export function facadeTextures(THREE) {
         dg.closePath();
         dg.fill();
         dg.restore();
+        rg.fillStyle = '#525252';
+        rg.fillRect(wx, wy, ww, wh);
         // Frame highlight and a glazing bar.
         dg.fillStyle = 'rgba(255,255,255,0.30)';
         dg.fillRect(wx - 2, wy - 2, ww + 4, 2);
@@ -140,22 +154,28 @@ export function facadeTextures(THREE) {
 
   const map = new THREE.CanvasTexture(day);
   const emissiveMap = new THREE.CanvasTexture(night);
-  for (const t of [map, emissiveMap]) {
+  const roughnessMap = new THREE.CanvasTexture(rough);
+  for (const t of [map, emissiveMap, roughnessMap]) {
     t.wrapS = THREE.RepeatWrapping;
     t.wrapT = THREE.RepeatWrapping;
     t.anisotropy = 4;
-    t.colorSpace = THREE.SRGBColorSpace;
   }
+  // Colour data is sRGB; the roughness map is raw numbers and must stay linear.
+  map.colorSpace = THREE.SRGBColorSpace;
+  emissiveMap.colorSpace = THREE.SRGBColorSpace;
 
-  cached = { map, emissiveMap };
+  cached = { map, emissiveMap, roughnessMap };
   return cached;
 }
 
 /** Material for building walls. Windows light up through `emissiveIntensity`. */
 export function makeWallMaterial(THREE) {
-  const { map, emissiveMap } = facadeTextures(THREE);
-  return new THREE.MeshLambertMaterial({
+  const { map, emissiveMap, roughnessMap } = facadeTextures(THREE);
+  return new THREE.MeshStandardMaterial({
     map,
+    roughnessMap,
+    roughness: 1,
+    metalness: 0,
     emissiveMap,
     emissive: new THREE.Color(0xffffff),
     emissiveIntensity: 0,
@@ -165,18 +185,25 @@ export function makeWallMaterial(THREE) {
 
 /** Material for roofs, parapets, staircases: flat vertex colour, no texture. */
 export function makeCapMaterial(THREE) {
-  return new THREE.MeshLambertMaterial({ vertexColors: true });
+  return new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0 });
 }
 
-/** Ground tiles: the painted canvas, kept matte. */
-export function makeGroundMaterial(THREE, texture) {
-  return new THREE.MeshLambertMaterial({ map: texture });
+/** Ground tiles: painted colour + painted roughness (water smooth, grass matte). */
+export function makeGroundMaterial(THREE, texture, roughnessMap) {
+  return new THREE.MeshStandardMaterial({
+    map: texture,
+    roughnessMap: roughnessMap || null,
+    roughness: 1,
+    metalness: 0,
+  });
 }
 
-/** Road markings: unlit-ish flat colour, pushed above the ground. */
+/** Road markings: worn paint with a hint of sheen. */
 export function makeMarkingMaterial(THREE) {
-  return new THREE.MeshLambertMaterial({
+  return new THREE.MeshStandardMaterial({
     vertexColors: true,
+    roughness: 0.55,
+    metalness: 0,
     polygonOffset: true,
     polygonOffsetFactor: -4,
     polygonOffsetUnits: -4,
@@ -212,5 +239,6 @@ export function disposeTextureCache() {
   if (!cached) return;
   cached.map.dispose();
   cached.emissiveMap.dispose();
+  cached.roughnessMap.dispose();
   cached = null;
 }
