@@ -16,6 +16,7 @@ import { nearestRoadPoint } from './world/roads.js';
 import { Vehicle } from './vehicle/physics.js';
 import { rayClearance } from './vehicle/collision.js';
 import { createCar, CAR_COLORS } from './vehicle/model.js';
+import { loadCarModel } from './vehicle/gltf.js';
 import { EngineAudio } from './vehicle/audio.js';
 import { TimeTrial, TrialState } from './game/timetrial.js';
 import { Hud } from './ui/hud.js';
@@ -71,6 +72,7 @@ class Game {
     this.vehicle = new Vehicle();
     this.car = createCar(THREE, { color: CAR_COLORS[0] });
     this.scene.add(this.car.group);
+    this._tryLoadCarModel();
 
     // One real spotlight for both headlamps: what makes night driving read is
     // the pool of light sweeping the asphalt ahead, not the bulbs themselves.
@@ -112,6 +114,25 @@ class Game {
     window.addEventListener('resize', () => this._resize());
 
     this._bootstrap();
+  }
+
+  /**
+   * Swap in models/car.glb if the build ships one. The procedural car is
+   * already on screen by the time this resolves, so a missing or broken model
+   * costs nothing but a 404 in the network tab.
+   */
+  async _tryLoadCarModel() {
+    const url = new URL('./models/car.glb', document.baseURI).href;
+    const model = await loadCarModel(url, { color: CAR_COLORS[0] });
+    if (!model) return;
+    this.scene.remove(this.car.group);
+    this.car.dispose();
+    this.car = model;
+    this.scene.add(model.group);
+    console.info('[ruelle] modèle chargé :', model.stats);
+    if (this.hud) {
+      this.hud.toast(`Modèle 3D chargé — ${model.stats.triangles} triangles, ${model.stats.wheels} roues.`, 3600);
+    }
   }
 
   // -------------------------------------------------------------------------

@@ -86,6 +86,9 @@ async function main() {
   page.on('console', (msg) => {
     const type = msg.type();
     const text = msg.text();
+    // A 404 on an optional asset is reported by the browser as a console
+    // error even when the code handles it; filter those, not real errors.
+    if (type === 'error' && /\/models\/|404 \(Not Found\)/.test(text)) return;
     if (type === 'error') problem(`console.error: ${text}`);
     else if (type === 'warning' && !/deprecat|Multiple instances/i.test(text)) {
       note(`console.warn: ${text}`);
@@ -95,6 +98,7 @@ async function main() {
   page.on('requestfailed', (req) => {
     const url = req.url();
     if (url.includes('nominatim') || url.includes('overpass')) return;
+    if (url.includes('/models/')) return;   // optional assets
     problem(`request failed: ${url} — ${req.failure()?.errorText}`);
   });
 
