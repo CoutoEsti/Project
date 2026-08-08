@@ -15,15 +15,25 @@ const G = 9.81;
 
 const SPEC = {
   mass: 1380,
-  izz: 2560,
+  // Yaw inertia: lower than a real sedan on purpose. The physical value makes
+  // the car feel like it is turning through treacle on a phone screen, where
+  // you cannot make the small continuous corrections a wheel allows.
+  izz: 2300,
   wheelbase: 2.70,
   frontAxle: 1.25,          // CG to front axle
   rearAxle: 1.45,           // CG to rear axle
   cgHeight: 0.53,
   wheelRadius: 0.33,
-  maxSteer: 0.60,           // rad, ~34°
-  grip: 1.06,               // peak μ
-  stiffnessPerN: 12,        // cornering stiffness = this × vertical load
+  maxSteer: 0.55,           // rad, ~31°
+  grip: 1.34,               // peak μ — arcade, well above a real road tyre
+  // The CG sits ahead of centre, so the front axle carries more load — and in
+  // a linear tyre model more load means more grip, which makes the car pivot
+  // on its nose. Real tyres lose grip per newton as they are loaded up; biasing
+  // the rear axle reproduces that, and understeer is what "planted" feels like.
+  rearGripBias: 1.22,
+  stiffnessPerN: 14,        // cornering stiffness = this × vertical load;
+                            // higher means the tyre builds force sooner, which
+                            // is what turns mush into bite
   peakTorque: 215,          // Nm
   redline: 7000,
   idle: 850,
@@ -139,7 +149,7 @@ export class Vehicle {
 
     // --- steering ----------------------------------------------------------
     const speed = Math.abs(this.u);
-    const steerLimit = S.maxSteer * (0.32 + 0.68 / (1 + speed / 17));
+    const steerLimit = S.maxSteer * (0.28 + 0.72 / (1 + speed / 20));
     // The model's lateral axis, (cos ψ, −sin ψ), is screen-LEFT: the camera's
     // right vector is forward × up = (−cos ψ, sin ψ). So a positive yaw rate
     // steers left on screen, and the driver's input has to be mirrored on the
@@ -169,7 +179,7 @@ export class Vehicle {
     this.slipRear = alphaR;
 
     const muF = S.grip;
-    const muR = S.grip * (handbrake ? S.handbrakeGripLoss : 1);
+    const muR = S.grip * S.rearGripBias * (handbrake ? S.handbrakeGripLoss : 1);
 
     // --- longitudinal forces per axle ---------------------------------------
     const brakeForce = brakePedal * S.brakeForce;
@@ -217,7 +227,7 @@ export class Vehicle {
 
     // Yaw damping keeps the tail from oscillating forever at low speed.
     this.yawRate *= 1 - Math.min(0.5, 1.6 * dt);
-    this.yawRate = clampAbs(this.yawRate, 4.0);
+    this.yawRate = clampAbs(this.yawRate, 3.2);
 
     // Creep to a genuine stop instead of drifting for ever.
     if (Math.abs(this.u) < 0.35 && drive === 0) {

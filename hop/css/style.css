@@ -237,6 +237,47 @@ html, body {
 }
 
 .pad-group.left { left: max(20px, env(safe-area-inset-left)); }
+
+/* Floating thumbstick: the base appears wherever the left thumb lands, which
+   is the only layout that works when you cannot see your own hand. */
+#stick-zone {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 45vw;
+  height: 62vh;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+#stick {
+  position: absolute;
+  width: 132px;
+  height: 132px;
+  margin: -66px 0 0 -66px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(18, 24, 30, 0.42);
+  backdrop-filter: blur(8px);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  pointer-events: none;
+}
+
+#stick.active { opacity: 1; }
+
+#stick-knob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 58px;
+  height: 58px;
+  margin: -29px 0 0 -29px;
+  border-radius: 50%;
+  background: rgba(95, 208, 168, 0.55);
+  border: 1px solid rgba(95, 208, 168, 0.9);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
+}
 .pad-group.right { right: max(20px, env(safe-area-inset-right)); }
 
 #touch button {

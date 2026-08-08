@@ -55,9 +55,10 @@
 
 <!-- ── Touch controls ────────────────────────────────────────────────── -->
 <div id="touch">
-  <div class="pad-group left">
-    <button id="pad-left" aria-label="Gauche">◀</button>
-    <button id="pad-right" aria-label="Droite">▶</button>
+  <div id="stick-zone">
+    <div id="stick">
+      <div id="stick-knob"></div>
+    </div>
   </div>
   <div class="pad-group right">
     <button id="pad-handbrake" aria-label="Frein à main">⌷</button>
@@ -143,6 +144,15 @@
     <label>
       <span>Volume</span>
       <input type="range" id="set-volume" min="0" max="1" step="0.05">
+    </label>
+
+    <label>
+      <span>Commandes tactiles</span>
+      <select id="set-touch">
+        <option value="auto">Automatique</option>
+        <option value="on">Toujours</option>
+        <option value="off">Jamais</option>
+      </select>
     </label>
 
     <label>

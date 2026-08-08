@@ -50,6 +50,7 @@ const DEFAULT_SETTINGS = {
   audio: true,
   volume: 0.7,
   camera: 'chase',      // 'chase' | 'hood' | 'orbit'
+  touch: 'auto',        // 'auto' | 'on' | 'off'
   timeOfDay: 10.5,      // hours, 0-24
   autoTime: false,
   units: 'kmh',         // 'kmh' | 'mph'

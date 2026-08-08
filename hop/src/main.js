@@ -161,13 +161,10 @@ class Game {
     };
     bindPad('#pad-throttle', (v) => this.input.setTouch({ throttle: v ? 1 : 0 }));
     bindPad('#pad-brake', (v) => this.input.setTouch({ brake: v ? 1 : 0 }));
-    bindPad('#pad-left', (v) => this.input.setTouch({ steer: v ? -1 : 0 }));
-    bindPad('#pad-right', (v) => this.input.setTouch({ steer: v ? 1 : 0 }));
     bindPad('#pad-handbrake', (v) => this.input.setTouch({ handbrake: v }));
 
-    if (matchMedia('(pointer: coarse)').matches) {
-      this.root.querySelector('#touch').classList.add('visible');
-    }
+    this._bindStick();
+    this._applyTouchMode();
 
     // Full-screen map
     this.mapEl = this.root.querySelector('#mapview');
@@ -184,6 +181,74 @@ class Game {
       if (this.menu.visible && this.spawned) { this.menu.hide(); this.audio.resume(); }
       else this.menu.show();
     });
+  }
+
+  /**
+   * A floating thumbstick. The base appears wherever the thumb lands in the
+   * lower-left of the screen rather than sitting at a fixed spot, because on a
+   * phone you cannot see your own hand — you find the stick by feel, and a
+   * fixed one is permanently in the wrong place.
+   *
+   * Only the horizontal axis is read: this steers, it does not drive.
+   */
+  _bindStick() {
+    const zone = this.root.querySelector('#stick-zone');
+    const stick = this.root.querySelector('#stick');
+    const knob = this.root.querySelector('#stick-knob');
+    if (!zone) return;
+
+    const RADIUS = 52;
+    let pointerId = null;
+    let originX = 0;
+
+    const place = (x, y) => {
+      stick.style.left = `${x}px`;
+      stick.style.top = `${y}px`;
+    };
+
+    const move = (x) => {
+      const dx = Math.max(-RADIUS, Math.min(RADIUS, x - originX));
+      knob.style.transform = `translateX(${dx}px)`;
+      // Slight dead zone so resting the thumb does not creep the wheel.
+      const raw = dx / RADIUS;
+      this.input.setTouch({ steer: Math.abs(raw) < 0.08 ? 0 : raw });
+    };
+
+    zone.addEventListener('pointerdown', (e) => {
+      if (pointerId !== null) return;
+      pointerId = e.pointerId;
+      zone.setPointerCapture(pointerId);
+      originX = e.clientX;
+      place(e.clientX, e.clientY);
+      stick.classList.add('active');
+      knob.style.transform = 'translateX(0px)';
+      e.preventDefault();
+    });
+
+    zone.addEventListener('pointermove', (e) => {
+      if (e.pointerId !== pointerId) return;
+      move(e.clientX);
+      e.preventDefault();
+    });
+
+    const release = (e) => {
+      if (e.pointerId !== pointerId) return;
+      pointerId = null;
+      stick.classList.remove('active');
+      knob.style.transform = 'translateX(0px)';
+      this.input.setTouch({ steer: 0 });
+    };
+    zone.addEventListener('pointerup', release);
+    zone.addEventListener('pointercancel', release);
+  }
+
+  /** 'auto' follows the pointer type; 'on' and 'off' override it. */
+  _applyTouchMode() {
+    const mode = this.settings.touch || 'auto';
+    const wanted = mode === 'on'
+      || (mode === 'auto' && matchMedia('(pointer: coarse)').matches);
+    this.root.querySelector('#touch').classList.toggle('visible', wanted);
+    if (!wanted) this.input.clearTouch();
   }
 
   _resize() {
@@ -203,6 +268,7 @@ class Game {
       this.sky.sun.castShadow = !!settings.shadows;
       this.scene.traverse((o) => { if (o.isMesh) o.castShadow = !!settings.shadows && o.castShadow; });
     }
+    if (key === 'touch') this._applyTouchMode();
     if (key === 'quality') {
       this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, settings.quality === 'high' ? 2 : 1.5));
       this.hud.toast('La qualité s’applique aux nouvelles tuiles.');

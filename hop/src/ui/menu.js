@@ -163,6 +163,7 @@ export class Menu {
     bind('#set-shadows', 'shadows');
     bind('#set-audio', 'audio');
     bind('#set-volume', 'volume', Number, 'input');
+    bind('#set-touch', 'touch');
     bind('#set-units', 'units');
     bind('#set-time', 'timeOfDay', Number, 'input');
     bind('#set-autotime', 'autoTime');
