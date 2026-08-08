@@ -23,8 +23,22 @@ import { CollisionGrid } from '../vehicle/collision.js';
 export const ZOOM = 15;
 
 const TEXTURE_SIZE = { low: 1024, medium: 1536, high: 2048 };
-const RING = { low: 1, medium: 1, high: 1 };
-const KEEP_RADIUS = 2;         // tiles kept alive beyond the build ring
+
+// How far tiles are built at all, and how far they are built in full.
+//
+// Beyond the detail ring a tile still gets its ground and its buildings —
+// which is what you actually see at that distance, the silhouette of the
+// street — but no street furniture, no staircases and a quarter of the
+// texture. That is the whole trade: spend the budget on what fills the
+// screen, not on lamp posts a kilometre away that cover four pixels.
+const RING = { low: 1, medium: 2, high: 2 };
+const DETAIL_RING = { low: 1, medium: 1, high: 1 };
+const KEEP_RADIUS = 3;         // tiles kept alive beyond the build ring
+
+// Hysteresis: upgrade a tile when it comes within the detail ring, but do not
+// downgrade it until it is well outside. Without the gap, driving along a
+// boundary would rebuild the same tile every few seconds.
+const DOWNGRADE_RING = 2;
 
 export class World {
   /**
@@ -86,6 +100,7 @@ export class World {
   }
 
   get ring() { return RING[this.settings.quality] ?? 1; }
+  get detailRing() { return DETAIL_RING[this.settings.quality] ?? 1; }
 
   /** Ensure the tiles around (x,z) exist; retire the ones far behind. */
   update(x, z) {
@@ -96,14 +111,24 @@ export class World {
 
     for (let dy = -ring; dy <= ring; dy++) {
       for (let dx = -ring; dx <= ring; dx++) {
-        this._ensureTile(centre.x + dx, centre.y + dy);
+        const ring0 = Math.max(Math.abs(dx), Math.abs(dy));
+        this._ensureTile(centre.x + dx, centre.y + dy, ring0 <= this.detailRing);
       }
     }
 
     for (const [key, tile] of this.tiles) {
-      if (Math.abs(tile.x - centre.x) > KEEP_RADIUS || Math.abs(tile.y - centre.y) > KEEP_RADIUS) {
+      const away = Math.max(Math.abs(tile.x - centre.x), Math.abs(tile.y - centre.y));
+      if (away > KEEP_RADIUS) {
         this._disposeTile(tile);
         this.tiles.delete(key);
+        continue;
+      }
+      // A tile built cheaply that you are now driving into has to be redone.
+      // Rebuilding is the same work as a fresh tile and the build queue
+      // spreads it over frames, so this never shows up as a stall.
+      if (tile.state === 'ready') {
+        if (!tile.detailed && away <= this.detailRing) this._rebuild(tile, true);
+        else if (tile.detailed && away >= DOWNGRADE_RING + 1) this._rebuild(tile, false);
       }
     }
 
@@ -117,7 +142,15 @@ export class World {
     return (cx - x) ** 2 + (cz - z) ** 2;
   }
 
-  _ensureTile(tx, ty) {
+  /** Tear a tile down and queue it again at a different detail level. */
+  _rebuild(tile, detailed) {
+    this._disposeTile(tile);
+    this.tiles.delete(tile.key);
+    this.readyTiles = Math.max(0, this.readyTiles - 1);
+    this._ensureTile(tile.x, tile.y, detailed);
+  }
+
+  _ensureTile(tx, ty, detailed = true) {
     const key = tileKey(ZOOM, tx, ty);
     if (this.tiles.has(key)) return;
 
@@ -129,6 +162,7 @@ export class World {
       geo,
       bounds: { x0: nw.x, z0: nw.z, x1: se.x, z1: se.z },
       state: 'requested',
+      detailed,
       objects: [],
       grid: null,
       roads: [],
@@ -256,7 +290,8 @@ export class World {
   // -- step 2: the painted ground --------------------------------------------
   _paint(tile) {
     const { roads, areas, buildings, rails } = tile.parsed;
-    const size = TEXTURE_SIZE[this.settings.quality] ?? 1536;
+    const full = TEXTURE_SIZE[this.settings.quality] ?? 1536;
+    const size = tile.detailed ? full : Math.max(512, full >> 1);
     const canvas = document.createElement('canvas');
     canvas.width = canvas.height = size;
     const ctx = canvas.getContext('2d', { alpha: false });
@@ -318,8 +353,8 @@ export class World {
     }
 
     const built = buildBuildings(THREE, buildings, clipped, {
-      staircases: this.settings.quality === 'high',
-      rooftops: this.settings.quality !== 'low',
+      staircases: tile.detailed && this.settings.quality === 'high',
+      rooftops: tile.detailed && this.settings.quality !== 'low',
     });
     if (built.walls) {
       const mesh = new THREE.Mesh(built.walls, this.materials.wall);
@@ -340,6 +375,16 @@ export class World {
   // -- step 4: street furniture ----------------------------------------------
   _props(tile) {
     const { clipped, junctions, nodes } = tile.parsed;
+    if (!tile.detailed) {
+      // Distant tiles get their buildings and their ground, and nothing else.
+      // The colliders still matter — you can drive into a far tile before it
+      // is ever upgraded.
+      tile.grid = new CollisionGrid(tile.buildingColliders || new Float32Array(0), tile.bounds);
+      tile.parsed.areas = null;
+      tile.parsed.buildings = null;
+      tile.parsed.nodes = null;
+      return;
+    }
     const props = buildProps(THREE, {
       nodes, roads: clipped, junctions, bounds: tile.bounds,
       materials: this.materials.props,

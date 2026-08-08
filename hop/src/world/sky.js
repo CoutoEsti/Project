@@ -209,8 +209,8 @@ export class Sky {
 
     // Fog takes the horizon colour so distance dissolves into the sky.
     this.fog.color.setRGB(p.horizon[0], p.horizon[1], p.horizon[2]);
-    this.fog.near = 70;
-    this.fog.far = 560 + (1 - this.night) * 140;
+    this.fog.near = 120;
+    this.fog.far = 1250 + (1 - this.night) * 350;
   }
 
   /**
