@@ -11,6 +11,7 @@ import { Input } from './core/input.js';
 import { loadSettings, saveSettings } from './core/store.js';
 import { TileSource } from './world/source.js';
 import { World } from './world/tiles.js';
+import { preloadPropModels, propTriangles } from './world/models.js';
 import { Sky } from './world/sky.js';
 import { nearestRoadPoint } from './world/roads.js';
 import { Vehicle } from './vehicle/physics.js';
@@ -92,7 +93,10 @@ class Game {
     this.menu = new Menu(root, {
       settings: this.settings,
       input: this.input,
-      onHop: (lat, lon, label) => this.hop(lat, lon, label),
+      onHop: (lat, lon, label) => {
+        const go = () => this.hop(lat, lon, label);
+        if (this.modelsReady) this.modelsReady.then(go, go); else go();
+      },
       onSettings: (s, key) => this._applySettings(s, key),
     });
 
@@ -161,15 +165,29 @@ class Game {
         else this.menu.setHint('Données OpenStreetMap en direct.');
       });
 
+    // Prop models must be registered before the first tile builds, otherwise
+    // half the world would get procedural trees and half authored ones.
+    const modelsReady = preloadPropModels(new URL('./models/', document.baseURI).href)
+      .then((kinds) => {
+        if (kinds.length) {
+          console.info('[ruelle] modèles chargés :',
+            kinds.map((k) => `${k} (${propTriangles(k)} tris)`).join(', '));
+        }
+        this.modelsLoaded = kinds;
+      })
+      .catch(() => { this.modelsLoaded = []; });
+
     if (hasCoords) {
-      this.hop(lat, lon, this.params.get('place') || 'Position partagée', true);
+      modelsReady.then(() => this.hop(lat, lon, this.params.get('place') || 'Position partagée', true));
     }
+    this.modelsReady = modelsReady;
     this.loop.start();
   }
 
   _bindUi() {
     this.root.querySelector('#hop-default').addEventListener('click', () => {
-      this.hop(DEFAULT_PLACE.lat, DEFAULT_PLACE.lon, DEFAULT_PLACE.label);
+      const go = () => this.hop(DEFAULT_PLACE.lat, DEFAULT_PLACE.lon, DEFAULT_PLACE.label);
+      if (this.modelsReady) this.modelsReady.then(go, go); else go();
     });
     this.root.querySelector('#resume').addEventListener('click', () => {
       if (this.spawned) { this.menu.hide(); this.audio.resume(); }

@@ -11,6 +11,7 @@
 import { hash01 } from '../core/geo.js';
 import { polylineLength, sampleAt } from './roads.js';
 import { makeFoliageTexture } from './materials.js';
+import { propParts, hasPropModel } from './models.js';
 
 // ---------------------------------------------------------------------------
 // Geometry helpers
@@ -401,9 +402,17 @@ export function buildProps(THREE, args) {
     d.scale.set(1, 1, 1);
   };
 
-  const lampMesh = addInstanced(P.lamp, mats.metal, lamps, placeUpright);
-  const headMesh = addInstanced(P.head, mats.lampHead, lamps, placeUpright);
-  if (lampMesh) { lampMesh.castShadow = !!args.shadows; }
+  let headMesh = null;
+  if (hasPropModel('lamp')) {
+    for (const part of propParts('lamp')) {
+      const mesh = addInstanced(part.geometry, part.material, lamps, placeUpright);
+      if (mesh) mesh.castShadow = !!args.shadows;
+    }
+  } else {
+    const lampMesh = addInstanced(P.lamp, mats.metal, lamps, placeUpright);
+    headMesh = addInstanced(P.head, mats.lampHead, lamps, placeUpright);
+    if (lampMesh) lampMesh.castShadow = !!args.shadows;
+  }
 
   const poolMesh = addInstanced(P.pool, mats.lightPool, lamps, (d, it) => {
     d.position.set(it.x + Math.cos(it.yaw) * 1.2, 0.04, it.z + Math.sin(it.yaw) * 1.2);
@@ -412,25 +421,37 @@ export function buildProps(THREE, args) {
   });
   if (poolMesh) poolMesh.renderOrder = 2;
 
-  const trunkMesh = addInstanced(P.trunk, mats.vertex, trees, (d, it) => {
-    d.position.set(it.x, 0, it.z);
-    d.rotation.set(0, hash01(Math.round(it.x * 3 + it.z * 5)) * 6.28, 0);
-    d.scale.setScalar(it.scale);
-  });
-  if (trunkMesh) trunkMesh.castShadow = !!args.shadows;
-
-  const canopyMesh = addInstanced(P.canopy, mats.foliage, trees, (d, it) => {
+  const placeTree = (d, it) => {
     d.position.set(it.x, 0, it.z);
     d.rotation.set(0, hash01(Math.round(it.x * 7 + it.z * 11)) * 6.28, 0);
     d.scale.setScalar(it.scale);
-  });
-  if (canopyMesh) {
-    canopyMesh.castShadow = !!args.shadows;
-    for (let i = 0; i < trees.length; i++) {
-      colour.setRGB(trees[i].colour[0], trees[i].colour[1], trees[i].colour[2]);
-      canopyMesh.setColorAt(i, colour);
+  };
+
+  if (hasPropModel('tree')) {
+    // An authored tree: one InstancedMesh per material, all sharing the same
+    // per-tree transforms. Its own foliage colour is better than our tint, so
+    // instance colours are left alone.
+    for (const part of propParts('tree')) {
+      const mesh = addInstanced(part.geometry, part.material, trees, placeTree);
+      if (mesh) mesh.castShadow = !!args.shadows;
     }
-    if (canopyMesh.instanceColor) canopyMesh.instanceColor.needsUpdate = true;
+  } else {
+    const trunkMesh = addInstanced(P.trunk, mats.vertex, trees, (d, it) => {
+      d.position.set(it.x, 0, it.z);
+      d.rotation.set(0, hash01(Math.round(it.x * 3 + it.z * 5)) * 6.28, 0);
+      d.scale.setScalar(it.scale);
+    });
+    if (trunkMesh) trunkMesh.castShadow = !!args.shadows;
+
+    const canopyMesh = addInstanced(P.canopy, mats.foliage, trees, placeTree);
+    if (canopyMesh) {
+      canopyMesh.castShadow = !!args.shadows;
+      for (let i = 0; i < trees.length; i++) {
+        colour.setRGB(trees[i].colour[0], trees[i].colour[1], trees[i].colour[2]);
+        canopyMesh.setColorAt(i, colour);
+      }
+      if (canopyMesh.instanceColor) canopyMesh.instanceColor.needsUpdate = true;
+    }
   }
 
   addInstanced(P.signalRed, mats.vertex, signalsRed, placeUpright);

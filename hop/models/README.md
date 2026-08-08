@@ -1,60 +1,84 @@
 # Modèles 3D
 
-Dépose ici un fichier nommé **`car.glb`** et le jeu l'utilisera à la place de
-la voiture procédurale, automatiquement. Rien d'autre à configurer : si le
-fichier est absent ou illisible, la voiture générée reste en place.
+Tout ici est **optionnel**. Chaque élément a une version générée par le code ;
+déposer un fichier au bon nom la remplace, sans rien configurer. Un fichier
+absent ou illisible n'est pas une erreur — le procédural reprend la main.
+
+| Fichier | Remplace | Hauteur cible |
+|---|---|---|
+| `car.glb` | la voiture du joueur | 4,30 m de long |
+| `tree.glb` | tous les arbres | 8,5 m |
+| `lamp.glb` | tous les lampadaires | 6,2 m |
+| `bench.glb` | les bancs | 0,9 m |
 
 ## Ce que le jeu fait tout seul
 
-Tu n'as pas à préparer l'orientation ni l'échelle. Au chargement, le jeu
-mesure la boîte englobante, normalise la longueur à 4,30 m, tourne le modèle
-pour qu'il pointe vers l'avant, et le pose sur ses roues.
+Tu n'as ni à orienter, ni à mettre à l'échelle, ni à poser le modèle au sol.
+Au chargement, le jeu mesure la boîte englobante, ramène le modèle à la
+hauteur cible, le recentre horizontalement et pose sa base à y = 0.
 
-Il cherche ensuite les pièces animables **par leur nom**. Ça marche mieux si
-les nœuds de ton modèle contiennent l'un de ces mots :
+Pour la voiture, il cherche en plus les pièces animables **par leur nom** :
 
-| Pièce | Mots reconnus |
+| Pièce | Mots reconnus, français ou anglais |
 |---|---|
 | Roues | `wheel`, `tyre`, `tire`, `rim`, `roue`, `pneu`, `jante` |
 | Roues avant | en plus : `front`, `avant`, `_fl`, `_fr` |
 | Vitres | `glass`, `window`, `windshield`, `vitre`, `pare-brise` |
 | Feux | `headlight`, `taillight`, `phare`, `feu` |
 
-Sans ces noms le modèle s'affiche quand même — les roues ne tourneront
+Sans ces noms, le modèle s'affiche quand même : les roues ne tourneront
 simplement pas.
 
-## Compresser avant de livrer
+Les props sont **instanciés** : un `tree.glb` sert des milliers d'arbres pour
+une poignée d'appels de rendu. Chaque matériau du modèle devient un
+InstancedMesh, donc un arbre tronc + feuillage coûte deux appels, pas deux
+mille.
+
+## Budget — et pourquoi
 
 Un modèle de vitrine fait couramment 50 à 150 Mo. Le téléchargement est
-pénible, mais ce qui tue vraiment l'onglet c'est la mémoire vidéo : une seule
+pénible, mais ce qui tue vraiment l'onglet, c'est la **mémoire vidéo** : une
 texture 4096×4096 non compressée occupe 67 Mo en VRAM, 89 Mo une fois
-mipmappée. Un jeu PBR complet pour une voiture, c'est donc ~450 Mo, et Safari
+mipmappée. Un jeu PBR complet pour une seule voiture, c'est ~450 Mo, et Safari
 iOS ferme la page bien avant.
 
-```bash
-node hop/tools/prepare-model.mjs ~/Downloads/voiture.glb hop/models/car.glb
-```
+| | Voiture | Arbre |
+|---|---|---|
+| Fichier | 2 à 5 Mo | 0,3 à 1,5 Mo |
+| Triangles | 50 à 150 k | 1,5 à 8 k |
+| Textures | 2048 max | 1024 max |
 
-Le script redimensionne les textures, les ré-encode en WebP, quantifie les
-sommets puis compresse la géométrie en Draco. Compter une division par vingt
-à cinquante. Si le résultat dépasse encore 8 Mo, relance avec `--max 1024`.
+L'arbre est instancié des milliers de fois : ses triangles comptent bien plus
+que ceux de la voiture, qui n'existe qu'en un exemplaire.
 
-Les dépendances du script ne sont pas dans le dépôt :
+## Compresser
 
 ```bash
 npm install @gltf-transform/core @gltf-transform/functions \
             @gltf-transform/extensions draco3dgltf sharp
+
+node hop/tools/prepare-model.mjs ~/Downloads/voiture.glb hop/models/car.glb
+node hop/tools/prepare-model.mjs ~/Downloads/arbre.glb hop/models/tree.glb --max 1024
 ```
 
-## Cibles
+Redimensionnement des textures, ré-encodage WebP, quantification des sommets,
+puis compression Draco. Compter une division par vingt à cinquante.
 
-| | Budget |
-|---|---|
-| Fichier | 2 à 5 Mo |
-| Triangles | 50 à 150 k |
-| Textures | 1024 ou 2048, jamais 4096 |
+## Où trouver des modèles
 
-## Licence
+Le dépôt est public : **CC0 de préférence**, sinon CC-BY avec l'attribution
+notée ci-dessous.
 
-Le dépôt est public : n'y dépose que des modèles en CC0, CC-BY ou dont tu
-détiens les droits, et note l'attribution ici.
+- **[Poly Haven](https://polyhaven.com/models)** — CC0, scannés, excellente
+  qualité. Peu de modèles mais tous bons.
+- **[Poly Pizza](https://poly.pizza)** — CC0, low-poly, énorme catalogue.
+  Idéal pour les arbres, qui doivent rester légers.
+- **[Sketchfab](https://sketchfab.com)** — filtrer sur « Downloadable » puis
+  licence CC0 ou CC-BY.
+- **[Kenney](https://kenney.nl/assets)** — CC0, style cohérent.
+
+## Attributions
+
+<!-- Ajouter ici : nom du modèle, auteur, licence, lien. -->
+
+_Aucun modèle livré pour l'instant._
