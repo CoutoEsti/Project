@@ -265,6 +265,8 @@ export function makeGroundMaterial(THREE, texture, roughnessMap) {
   return new THREE.MeshStandardMaterial({
     map: texture,
     roughnessMap: roughnessMap || null,
+    normalMap: groundDetailNormal(THREE),
+    normalScale: new THREE.Vector2(0.22, 0.22),
     roughness: 1,
     metalness: 0,
   });
@@ -305,6 +307,129 @@ export function makeLightPoolMaterial(THREE) {
     depthWrite: false,
     opacity: 0,
   });
+}
+
+// ---------------------------------------------------------------------------
+// Ground detail
+// ---------------------------------------------------------------------------
+
+let detailNormal = null;
+
+/**
+ * A tileable asphalt grain, as a normal map.
+ *
+ * The tile colour texture covers ~850 m in 2048 px — about 40 cm a pixel, far
+ * too coarse to show road surface. So the grain arrives separately, at its own
+ * repeat: three.js gives every texture its own offset/repeat, so this can tile
+ * a hundred times across the same mesh the colour map covers once.
+ *
+ * The noise lattice wraps on the texture size, which is what makes it seamless.
+ */
+export function groundDetailNormal(THREE) {
+  if (detailNormal) return detailNormal;
+  const n = 256;
+
+  const hash = (x, y) => {
+    let h = Math.imul(((x & 255) + Math.imul(y & 255, 57)) | 0, 0x27d4eb2d);
+    h ^= h >>> 15;
+    h = Math.imul(h, 0x85ebca6b);
+    h ^= h >>> 13;
+    return (h >>> 0) / 4294967296;
+  };
+
+  // Value noise on a lattice that repeats every `period` cells.
+  const octave = (x, y, period) => {
+    const fx = (x / n) * period, fy = (y / n) * period;
+    const ix = Math.floor(fx), iy = Math.floor(fy);
+    const tx = fx - ix, ty = fy - iy;
+    const sx = tx * tx * (3 - 2 * tx), sy = ty * ty * (3 - 2 * ty);
+    const w = (a, b) => hash(((a % period) + period) % period, ((b % period) + period) % period);
+    const a = w(ix, iy), b = w(ix + 1, iy), c = w(ix, iy + 1), d = w(ix + 1, iy + 1);
+    return (a + (b - a) * sx) + ((c + (d - c) * sx) - (a + (b - a) * sx)) * sy;
+  };
+
+  const heights = new Float32Array(n * n);
+  for (let y = 0; y < n; y++) {
+    for (let x = 0; x < n; x++) {
+      // Coarse chip pattern under a fine sand grain.
+      const v = octave(x, y, 32) * 0.55 + octave(x, y, 64) * 0.28 + octave(x, y, 128) * 0.17;
+      heights[y * n + x] = v;
+    }
+  }
+
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = n;
+  const ctx = cv.getContext('2d');
+  const img = ctx.createImageData(n, n);
+  const at = (x, y) => heights[(((y % n) + n) % n) * n + (((x % n) + n) % n)];
+  const strength = 1.1;
+  for (let y = 0; y < n; y++) {
+    for (let x = 0; x < n; x++) {
+      const dx = (at(x + 1, y) - at(x - 1, y)) * strength;
+      const dy = (at(x, y + 1) - at(x, y - 1)) * strength;
+      const len = Math.hypot(dx, dy, 1);
+      const i = (y * n + x) * 4;
+      img.data[i] = Math.round(((-dx / len) * 0.5 + 0.5) * 255);
+      img.data[i + 1] = Math.round(((dy / len) * 0.5 + 0.5) * 255);
+      img.data[i + 2] = Math.round(((1 / len) * 0.5 + 0.5) * 255);
+      img.data[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+
+  const tex = new THREE.CanvasTexture(cv);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  // One repeat every ~4 m of ground: fine enough to read as grain from a
+  // windscreen, coarse enough not to shimmer at the end of the street.
+  tex.repeat.set(150, 150);
+  tex.anisotropy = 8;
+  detailNormal = tex;
+  return tex;
+}
+
+/**
+ * Foliage: a mass of small leaf strokes with a transparent background, used on
+ * crossed billboards. Alpha-tested rather than blended, so there is no sorting
+ * to get wrong and trees still cast shadows.
+ */
+let foliageTexture = null;
+export function makeFoliageTexture(THREE) {
+  if (foliageTexture) return foliageTexture;
+  const n = 256;
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = n;
+  const g = cv.getContext('2d');
+  g.clearRect(0, 0, n, n);
+
+  let seed = 0x51f3a7;
+  const rand = () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+
+  // Leaves cluster towards the middle and thin out at the silhouette, which is
+  // what stops a billboard reading as a disc.
+  for (let i = 0; i < 1400; i++) {
+    const a = rand() * Math.PI * 2;
+    const r = Math.pow(rand(), 0.62) * (n * 0.46);
+    const x = n / 2 + Math.cos(a) * r;
+    const y = n / 2 + Math.sin(a) * r * 0.92;
+    const size = 5 + rand() * 11;
+    const shade = 0.55 + rand() * 0.45;
+    const warm = rand() < 0.18;
+    g.fillStyle = warm
+      ? `rgba(${Math.round(150 * shade)},${Math.round(160 * shade)},${Math.round(70 * shade)},0.95)`
+      : `rgba(${Math.round(74 * shade)},${Math.round(128 * shade)},${Math.round(58 * shade)},0.95)`;
+    g.beginPath();
+    g.ellipse(x, y, size, size * (0.55 + rand() * 0.5), rand() * Math.PI, 0, Math.PI * 2);
+    g.fill();
+  }
+
+  foliageTexture = new THREE.CanvasTexture(cv);
+  foliageTexture.colorSpace = THREE.SRGBColorSpace;
+  foliageTexture.anisotropy = 4;
+  return foliageTexture;
 }
 
 export function disposeTextureCache() {

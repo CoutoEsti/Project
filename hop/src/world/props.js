@@ -10,6 +10,7 @@
 
 import { hash01 } from '../core/geo.js';
 import { polylineLength, sampleAt } from './roads.js';
+import { makeFoliageTexture } from './materials.js';
 
 // ---------------------------------------------------------------------------
 // Geometry helpers
@@ -61,6 +62,35 @@ function merge(THREE, geos) {
   return out;
 }
 
+/** Like merge(), but keeps UVs — the billboards need them. */
+function mergeUv(THREE, geos) {
+  const pos = [], norm = [], col = [], uv = [], idx = [];
+  let offset = 0;
+  for (const g of geos) {
+    const p = g.attributes.position, n = g.attributes.normal;
+    const c = g.attributes.color, t = g.attributes.uv;
+    for (let i = 0; i < p.count; i++) {
+      pos.push(p.getX(i), p.getY(i), p.getZ(i));
+      norm.push(n ? n.getX(i) : 0, n ? n.getY(i) : 1, n ? n.getZ(i) : 0);
+      col.push(c ? c.getX(i) : 1, c ? c.getY(i) : 1, c ? c.getZ(i) : 1);
+      uv.push(t ? t.getX(i) : 0, t ? t.getY(i) : 0);
+    }
+    const index = g.getIndex();
+    if (index) for (let i = 0; i < index.count; i++) idx.push(index.getX(i) + offset);
+    else for (let i = 0; i < p.count; i++) idx.push(i + offset);
+    offset += p.count;
+    g.dispose();
+  }
+  const out = new THREE.BufferGeometry();
+  out.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  out.setAttribute('normal', new THREE.Float32BufferAttribute(norm, 3));
+  out.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  out.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  out.setIndex(idx);
+  out.computeBoundingSphere();
+  return out;
+}
+
 let prototypes = null;
 
 /** Build the shared prop geometries once, then reuse them for every tile. */
@@ -90,12 +120,17 @@ function getPrototypes(THREE) {
   trunk.translate(0, 1.3, 0);
   tint(THREE, trunk, [0.30, 0.24, 0.19]);
 
-  const blobA = new THREE.IcosahedronGeometry(1.55, 0);
-  blobA.translate(0, 3.9, 0);
-  blobA.scale(1, 0.92, 1);
-  const blobB = new THREE.IcosahedronGeometry(1.05, 0);
-  blobB.translate(0.75, 3.1, 0.35);
-  const canopy = merge(THREE, [tint(THREE, blobA, [1, 1, 1]), tint(THREE, blobB, [1, 1, 1])]);
+  // Three quads crossed at 60°, each carrying an alpha-tested leaf mass. Six
+  // triangles a tree instead of forty, and it reads as foliage rather than as
+  // a faceted rock, because the silhouette is in the texture where it belongs.
+  const canopyPlanes = [];
+  for (let k = 0; k < 3; k++) {
+    const q = new THREE.PlaneGeometry(5.2, 5.2);
+    q.rotateY((k * Math.PI) / 3);
+    q.translate(0, 3.8, 0);
+    canopyPlanes.push(tint(THREE, q, [1, 1, 1]));
+  }
+  const canopy = mergeUv(THREE, canopyPlanes);
 
   // --- traffic signal -----------------------------------------------------
   const makeSignal = (lit) => {
@@ -384,7 +419,7 @@ export function buildProps(THREE, args) {
   });
   if (trunkMesh) trunkMesh.castShadow = !!args.shadows;
 
-  const canopyMesh = addInstanced(P.canopy, mats.vertex, trees, (d, it) => {
+  const canopyMesh = addInstanced(P.canopy, mats.foliage, trees, (d, it) => {
     d.position.set(it.x, 0, it.z);
     d.rotation.set(0, hash01(Math.round(it.x * 7 + it.z * 11)) * 6.28, 0);
     d.scale.setScalar(it.scale);
@@ -469,6 +504,14 @@ function roadDirectionNear(roads, x, z) {
 export function makePropMaterials(THREE) {
   return {
     vertex: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.88, metalness: 0 }),
+    foliage: new THREE.MeshStandardMaterial({
+      map: makeFoliageTexture(THREE),
+      alphaTest: 0.42,
+      side: THREE.DoubleSide,
+      roughness: 0.92,
+      metalness: 0,
+      vertexColors: true,
+    }),
     metal: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.45, metalness: 0.8 }),
     lampHead: new THREE.MeshBasicMaterial({ vertexColors: true }),
     stopSign: new THREE.MeshBasicMaterial({
