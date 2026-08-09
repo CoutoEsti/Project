@@ -36,6 +36,16 @@ const RING = { low: 1, medium: 2, high: 2 };
 const DETAIL_RING = { low: 1, medium: 1, high: 1 };
 const KEEP_RADIUS = 3;         // tiles kept alive beyond the build ring
 
+// How far the horizon plane sits below the ground you are standing on.
+//
+// That plane exists only so unbuilt distance shows ground colour instead of
+// sky. It used to sit at a fixed −8 cm, which was correct while the world was
+// flat — and the moment relief arrived it punched through every street that
+// sloped downhill and swallowed it. Forty metres clears anything Montréal
+// does within sight, and at four kilometres it is half a degree below the
+// true horizon, which nobody can see.
+const BACKDROP_DROP = 40;
+
 // Hysteresis: upgrade a tile when it comes within the detail ring, but do not
 // downgrade it until it is well outside. Without the gap, driving along a
 // boundary would rebuild the same tile every few seconds.
@@ -81,7 +91,8 @@ export class World {
       }),
     );
     this.backdrop.rotation.x = -Math.PI / 2;
-    this.backdrop.position.y = -0.08;
+    // Height is set per frame in update() — see BACKDROP_DROP.
+    this.backdrop.position.y = -BACKDROP_DROP;
     this.backdrop.receiveShadow = false;
     this.group.add(this.backdrop);
 
@@ -127,6 +138,8 @@ export class World {
     const ll = this.projection.toLatLon(x, z);
     const centre = tileAt(ll.lat, ll.lon, ZOOM);
     const ring = this.ring;
+
+    this.backdrop.position.y = this.terrain.height(ll.lat, ll.lon) - BACKDROP_DROP;
 
     for (let dy = -ring; dy <= ring; dy++) {
       for (let dx = -ring; dx <= ring; dx++) {

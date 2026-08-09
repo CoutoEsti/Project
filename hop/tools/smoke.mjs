@@ -443,6 +443,24 @@ async function main() {
     }
     return { worst, at, anchored: g.world.terrain.baselineReady, baseline: g.world.terrain.baseline };
   });
+  // The horizon plane must stay under every bit of ground you can see, or it
+  // hides the street you are driving on.
+  const horizon = await page.evaluate(() => {
+    const g = window.__ruelle;
+    const v = g.vehicle;
+    let lowest = Infinity;
+    for (let dz = -600; dz <= 600; dz += 60) {
+      for (let dx = -600; dx <= 600; dx += 60) {
+        lowest = Math.min(lowest, g.world.groundHeight(v.x + dx, v.z + dz));
+      }
+    }
+    return { plane: g.world.backdrop.position.y, lowest };
+  });
+  note(`plan d'horizon à ${horizon.plane.toFixed(1)} m, sol le plus bas ${horizon.lowest.toFixed(1)} m`);
+  if (horizon.plane > horizon.lowest) {
+    problem('le plan d’horizon perce le sol et masque la rue');
+  }
+
   note(`continuité du sol : plus gros saut ${continuity.worst.toFixed(1)} m sur 50 m`
     + ` · ancrage ${continuity.anchored ? `${continuity.baseline.toFixed(0)} m` : 'provisoire'}`);
   if (relief.enabled && relief.loaded > 0 && !continuity.anchored) {
