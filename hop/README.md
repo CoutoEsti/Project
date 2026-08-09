@@ -103,6 +103,9 @@ débattements qui vont avec.
 
 Volontairement écartés : trafic, imagerie satellite.
 
+Les idées de *jeu* — météo réelle de Montréal, neige, garage et pièces moteur —
+sont dans [`IDEES.md`](IDEES.md). Cette liste-ci reste la liste technique.
+
 ---
 
 ## Comment c'est construit
