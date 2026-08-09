@@ -421,6 +421,37 @@ async function main() {
     problem('le relief est chargé mais le mont Royal reste plat');
   }
 
+  // The ground has to be continuous. Reading not-yet-loaded elevation as sea
+  // level puts a forty-metre cliff at the edge of the data — the city drops
+  // through the floor and the car is left on a mesa. Real terrain never steps
+  // that hard over fifty metres, so a big jump means missing data, not a hill.
+  const continuity = await page.evaluate(() => {
+    const g = window.__ruelle;
+    const v = g.vehicle;
+    let worst = 0, at = null;
+    const STEP = 50;
+    for (let dz = -400; dz <= 400; dz += STEP) {
+      let prev = null;
+      for (let dx = -400; dx <= 400; dx += STEP) {
+        const h = g.world.groundHeight(v.x + dx, v.z + dz);
+        if (prev !== null && Math.abs(h - prev) > worst) {
+          worst = Math.abs(h - prev);
+          at = [dx, dz];
+        }
+        prev = h;
+      }
+    }
+    return { worst, at, anchored: g.world.terrain.baselineReady, baseline: g.world.terrain.baseline };
+  });
+  note(`continuité du sol : plus gros saut ${continuity.worst.toFixed(1)} m sur 50 m`
+    + ` · ancrage ${continuity.anchored ? `${continuity.baseline.toFixed(0)} m` : 'provisoire'}`);
+  if (relief.enabled && relief.loaded > 0 && !continuity.anchored) {
+    problem('l’altitude de référence n’a jamais été résolue');
+  }
+  if (continuity.worst > 25) {
+    problem(`falaise de ${continuity.worst.toFixed(0)} m dans le sol — données d’altitude manquantes lues comme le niveau de la mer`);
+  }
+
   // --- skill chain ----------------------------------------------------------
   const scoring = await page.evaluate(async () => {
     const g = window.__ruelle;

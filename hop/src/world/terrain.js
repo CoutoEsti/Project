@@ -32,7 +32,10 @@ export class Terrain {
     this.enabled = opts.enabled !== false;
     this.exaggeration = opts.exaggeration ?? 1;
     this.tiles = new Map();      // key -> Float32Array(256×256) | 'pending' | 'failed'
-    this.baseline = null;        // height at the hop origin, so the world starts at y≈0
+    this.baseline = 0;           // height at the hop origin, so the world starts at y≈0
+    this.baselineReady = false;  // false until the origin's own tile has landed
+    this.originLat = 0;
+    this.originLon = 0;
     this.ready = false;
   }
 
@@ -62,6 +65,19 @@ export class Terrain {
     this.ready = true;
   }
 
+  /**
+   * Load just the tile the hop lands in, and fix the anchor to it.
+   *
+   * Worth having separately from `ensure`: no map tile may be built before
+   * this resolves, because a ground mesh bakes its displacement at build time
+   * and a tile built against a provisional anchor is wrong for good.
+   */
+  async ensureOrigin(lat, lon) {
+    if (!this.enabled) return;
+    await this.ensure({ north: lat, south: lat, east: lon, west: lon });
+    this._resolveBaseline();
+  }
+
   async _load(x, y, key) {
     try {
       const res = await fetch(`${ENDPOINT}/${ZOOM}/${x}/${y}.png`);
@@ -81,19 +97,29 @@ export class Terrain {
         heights[i] = data[o] * 256 + data[o + 1] + data[o + 2] / 256 - 32768;
       }
       this.tiles.set(key, heights);
+      // The origin's own tile may only have arrived now; until it does, every
+      // height in the world is measured against a placeholder.
+      this._resolveBaseline();
     } catch {
       this.tiles.set(key, 'failed');
     }
   }
 
-  /** Raw metres above sea level at a coordinate, or 0 if not loaded. */
-  sample(lat, lon) {
-    if (!this.enabled) return 0;
+  /**
+   * Metres above sea level, or null where the data has not arrived.
+   *
+   * The null matters. Reading missing ground as sea level puts a forty-metre
+   * cliff at the edge of whatever has loaded, and Montréal sits about forty
+   * metres up — so the entire not-yet-loaded city drops through the floor and
+   * the player is left standing on a mesa. Callers substitute the baseline,
+   * which reads as "flat, at the height you started".
+   */
+  _raw(lat, lon) {
     const fx = lonToTileX(lon, ZOOM);
     const fy = latToTileY(lat, ZOOM);
     const tx = Math.floor(fx), ty = Math.floor(fy);
     const heights = this.tiles.get(this._key(tx, ty));
-    if (!heights || heights === 'pending' || heights === 'failed') return 0;
+    if (!heights || heights === 'pending' || heights === 'failed') return null;
 
     // Bilinear inside the tile.
     const px = (fx - tx) * TILE_PX;
@@ -108,6 +134,13 @@ export class Terrain {
     return (a + (b - a) * sx) + ((c + (d - c) * sx) - (a + (b - a) * sx)) * sy;
   }
 
+  /** Metres above sea level, with missing ground held at the origin's height. */
+  sample(lat, lon) {
+    if (!this.enabled) return 0;
+    const h = this._raw(lat, lon);
+    return h === null ? this.baseline : h;
+  }
+
   /**
    * Height relative to the hop origin, smoothed.
    *
@@ -117,7 +150,7 @@ export class Terrain {
    */
   height(lat, lon) {
     if (!this.enabled) return 0;
-    if (this.baseline === null) this.baseline = this.sample(lat, lon);
+    if (!this.baselineReady) this._resolveBaseline();
 
     // ~40 m offsets, in degrees at this latitude.
     const dLat = 0.00036;
@@ -129,10 +162,28 @@ export class Terrain {
     return (h - this.baseline) * this.exaggeration;
   }
 
-  /** Anchor the world so the place you hopped into sits at y = 0. */
+  /**
+   * Anchor the world so the place you hopped into sits at y = 0.
+   *
+   * The anchor cannot be computed here: a hop is synchronous and the elevation
+   * tile covering it is a network round trip away. So it is provisional until
+   * that tile lands, and every unloaded sample reads as the anchor in the
+   * meantime — which keeps the world flat and continuous rather than terraced.
+   */
   setOrigin(lat, lon) {
-    this.baseline = null;
-    this.baseline = this.sample(lat, lon);
+    this.originLat = lat;
+    this.originLon = lon;
+    this.baseline = 0;
+    this.baselineReady = false;
+    this._resolveBaseline();
+  }
+
+  _resolveBaseline() {
+    if (this.baselineReady || !this.enabled) return;
+    const h = this._raw(this.originLat, this.originLon);
+    if (h === null) return;
+    this.baseline = h;
+    this.baselineReady = true;
   }
 
   /** Convenience: height at a world-space position, given the projection. */

@@ -98,6 +98,9 @@ export class World {
     this.projection = new Projection(lat, lon);
     this.terrain.setOrigin(lat, lon);
     this.clear();
+    // Nothing may build until the elevation anchor is real — see
+    // Terrain.ensureOrigin. Failures resolve too; flat is a fine fallback.
+    this._originTerrain = this.terrain.ensureOrigin(lat, lon).catch(() => {});
   }
 
   /** Height of the ground at a world position. */
@@ -191,6 +194,7 @@ export class World {
     Promise.all([
       this.source.getTile(ZOOM, tx, ty, signal),
       this.terrain.ensure(geo),
+      this._originTerrain,
     ]).then(([res]) => {
       if (signal.aborted || !this.tiles.has(key)) return;
       tile.elements = res.elements;
@@ -537,7 +541,11 @@ export class World {
   setNight(night) {
     const n = Math.max(0, Math.min(1, night));
     this.materials.wall.emissiveIntensity = n * 0.95;
-    this.materials.lightPool.opacity = n * 0.72;
+    // The halo under a streetlamp is additive, so on a dusk-lit lawn a linear
+    // ramp shows up as a pale disc long before the lamp would actually be
+    // doing anything. Squaring it holds the halo back until the ground is
+    // genuinely dark, which is when a real one becomes visible.
+    this.materials.lightPool.opacity = n * n * 0.62;
     this.materials.props.lampHead.color.setRGB(
       0.35 + n * 0.65, 0.30 + n * 0.56, 0.22 + n * 0.40,
     );
