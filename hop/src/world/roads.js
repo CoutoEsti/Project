@@ -248,10 +248,12 @@ export function sampleAt(points, s, out = { x: 0, z: 0, tx: 0, tz: 0 }) {
 
 /** Accumulates flat, y-up quads with vertex colours into plain arrays. */
 export class StripBuilder {
-  constructor() {
+  /** @param {?(x:number,z:number)=>number} groundAt terrain height, or null */
+  constructor(groundAt = null) {
     this.positions = [];
     this.colors = [];
     this.indices = [];
+    this.groundAt = groundAt;
   }
 
   get count() { return this.positions.length / 3; }
@@ -266,12 +268,16 @@ export class StripBuilder {
     if (len < 1e-5) return;
     const nx = (-dz / len) * (width / 2);
     const nz = (dx / len) * (width / 2);
+    // One sample at the centre is plenty: a marking is centimetres wide and
+    // a couple of metres long, far below anything the terrain can resolve.
+    const lift = this.groundAt ? this.groundAt((ax + bx) / 2, (az + bz) / 2) : 0;
+    const yy = y + lift;
     const i = this.count;
     this.positions.push(
-      ax - nx, y, az - nz,
-      ax + nx, y, az + nz,
-      bx + nx, y, bz + nz,
-      bx - nx, y, bz - nz,
+      ax - nx, yy, az - nz,
+      ax + nx, yy, az + nz,
+      bx + nx, yy, bz + nz,
+      bx - nx, yy, bz - nz,
     );
     for (let k = 0; k < 4; k++) this.colors.push(r, g, bl);
     this.indices.push(i, i + 1, i + 2, i, i + 2, i + 3);

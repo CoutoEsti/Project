@@ -83,12 +83,27 @@ async function main() {
 
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 
+  // Serve the elevation tiles from disk. The test then verifies that Mount
+  // Royal is actually a hill rather than hoping AWS is reachable — and it
+  // stays honest on a machine with no network at all.
+  await page.route('**/elevation-tiles-prod/**', async (route) => {
+    const m = route.request().url().match(/terrarium\/(\d+)\/(\d+)\/(\d+)\.png/);
+    if (!m) return route.abort();
+    const file = path.join(ROOT, 'tools', 'fixtures', 'terrarium', m[1], m[2], `${m[3]}.png`);
+    try {
+      route.fulfill({ status: 200, contentType: 'image/png', body: await fs.readFile(file) });
+    } catch {
+      route.fulfill({ status: 404, body: '' });
+    }
+  });
+
   page.on('console', (msg) => {
     const type = msg.type();
     const text = msg.text();
     // A 404 on an optional asset is reported by the browser as a console
     // error even when the code handles it; filter those, not real errors.
     if (type === 'error' && /\/models\/|404 \(Not Found\)/.test(text)) return;
+    if (type === 'error' && /elevation-tiles-prod|ERR_CONNECTION_RESET/.test(text)) return;
     if (type === 'error') problem(`console.error: ${text}`);
     else if (type === 'warning' && !/deprecat|Multiple instances/i.test(text)) {
       note(`console.warn: ${text}`);
@@ -98,7 +113,8 @@ async function main() {
   page.on('requestfailed', (req) => {
     const url = req.url();
     if (url.includes('nominatim') || url.includes('overpass')) return;
-    if (url.includes('/models/')) return;   // optional assets
+    if (url.includes('/models/')) return;              // optional assets
+    if (url.includes('elevation-tiles-prod')) return;  // optional elevation
     problem(`request failed: ${url} — ${req.failure()?.errorText}`);
   });
 
@@ -386,6 +402,24 @@ async function main() {
   });
   if (traffic > 0) problem(`des voitures garées sont encore générées (${traffic / 4} objets)`);
   else note('aucun autre véhicule dans le monde');
+
+  // --- terrain --------------------------------------------------------------
+  const relief = await page.evaluate(() => {
+    const g = window.__ruelle;
+    const t = g.world.terrain;
+    let loaded = 0, failed = 0;
+    for (const v of t.tiles.values()) {
+      if (v === 'failed') failed++; else if (v !== 'pending') loaded++;
+    }
+    // Mount Royal's summit against the Plateau, in metres.
+    const summit = t.height(45.5040, -73.5875);
+    const flat = t.height(45.5265, -73.5795);
+    return { loaded, failed, summit, flat, enabled: t.enabled };
+  });
+  note(`relief : ${relief.loaded} tuiles d'altitude, ${relief.failed} échouées · mont Royal ${relief.summit.toFixed(0)} m contre ${relief.flat.toFixed(0)} m au Plateau`);
+  if (relief.enabled && relief.loaded > 0 && Math.abs(relief.summit - relief.flat) < 15) {
+    problem('le relief est chargé mais le mont Royal reste plat');
+  }
 
   // --- skill chain ----------------------------------------------------------
   const scoring = await page.evaluate(async () => {

@@ -396,8 +396,9 @@ export function buildProps(THREE, args) {
 
   const mats = args.materials;
 
+  const lift = args.groundAt || (() => 0);
   const placeUpright = (d, it) => {
-    d.position.set(it.x, 0, it.z);
+    d.position.set(it.x, lift(it.x, it.z), it.z);
     d.rotation.set(0, it.yaw || 0, 0);
     d.scale.set(1, 1, 1);
   };
@@ -415,14 +416,15 @@ export function buildProps(THREE, args) {
   }
 
   const poolMesh = addInstanced(P.pool, mats.lightPool, lamps, (d, it) => {
-    d.position.set(it.x + Math.cos(it.yaw) * 1.2, 0.04, it.z + Math.sin(it.yaw) * 1.2);
+    const px = it.x + Math.cos(it.yaw) * 1.2, pz = it.z + Math.sin(it.yaw) * 1.2;
+    d.position.set(px, lift(px, pz) + 0.04, pz);
     d.rotation.set(0, 0, 0);
     d.scale.set(1, 1, 1);
   });
   if (poolMesh) poolMesh.renderOrder = 2;
 
   const placeTree = (d, it) => {
-    d.position.set(it.x, 0, it.z);
+    d.position.set(it.x, lift(it.x, it.z), it.z);
     d.rotation.set(0, hash01(Math.round(it.x * 7 + it.z * 11)) * 6.28, 0);
     d.scale.setScalar(it.scale);
   };
@@ -437,7 +439,7 @@ export function buildProps(THREE, args) {
     }
   } else {
     const trunkMesh = addInstanced(P.trunk, mats.vertex, trees, (d, it) => {
-      d.position.set(it.x, 0, it.z);
+      d.position.set(it.x, lift(it.x, it.z), it.z);
       d.rotation.set(0, hash01(Math.round(it.x * 3 + it.z * 5)) * 6.28, 0);
       d.scale.setScalar(it.scale);
     });

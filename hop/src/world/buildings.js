@@ -226,7 +226,21 @@ export function buildBuildings(THREE, buildings, roads, opts = {}) {
     const tags = b.tags || {};
     const seed = hashId(b.id);
     const height = heightFor(tags);
+    // A footprint on a slope has to start at its lowest corner and be buried
+    // deep enough that no gap opens under the uphill wall.
+    let base = 0, foot = 0;
+    if (opts.groundAt) {
+      let lo = Infinity, hi = -Infinity;
+      for (const p of ring) {
+        const h = opts.groundAt(p.x, p.z);
+        if (h < lo) lo = h;
+        if (h > hi) hi = h;
+      }
+      base = lo;
+      foot = Math.min(6, hi - lo + 0.6);
+    }
     prepared.push({
+      base, foot,
       ring: ringArea(ring) > 0 ? ring : ring.slice().reverse(),
       area, seed, height, tags,
       colour: wallColor(tags, seed),
@@ -238,7 +252,7 @@ export function buildBuildings(THREE, buildings, roads, opts = {}) {
 
   // --- pass 2: emit ---------------------------------------------------------
   for (let bi = 0; bi < prepared.length; bi++) {
-    const { ring: ordered, area, seed, height, colour, bandStart } = prepared[bi];
+    const { ring: ordered, area, seed, height, colour, bandStart, base, foot } = prepared[bi];
     const b = { tags: prepared[bi].tags, id: seed };
 
     // Cumulative distance keeps window bays running around corners rather
@@ -251,14 +265,14 @@ export function buildBuildings(THREE, buildings, roads, opts = {}) {
       const len = Math.hypot(c.x - a.x, c.z - a.z);
       if (len < 0.05) continue;
       const occ = neighbours.occlusion(a, c, len, bi);
-      walls.wall(a.x, a.z, c.x, c.z, 0, height, u, bandStart, colour, occ);
+      walls.wall(a.x, a.z, c.x, c.z, base - foot, base + height, u, bandStart, colour, occ);
       u += len;
       colliders.push(a.x, a.z, c.x, c.z);
     }
 
     // Roof
     const roofColour = [colour[0] * 0.5 + 0.10, colour[1] * 0.5 + 0.10, colour[2] * 0.5 + 0.11];
-    addCap(THREE, caps, ordered, height, roofColour);
+    addCap(THREE, caps, ordered, base + height, roofColour);
 
     // Parapet: a thin lip around flat roofs. Cheap, and it stops the roofline
     // from looking like a sheet of paper.
@@ -270,11 +284,11 @@ export function buildBuildings(THREE, buildings, roads, opts = {}) {
         const len = Math.hypot(c.x - a.x, c.z - a.z);
         if (len < 0.4) continue;
         const yaw = Math.atan2(c.z - a.z, c.x - a.x);
-        caps.box((a.x + c.x) / 2, height + 0.30, (a.z + c.z) / 2,
+        caps.box((a.x + c.x) / 2, base + height + 0.30, (a.z + c.z) / 2,
                  len, 0.60, 0.52, yaw, parapetColour);
         // Cornice: a second, wider band just under the roofline. Two boxes an
         // edge is cheap, and it is what gives a row of triplexes a skyline.
-        caps.box((a.x + c.x) / 2, height - 0.34, (a.z + c.z) / 2,
+        caps.box((a.x + c.x) / 2, base + height - 0.34, (a.z + c.z) / 2,
                  len, 0.34, 0.78, yaw, parapetColour);
       }
     }
@@ -283,7 +297,7 @@ export function buildBuildings(THREE, buildings, roads, opts = {}) {
     if (opts.rooftops !== false && area > 260 && hash01(seed * 13) > 0.45) {
       const c0 = ringCentroid(ordered);
       const w = 2.2 + hash01(seed * 17) * 3;
-      caps.box(c0.x, height + 0.9, c0.z, w, 1.8, w * 0.7,
+      caps.box(c0.x, base + height + 0.9, c0.z, w, 1.8, w * 0.7,
                hash01(seed * 19) * Math.PI, [0.42, 0.42, 0.44]);
     }
 
@@ -292,7 +306,7 @@ export function buildBuildings(THREE, buildings, roads, opts = {}) {
       const levels = num((b.tags || {})['building:levels']);
       const isWalkup = (Number.isFinite(levels) ? levels >= 2 && levels <= 4 : height >= 7 && height <= 14);
       if (isWalkup && hash01(seed * 23) > 0.25) {
-        addStaircase(caps, ordered, roads, colour, seed);
+        addStaircase(caps, ordered, roads, colour, seed, base);
       }
     }
 
@@ -426,7 +440,7 @@ function addCap(THREE, mb, ring, y, colour) {
  * first floor, with two railings. Placed on whichever edge faces the nearest
  * road, so it never ends up in a back yard.
  */
-function addStaircase(mb, ring, roads, wallColour, seed) {
+function addStaircase(mb, ring, roads, wallColour, seed, base = 0) {
   const centre = ringCentroid(ring);
   const target = nearestRoadTarget(roads, centre.x, centre.z);
   if (!target) return;
@@ -455,6 +469,7 @@ function addStaircase(mb, ring, roads, wallColour, seed) {
 
   const yaw = Math.atan2(nz, nx);
   const rise = 3.05;
+  const y0 = base;
   const run = 2.3;
   const steps = 6;
   const stepColour = [0.52, 0.50, 0.48];
@@ -477,7 +492,7 @@ function addStaircase(mb, ring, roads, wallColour, seed) {
     const t = (i + 0.5) / steps;
     const top = rise * ((i + 1) / steps);
     const outward = run * (1 - t);
-    mb.box(baseX + nx * outward, top, baseZ + nz * outward,
+    mb.box(baseX + nx * outward, y0 + top, baseZ + nz * outward,
            1.05, 0.09, run / steps + 0.16, yaw, stepColour);
   }
 
@@ -485,24 +500,26 @@ function addStaircase(mb, ring, roads, wallColour, seed) {
   const midOut = run / 2;
   const stringerLen = Math.hypot(rise, run);
   for (const side of [-1, 1]) {
-    mb.box(baseX + nx * midOut + ax * side * 0.52, rise / 2, baseZ + nz * midOut + az * side * 0.52,
+    mb.box(baseX + nx * midOut + ax * side * 0.52, y0 + rise / 2, baseZ + nz * midOut + az * side * 0.52,
            0.09, stringerLen * 0.92, 0.22, yaw, railColour);
   }
 
   // Small landing at the door.
-  mb.box(baseX + nx * 0.26, rise + 0.09, baseZ + nz * 0.26, 1.25, 0.14, 0.72, yaw, stepColour);
+  mb.box(baseX + nx * 0.26, y0 + rise + 0.09, baseZ + nz * 0.26, 1.25, 0.14, 0.72, yaw, stepColour);
 
   // Two inclined railings, approximated by three short segments each.
   for (const side of [-1, 1]) {
     for (let k = 0; k < 2; k++) {
       const t0 = k / 2, t1 = (k + 1) / 2;
-      const y0 = 0.55 + rise * t0, y1 = 0.55 + rise * t1;
+      // Named ya/yb, not y0/y1: the outer y0 is the building's base height and
+      // shadowing it here would drop every railing back to sea level.
+      const ya = y0 + 0.55 + rise * t0, yb = y0 + 0.55 + rise * t1;
       const o0 = run * (1 - t0), o1 = run * (1 - t1);
       const cx = baseX + nx * (o0 + o1) / 2 + ax * side * 0.56;
       const cz = baseZ + nz * (o0 + o1) / 2 + az * side * 0.56;
-      const dy = y1 - y0;
+      const dy = yb - ya;
       const dh = Math.hypot(o1 - o0, 0);
-      mb.box(cx, (y0 + y1) / 2, cz, 0.07, Math.hypot(dy, dh), 0.07, yaw, railColour);
+      mb.box(cx, (ya + yb) / 2, cz, 0.07, Math.hypot(dy, dh), 0.07, yaw, railColour);
     }
     // Balusters: the wrought iron is most of what you actually see of a
     // Montréal staircase from a car.
@@ -510,7 +527,7 @@ function addStaircase(mb, ring, roads, wallColour, seed) {
       const t = k / 3;
       const out = run * (1 - t);
       const y = 0.5 + rise * t;
-      mb.box(baseX + nx * out + ax * side * 0.56, y / 2 + rise * t * 0.5,
+      mb.box(baseX + nx * out + ax * side * 0.56, y0 + y / 2 + rise * t * 0.5,
              baseZ + nz * out + az * side * 0.56,
              0.05, y, 0.05, yaw, railColour);
     }

@@ -15,6 +15,7 @@ const PRESETS = [
   { name: 'Mile End', sub: 'Saint-Viateur', lat: 45.5230, lon: -73.5990 },
   { name: 'Vieux-Montréal', sub: 'Place Jacques-Cartier', lat: 45.5065, lon: -73.5540 },
   { name: 'Centre-ville', sub: 'Sainte-Catherine', lat: 45.5015, lon: -73.5700 },
+  { name: 'Mont-Royal', sub: 'Voie Camillien-Houde', lat: 45.5100, lon: -73.5880 },
   { name: 'Rosemont', sub: 'Beaubien', lat: 45.5400, lon: -73.5830 },
   { name: 'Saint-Léonard', sub: 'Grandes-Prairies', lat: 45.5880, lon: -73.5940 },
 ];
@@ -167,6 +168,7 @@ export class Menu {
     bind('#set-weather', 'weather');
     bind('#set-units', 'units');
     bind('#set-time', 'timeOfDay', Number, 'input');
+    bind('#set-terrain', 'terrain');
     bind('#set-autotime', 'autoTime');
     bind('#set-fps', 'showFps');
   }

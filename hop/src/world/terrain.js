@@ -1,0 +1,144 @@
+// Ground elevation, from the Mapzen terrain tiles hosted on AWS Open Data.
+//
+// The "terrarium" encoding packs metres into a PNG:
+//     height = red · 256 + green + blue / 256 − 32768
+// which gives a centimetre of precision over the whole range of the planet,
+// in an image any browser can decode. No key, CORS open, free.
+//
+// The catch is resolution. These tiles come from SRTM and friends at about
+// thirty metres a sample, which is fine for the shape of a mountain and far
+// too coarse for a road — sampled raw, a street inherits every stair-step of
+// the source data and the car judders. So the sampler blurs: it reads a small
+// neighbourhood and weights it, which costs nothing and turns the staircase
+// into the smooth ramp a road actually is.
+
+const ENDPOINT = 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium';
+const ZOOM = 12;               // ≈9.5 km a tile at this latitude
+const TILE_PX = 256;
+
+const DEG = Math.PI / 180;
+
+function lonToTileX(lon, z) { return ((lon + 180) / 360) * Math.pow(2, z); }
+function latToTileY(lat, z) {
+  const p = lat * DEG;
+  return ((1 - Math.log(Math.tan(p) + 1 / Math.cos(p)) / Math.PI) / 2) * Math.pow(2, z);
+}
+
+export class Terrain {
+  /**
+   * @param {object} opts {enabled:boolean, exaggeration:number}
+   */
+  constructor(opts = {}) {
+    this.enabled = opts.enabled !== false;
+    this.exaggeration = opts.exaggeration ?? 1;
+    this.tiles = new Map();      // key -> Float32Array(256×256) | 'pending' | 'failed'
+    this.baseline = null;        // height at the hop origin, so the world starts at y≈0
+    this.ready = false;
+  }
+
+  _key(x, y) { return `${x}/${y}`; }
+
+  /**
+   * Load every elevation tile covering a geographic box. Resolves when they
+   * have all settled; failures are silent and read as flat ground.
+   */
+  async ensure(bounds) {
+    if (!this.enabled) return;
+    const x0 = Math.floor(lonToTileX(bounds.west, ZOOM));
+    const x1 = Math.floor(lonToTileX(bounds.east, ZOOM));
+    const y0 = Math.floor(latToTileY(bounds.north, ZOOM));
+    const y1 = Math.floor(latToTileY(bounds.south, ZOOM));
+
+    const jobs = [];
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        const key = this._key(x, y);
+        if (this.tiles.has(key)) continue;
+        this.tiles.set(key, 'pending');
+        jobs.push(this._load(x, y, key));
+      }
+    }
+    await Promise.all(jobs);
+    this.ready = true;
+  }
+
+  async _load(x, y, key) {
+    try {
+      const res = await fetch(`${ENDPOINT}/${ZOOM}/${x}/${y}.png`);
+      if (!res.ok) throw new Error(String(res.status));
+      const bitmap = await createImageBitmap(await res.blob());
+
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = TILE_PX;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      ctx.drawImage(bitmap, 0, 0, TILE_PX, TILE_PX);
+      const data = ctx.getImageData(0, 0, TILE_PX, TILE_PX).data;
+      bitmap.close();
+
+      const heights = new Float32Array(TILE_PX * TILE_PX);
+      for (let i = 0; i < heights.length; i++) {
+        const o = i * 4;
+        heights[i] = data[o] * 256 + data[o + 1] + data[o + 2] / 256 - 32768;
+      }
+      this.tiles.set(key, heights);
+    } catch {
+      this.tiles.set(key, 'failed');
+    }
+  }
+
+  /** Raw metres above sea level at a coordinate, or 0 if not loaded. */
+  sample(lat, lon) {
+    if (!this.enabled) return 0;
+    const fx = lonToTileX(lon, ZOOM);
+    const fy = latToTileY(lat, ZOOM);
+    const tx = Math.floor(fx), ty = Math.floor(fy);
+    const heights = this.tiles.get(this._key(tx, ty));
+    if (!heights || heights === 'pending' || heights === 'failed') return 0;
+
+    // Bilinear inside the tile.
+    const px = (fx - tx) * TILE_PX;
+    const py = (fy - ty) * TILE_PX;
+    const ix = Math.max(0, Math.min(TILE_PX - 2, Math.floor(px)));
+    const iy = Math.max(0, Math.min(TILE_PX - 2, Math.floor(py)));
+    const sx = px - ix, sy = py - iy;
+    const a = heights[iy * TILE_PX + ix];
+    const b = heights[iy * TILE_PX + ix + 1];
+    const c = heights[(iy + 1) * TILE_PX + ix];
+    const d = heights[(iy + 1) * TILE_PX + ix + 1];
+    return (a + (b - a) * sx) + ((c + (d - c) * sx) - (a + (b - a) * sx)) * sy;
+  }
+
+  /**
+   * Height relative to the hop origin, smoothed.
+   *
+   * The smoothing is the whole reason a car can drive on this. Thirty-metre
+   * samples produce visible terraces; averaging a small cross around the point
+   * flattens them into a gradient without losing the hill itself.
+   */
+  height(lat, lon) {
+    if (!this.enabled) return 0;
+    if (this.baseline === null) this.baseline = this.sample(lat, lon);
+
+    // ~40 m offsets, in degrees at this latitude.
+    const dLat = 0.00036;
+    const dLon = dLat / Math.max(0.2, Math.cos(lat * DEG));
+    const h = this.sample(lat, lon) * 0.44
+      + (this.sample(lat + dLat, lon) + this.sample(lat - dLat, lon)
+       + this.sample(lat, lon + dLon) + this.sample(lat, lon - dLon)) * 0.14;
+
+    return (h - this.baseline) * this.exaggeration;
+  }
+
+  /** Anchor the world so the place you hopped into sits at y = 0. */
+  setOrigin(lat, lon) {
+    this.baseline = null;
+    this.baseline = this.sample(lat, lon);
+  }
+
+  /** Convenience: height at a world-space position, given the projection. */
+  heightAt(projection, x, z) {
+    if (!this.enabled || !projection) return 0;
+    const ll = projection.toLatLon(x, z);
+    return this.height(ll.lat, ll.lon);
+  }
+}

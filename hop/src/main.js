@@ -111,6 +111,8 @@ class Game {
     this._camLook = new THREE.Vector3();
     this._orbitAngle = 0;
     this.headlightsOn = false;
+    this.groundY = 0;
+    this.slope = 0;
     this.spawned = false;
     this.placeLabel = '';
     this._spawnRetry = 0;
@@ -451,12 +453,20 @@ class Game {
         handbrake: this.input.handbrake,
       }, grids);
 
+      // Gravity along the slope, applied after the step: a hill should cost
+      // you speed going up and give it back coming down. The physics itself
+      // stays two-dimensional, which is what keeps it stable.
+      if (this.slope) {
+        this.vehicle.u -= Math.sin(this.slope) * 9.81 * dt;
+      }
+
       if (this.vehicle.lastImpact > 1.2) this.audio.impact(this.vehicle.lastImpact);
       this.score.update(
         dt, this.vehicle,
         nearestObstacle(this.vehicle.x, this.vehicle.z, this.vehicle.yaw, grids),
       );
       if (this.trial) {
+        this.trial.groundAt = (x, z) => this.world.groundHeight(x, z);
         this.trial.update(dt, {
           x: this.vehicle.x, z: this.vehicle.z, yaw: this.vehicle.yaw, speed: this.vehicle.speed,
         });
@@ -514,15 +524,28 @@ class Game {
     }
 
     // --- car ---------------------------------------------------------------
-    this.car.group.position.set(v.x, 0, v.z);
-    this.car.group.rotation.set(v.bodyPitch, v.yaw, -v.bodyRoll, 'YXZ');
+    // Read the ground under the nose and the tail: the difference is the
+    // slope, which both tilts the car and pulls on it.
+    const gx = Math.sin(v.yaw), gz = Math.cos(v.yaw);
+    const hMid = this.world.groundHeight(v.x, v.z);
+    const hNose = this.world.groundHeight(v.x + gx * 2.1, v.z + gz * 2.1);
+    const hTail = this.world.groundHeight(v.x - gx * 2.1, v.z - gz * 2.1);
+    const slope = Math.atan2(hNose - hTail, 4.2);
+    this.groundY = hMid;
+    this.slope = slope;
+
+    this.car.group.position.set(v.x, hMid, v.z);
+    this.car.group.rotation.set(v.bodyPitch - slope, v.yaw, -v.bodyRoll, 'YXZ');
     this.car.setSteer(v.steerAngle);
     this.car.setSpin(v.wheelSpin);
     const nightLights = this.headlightsOn || this.sky.night > 0.35;
     this.car.setLights(nightLights, this.input.brake > 0.1 && v.u > 0.5);
     const fx2 = Math.sin(v.yaw), fz2 = Math.cos(v.yaw);
-    this.headlight.position.set(v.x + fx2 * 2.0, 0.9, v.z + fz2 * 2.0);
-    this.headlight.target.position.set(v.x + fx2 * 26, 0.1, v.z + fz2 * 26);
+    this.headlight.position.set(v.x + fx2 * 2.0, hMid + 0.9, v.z + fz2 * 2.0);
+    this.headlight.target.position.set(
+      v.x + fx2 * 26, this.world.groundHeight(v.x + fx2 * 26, v.z + fz2 * 26) + 0.1,
+      v.z + fz2 * 26,
+    );
     this.headlight.target.updateMatrixWorld();
     this.headlight.intensity = nightLights ? 240 * Math.max(0.25, this.sky.night) : 0;
 
@@ -640,8 +663,10 @@ class Game {
     const speedT = Math.min(1, v.speed / 45);
 
     if (this.cameraMode === 'hood') {
-      this.camera.position.set(v.x + fx * 0.35, 1.32, v.z + fz * 0.35);
-      this._camLook.set(v.x + fx * 40, 1.1, v.z + fz * 40);
+      const gy = this.groundY || 0;
+      this.camera.position.set(v.x + fx * 0.35, gy + 1.32, v.z + fz * 0.35);
+      this._camLook.set(v.x + fx * 40, gy + 1.1 + Math.sin(this.slope || 0) * 20,
+                        v.z + fz * 40);
       this.camera.lookAt(this._camLook);
       this.camera.fov = 68 + speedT * 8;
       this.camera.updateProjectionMatrix();
@@ -651,10 +676,11 @@ class Game {
     if (this.cameraMode === 'orbit') {
       this._orbitAngle += dt * 0.25;
       const r = 13;
+      const gy = this.groundY || 0;
       this.camera.position.set(
-        v.x + Math.cos(this._orbitAngle) * r, 5.5, v.z + Math.sin(this._orbitAngle) * r,
+        v.x + Math.cos(this._orbitAngle) * r, gy + 5.5, v.z + Math.sin(this._orbitAngle) * r,
       );
-      this.camera.lookAt(v.x, 1.0, v.z);
+      this.camera.lookAt(v.x, gy + 1.0, v.z);
       this.camera.fov = 55;
       this.camera.updateProjectionMatrix();
       return;
@@ -673,7 +699,8 @@ class Game {
     const k = 1 - Math.pow(0.0016, dt);
     this._camPos.x += (targetX - this._camPos.x) * k;
     this._camPos.z += (targetZ - this._camPos.z) * k;
-    this._camPos.y += (height - this._camPos.y) * (1 - Math.pow(0.004, dt));
+    const gy = this.groundY || 0;
+    this._camPos.y += ((gy + height) - this._camPos.y) * (1 - Math.pow(0.004, dt));
 
     // Never let the camera sink into the road, and never let it end up inside
     // the building behind you — pull it in to the last clear point instead.
@@ -686,8 +713,10 @@ class Game {
         cz = v.z + (cz - v.z) * t;
       }
     }
-    this.camera.position.set(cx, Math.max(1.4, this._camPos.y), cz);
-    this._camLook.set(v.x + fx * 7, 1.35, v.z + fz * 7);
+    // Never let the camera sink below the ground it is flying over.
+    const camGround = this.world.groundHeight(cx, cz);
+    this.camera.position.set(cx, Math.max(camGround + 1.4, this._camPos.y), cz);
+    this._camLook.set(v.x + fx * 7, gy + 1.35, v.z + fz * 7);
     this.camera.lookAt(this._camLook);
     this.camera.fov = 60 + speedT * 12;
     this.camera.updateProjectionMatrix();

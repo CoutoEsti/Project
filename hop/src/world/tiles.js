@@ -19,6 +19,7 @@ import {
   makeMarkingMaterial, makeLightPoolMaterial,
 } from './materials.js';
 import { CollisionGrid } from '../vehicle/collision.js';
+import { Terrain } from './terrain.js';
 
 export const ZOOM = 15;
 
@@ -39,6 +40,12 @@ const KEEP_RADIUS = 3;         // tiles kept alive beyond the build ring
 // downgrade it until it is well outside. Without the gap, driving along a
 // boundary would rebuild the same tile every few seconds.
 const DOWNGRADE_RING = 2;
+
+// Ground mesh subdivisions per tile. A z15 tile is ~860 m, so 48 segments give
+// an 18 m quad — just finer than the 30 m elevation data underneath, which is
+// the right place to stop: more vertices cannot invent detail the source
+// does not have.
+const GROUND_SEGMENTS = { low: 24, medium: 40, high: 48 };
 
 export class World {
   /**
@@ -82,13 +89,20 @@ export class World {
     this.requestedTiles = 0;
     this.groundRoughness = 1;
     this._groundMaterials = new Set();
+    this.terrain = new Terrain({ enabled: opts.settings.terrain !== false });
     this._abort = new AbortController();
   }
 
   /** Anchor the world. Everything after this is in metres from here. */
   setOrigin(lat, lon) {
     this.projection = new Projection(lat, lon);
+    this.terrain.setOrigin(lat, lon);
     this.clear();
+  }
+
+  /** Height of the ground at a world position. */
+  groundHeight(x, z) {
+    return this.terrain.heightAt(this.projection, x, z);
   }
 
   clear() {
@@ -174,7 +188,10 @@ export class World {
     this.requestedTiles++;
 
     const signal = this._abort.signal;
-    this.source.getTile(ZOOM, tx, ty, signal).then((res) => {
+    Promise.all([
+      this.source.getTile(ZOOM, tx, ty, signal),
+      this.terrain.ensure(geo),
+    ]).then(([res]) => {
       if (signal.aborted || !this.tiles.has(key)) return;
       tile.elements = res.elements;
       tile.source = res.source;
@@ -320,9 +337,26 @@ export class World {
     tile.roughTexture = roughTex;
 
     const { width, height } = tileSizeMetres(ZOOM, tile.x, tile.y);
-    const geo = new THREE.PlaneGeometry(Math.abs(tile.bounds.x1 - tile.bounds.x0),
-                                        Math.abs(tile.bounds.z1 - tile.bounds.z0));
     void width; void height;
+    const spanX = Math.abs(tile.bounds.x1 - tile.bounds.x0);
+    const spanZ = Math.abs(tile.bounds.z1 - tile.bounds.z0);
+    const seg = this.terrain.enabled
+      ? (GROUND_SEGMENTS[this.settings.quality] ?? 40) >> (tile.detailed ? 0 : 1)
+      : 1;
+    const geo = new THREE.PlaneGeometry(spanX, spanZ, seg, seg);
+
+    if (this.terrain.enabled) {
+      // The plane is built flat in XY and rotated later, so displacing along
+      // its local +Z is what lifts it once it is lying down.
+      const cx = (tile.bounds.x0 + tile.bounds.x1) / 2;
+      const cz = (tile.bounds.z0 + tile.bounds.z1) / 2;
+      const pos = geo.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        pos.setZ(i, this.groundHeight(cx + pos.getX(i), cz - pos.getY(i)));
+      }
+      pos.needsUpdate = true;
+      geo.computeVertexNormals();
+    }
     const groundMat = makeGroundMaterial(THREE, texture, roughTex);
     // `roughness` multiplies the roughness map, so one scalar turns every
     // painted surface glossy at once — which is exactly what rain does.
@@ -344,7 +378,7 @@ export class World {
   _structures(tile) {
     const { clipped, junctions, buildings } = tile.parsed;
 
-    const strips = new StripBuilder();
+    const strips = new StripBuilder(this.terrain.enabled ? (x, z) => this.groundHeight(x, z) : null);
     buildMarkings(clipped, junctions, strips);
     if (strips.count) {
       const geo = new THREE.BufferGeometry();
@@ -359,7 +393,9 @@ export class World {
       tile.objects.push(mesh);
     }
 
+    const groundAt = this.terrain.enabled ? (x, z) => this.groundHeight(x, z) : null;
     const built = buildBuildings(THREE, buildings, clipped, {
+      groundAt,
       staircases: tile.detailed && this.settings.quality === 'high',
       rooftops: tile.detailed && this.settings.quality !== 'low',
     });
@@ -394,6 +430,7 @@ export class World {
     }
     const props = buildProps(THREE, {
       nodes, roads: clipped, junctions, bounds: tile.bounds,
+      groundAt: this.terrain.enabled ? (x, z) => this.groundHeight(x, z) : null,
       materials: this.materials.props,
       shadows: !!this.settings.shadows && this.settings.quality === 'high',
       opts: {

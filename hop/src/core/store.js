@@ -52,6 +52,7 @@ const DEFAULT_SETTINGS = {
   camera: 'chase',      // 'chase' | 'hood' | 'orbit'
   touch: 'auto',        // 'auto' | 'on' | 'off'
   weather: 'clear',     // 'clear' | 'overcast' | 'rain'
+  terrain: true,        // ground elevation from the AWS terrain tiles
   timeOfDay: 10.5,      // hours, 0-24
   autoTime: false,
   units: 'kmh',         // 'kmh' | 'mph'

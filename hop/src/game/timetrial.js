@@ -52,6 +52,7 @@ export class TimeTrial {
     this.group.add(this.ghostCar.group);
     this.ghostTime = 0;
     this.ghostActive = false;
+    this.groundAt = null;
   }
 
   setProjection(projection) {
@@ -208,7 +209,7 @@ export class TimeTrial {
     let d = y1 - y0;
     while (d > Math.PI) d -= Math.PI * 2;
     while (d < -Math.PI) d += Math.PI * 2;
-    this.ghostCar.group.position.set(x, 0, z);
+    this.ghostCar.group.position.set(x, this.groundAt ? this.groundAt(x, z) : 0, z);
     this.ghostCar.group.rotation.y = y0 + d * f;
     this.ghostCar.group.visible = true;
   }
@@ -270,7 +271,7 @@ export class TimeTrial {
   _buildGateMesh(gate, kind) {
     const colour = kind === 'start' ? 0x35c46a : 0xe8503a;
     const g = new THREE.Group();
-    g.position.set(gate.x, 0, gate.z);
+    g.position.set(gate.x, this.groundAt ? this.groundAt(gate.x, gate.z) : 0, gate.z);
     g.rotation.y = gate.yaw;
 
     const postGeo = new THREE.BoxGeometry(0.34, 6.2, 0.34);
