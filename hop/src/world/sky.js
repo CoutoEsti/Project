@@ -151,6 +151,7 @@ export class Sky {
     this._envWallClock = 0;
     this._hours = 12;
 
+    this.weather = { saturation: 1, brightness: 1, fogScale: 1, sunScale: 1, envScale: 1 };
     this.fog = new THREE.Fog(0xb0c4d8, 60, 620);
     scene.fog = this.fog;
   }
@@ -176,7 +177,7 @@ export class Sky {
     );
 
     const elDeg = elevation * 180 / Math.PI;
-    const p = paletteAt(elDeg);
+    const p = grade(paletteAt(elDeg), this.weather);
 
     // Sun direction in world space (+X east, -Z north).
     const cosEl = Math.cos(elevation);
@@ -195,7 +196,7 @@ export class Sky {
     this.uniforms.uNight.value = this.night;
 
     this.sun.color.setRGB(p.light[0], p.light[1], p.light[2]);
-    this.sun.intensity = p.intensity * 0.85;
+    this.sun.intensity = p.intensity * 0.85 * this.weather.sunScale;
     this.sun.position.copy(dir).multiplyScalar(320);
 
     // IBL supplies most of the ambient now; the hemisphere is just fill.
@@ -209,8 +210,8 @@ export class Sky {
 
     // Fog takes the horizon colour so distance dissolves into the sky.
     this.fog.color.setRGB(p.horizon[0], p.horizon[1], p.horizon[2]);
-    this.fog.near = 120;
-    this.fog.far = 1250 + (1 - this.night) * 350;
+    this.fog.near = 120 * this.weather.fogScale;
+    this.fog.far = (1250 + (1 - this.night) * 350) * this.weather.fogScale;
   }
 
   /**
@@ -231,9 +232,15 @@ export class Sky {
     scene.environment = rt.texture;
     // The env map is a light source on top of sun + hemisphere, so it enters
     // at about half strength or the whole scene washes out to pastel.
-    scene.environmentIntensity = 0.45 - this.night * 0.12;
+    scene.environmentIntensity = (0.45 - this.night * 0.12) * this.weather.envScale;
     if (this._envRT) this._envRT.dispose();
     this._envRT = rt;
+  }
+
+  /** Apply a weather preset; the next setTime() picks it up. */
+  setWeather(spec) {
+    this.weather = spec;
+    this._envBakedAt = -99;    // force the environment map to be re-cooked
   }
 
   /** Keep the sun's shadow frustum centred on the car. */
@@ -256,6 +263,31 @@ export class Sky {
     this.dome.material.dispose();
     this.scene.fog = null;
   }
+}
+
+/**
+ * Push a palette towards the weather: desaturate, darken, and warm the sky
+ * slightly grey. Done on the palette rather than as a post-process so the sun,
+ * the fog and the environment map all agree with each other.
+ */
+function grade(p, w) {
+  if (w.saturation === 1 && w.brightness === 1) return p;
+  const wash = (c) => {
+    const grey = (c[0] + c[1] + c[2]) / 3;
+    return [
+      (grey + (c[0] - grey) * w.saturation) * w.brightness,
+      (grey + (c[1] - grey) * w.saturation) * w.brightness,
+      (grey + (c[2] - grey) * w.saturation) * w.brightness,
+    ];
+  };
+  return {
+    zenith: wash(p.zenith),
+    horizon: wash(p.horizon),
+    sun: wash(p.sun),
+    light: wash(p.light),
+    intensity: p.intensity,
+    ambient: p.ambient * (0.85 + 0.15 * w.brightness),
+  };
 }
 
 function smoothstep(edge0, edge1, x) {

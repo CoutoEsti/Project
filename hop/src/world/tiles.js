@@ -80,6 +80,8 @@ export class World {
 
     this.readyTiles = 0;
     this.requestedTiles = 0;
+    this.groundRoughness = 1;
+    this._groundMaterials = new Set();
     this._abort = new AbortController();
   }
 
@@ -321,7 +323,12 @@ export class World {
     const geo = new THREE.PlaneGeometry(Math.abs(tile.bounds.x1 - tile.bounds.x0),
                                         Math.abs(tile.bounds.z1 - tile.bounds.z0));
     void width; void height;
-    const mesh = new THREE.Mesh(geo, makeGroundMaterial(THREE, texture, roughTex));
+    const groundMat = makeGroundMaterial(THREE, texture, roughTex);
+    // `roughness` multiplies the roughness map, so one scalar turns every
+    // painted surface glossy at once — which is exactly what rain does.
+    groundMat.roughness = this.groundRoughness;
+    this._groundMaterials.add(groundMat);
+    const mesh = new THREE.Mesh(geo, groundMat);
     mesh.rotation.x = -Math.PI / 2;
     mesh.position.set((tile.bounds.x0 + tile.bounds.x1) / 2, 0,
                       (tile.bounds.z0 + tile.bounds.z1) / 2);
@@ -426,6 +433,7 @@ export class World {
         if (child.material && child.material.map && child.material.map === tile.texture) {
           child.material.map.dispose();
           if (child.material.roughnessMap) child.material.roughnessMap.dispose();
+          this._groundMaterials.delete(child.material);
           child.material.dispose();
         }
       });
@@ -467,6 +475,13 @@ export class World {
       out.push(tile.grid);
     }
     return out;
+  }
+
+  /** Wet the streets. 1 is dry asphalt, 0.16 is a mirror after rain. */
+  setGroundRoughness(r) {
+    this.groundRoughness = r;
+    for (const m of this._groundMaterials) m.roughness = r;
+    this.backdrop.material.roughness = r;
   }
 
   /**

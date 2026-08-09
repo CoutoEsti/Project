@@ -13,6 +13,7 @@ import { TileSource } from './world/source.js';
 import { World } from './world/tiles.js';
 import { preloadPropModels, propTriangles } from './world/models.js';
 import { Sky } from './world/sky.js';
+import { Weather, WEATHER } from './world/weather.js';
 import { nearestRoadPoint } from './world/roads.js';
 import { Vehicle } from './vehicle/physics.js';
 import { rayClearance } from './vehicle/collision.js';
@@ -58,6 +59,8 @@ class Game {
       shadowMap: this.settings.quality === 'high' ? 2048 : 1024,
       shadowExtent: 140,
     });
+
+    this.weather = new Weather(this.scene);
 
     this.source = new TileSource({
       offline: this.offline,
@@ -113,6 +116,7 @@ class Game {
 
     this.loop = new Loop((dt) => this.update(dt), (alpha, dt) => this.render(alpha, dt));
 
+    this._applyWeather();
     this._bindUi();
     this._resize();
     window.addEventListener('resize', () => this._resize());
@@ -288,6 +292,13 @@ class Game {
     zone.addEventListener('pointercancel', release);
   }
 
+  _applyWeather() {
+    const spec = WEATHER[this.settings.weather] || WEATHER.clear;
+    this.weather.set(this.settings.weather in WEATHER ? this.settings.weather : 'clear');
+    this.sky.setWeather(spec);
+    this.world.setGroundRoughness(spec.groundRoughness);
+  }
+
   /** 'auto' follows the pointer type; 'on' and 'off' override it. */
   _applyTouchMode() {
     const mode = this.settings.touch || 'auto';
@@ -315,6 +326,7 @@ class Game {
       this.scene.traverse((o) => { if (o.isMesh) o.castShadow = !!settings.shadows && o.castShadow; });
     }
     if (key === 'touch') this._applyTouchMode();
+    if (key === 'weather') this._applyWeather();
     if (key === 'quality') {
       this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, settings.quality === 'high' ? 2 : 1.5));
       this.hud.toast('La qualité s’applique aux nouvelles tuiles.');
@@ -471,6 +483,7 @@ class Game {
     }
 
     // --- world -------------------------------------------------------------
+    this.weather.update(dt, this.camera);
     this.sky.setTime(this.settings.timeOfDay);
     this.sky.follow(v.x, v.z);
     this.sky.updateEnvironment(this.renderer, this.scene);
