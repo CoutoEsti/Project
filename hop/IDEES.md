@@ -310,18 +310,74 @@ La méthode :
   vitesse que n'importe quel paramètre de pneu. À régler *avec* la physique,
   jamais séparément.
 
-**Notre signature, à décider.** La question à trancher avant de toucher au
-code, parce que tout le reste en découle : on veut une voiture **lourde et
-posée qui récompense la conduite propre**, ou **vive et joueuse qui part en
-travers dès qu'on le demande** ? Les deux sont défendables. Ce qui ne l'est
-pas, c'est de ne pas choisir — c'est comme ça qu'on obtient un jeu dont
-personne ne se rappelle la conduite.
+### La signature : plancher bas, plafond haut
 
-Vu le reste du projet — une vraie ville, des rues étroites, du relief, de la
-neige — je pencherais pour **lourd et posé, avec un arrière qui se réveille
-quand on va le chercher**. Ça laisse la neige et les pneus d'hiver être une
-vraie différence, au lieu d'un décor par-dessus une voiture qui glisse déjà
-tout le temps.
+**Décidé.** Pas casual à la Forza. N'importe qui doit pouvoir rouler sans
+tourner en toupie, et quelqu'un de bon doit pouvoir se démarquer nettement.
+
+Ces deux choses ont l'air de se contredire. Elles ne se contredisent pas — mais
+la façon évidente d'y arriver est la mauvaise, et c'est exactement celle que
+Forza a prise. **Les aides ne baissent pas le plancher, elles baissent le
+plafond.** Une direction assistée qui corrige ta trajectoire rend le jeu facile
+*et* rend impossible d'être meilleur que l'assistance. Un bon joueur le sent au
+bout de deux virages et s'en va.
+
+La bonne formulation :
+
+> On ne rend pas la voiture plus facile à conduire vite.
+> On rend l'erreur moins coûteuse.
+
+Un débutant roule à 70 % de la limite, ne part jamais en tête-à-queue, et
+s'amuse. Un bon joueur vit à 98 %, et ces 28 % se voient au chronomètre. Le
+plancher est bas parce que se tromper ne détruit pas ta sortie ; le plafond est
+haut parce que rien ne conduit à ta place.
+
+**Ce que ça impose, concrètement :**
+
+| Décision | Pourquoi ça sert les deux |
+|---|---|
+| **Pic d'adhérence large** | Le débutant ne remarque jamais qu'il l'a franchi. Le bon joueur sent exactement où il est et s'assoit dessus |
+| **Chute douce après le pic** | Perdre l'arrière devient une glisse rattrapable, pas une fin de course |
+| **Récupération rapide mais pas gratuite** | Tu reprends le contrôle — tu as quand même perdu deux secondes |
+| **Aucune main invisible** | Zéro correction automatique de trajectoire. C'est la ligne rouge |
+| **Facile en bas, exigeant à la limite** | C'est ce que font les vraies voitures. À 40 dans une rue, ça se conduit tout seul |
+
+**Le plafond doit être fait de technique, pas de tolérance.** C'est le point que
+la physique doit rendre possible, sinon il n'y a rien à maîtriser :
+
+- **freinage dégressif** — freiner encore un peu en entrée fait tourner la
+  voiture. Impossible sans sensibilité à la charge : c'est pour ça qu'elle
+  est en haut de la liste de recherche ;
+- **transfert de masse** — lever le pied fait pivoter, remettre les gaz
+  stabilise ;
+- **le choix du rapport** en sortie, avec une vraie courbe de couple ;
+- **la trajectoire**, qui n'existe que parce que les rues sont vraies et
+  étroites.
+
+Un modèle sans ces quatre choses n'a pas de plafond : il n'y a rien à faire de
+mieux que de tourner le volant au bon moment.
+
+**Les aides, s'il y en a : optionnelles, visibles, et plus lentes.** Antipatinage
+ou contrôle de stabilité désactivés par défaut, affichés quand ils sont actifs,
+et mesurablement plus lents au chrono. Ça devient une rampe qu'on monte, pas un
+plafond qu'on subit.
+
+**Et il faut que la maîtrise se voie en chiffres.** Un plafond dont on ne peut
+pas prouver qu'on l'a atteint n'existe pas. C'est là que le chrono, les
+fantômes, les défis et les records de quartier — tous déjà écrits — cessent
+d'être des à-côtés et deviennent la raison d'être du modèle de conduite.
+
+**Le caractère, dans ce cadre : lourde et posée, avec un arrière qui se réveille
+quand on va le chercher.** Le poids donne le plancher — une voiture lourde est
+stable et prévisible pour qui ne fait rien de spécial. L'arrière disponible
+donne le plafond — il est là quand tu le provoques, jamais quand tu ne l'as pas
+demandé. Et ça laisse la neige et les pneus d'hiver être une vraie différence,
+au lieu d'un décor par-dessus une voiture qui glisse déjà tout le temps.
+
+**Le seul vrai risque à surveiller :** la première minute. « Jouable même si tu
+n'es pas bon » se joue là, pas sur la durée. Si les trente premières secondes
+sont frustrantes, personne ne découvre jamais le plafond. À tester sur
+quelqu'un qui n'a jamais touché au jeu, au clavier, sans explication.
 
 ---
 
