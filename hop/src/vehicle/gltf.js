@@ -17,8 +17,14 @@ const DRACO_PATH = new URL('../../vendor/jsm/libs/draco/', import.meta.url).href
 // Nodes whose name looks like a wheel. Blender, Sketchfab and most exporters
 // keep some variant of these, in one language or another.
 const WHEEL_PATTERN = /wheel|tyre|tire|rim|roue|pneu|jante|rad|rueda/i;
-const FRONT_PATTERN = /front|_f[lr]?\b|fore|avant|_av/i;
-const REAR_PATTERN = /rear|back|_r[lr]?\b|arriere|arrière|_ar/i;
+// Which end a wheel is at. The trailing `f[lr]$` alternative matters more than
+// it looks: `WheelFL` / `WheelFR` is what Blender and half of Sketchfab export,
+// and it carries no separator at all — so a pattern anchored on an underscore
+// silently classifies all four wheels as rear, and the car steers with none of
+// them. These are only ever tested against names that already matched
+// WHEEL_PATTERN, so two loose letters cannot capture anything else.
+const FRONT_PATTERN = /front|fore|avant|_f[lr]?\b|_av|f[lr]$|\bfw/i;
+const REAR_PATTERN = /rear|back|arriere|arrière|_r[lr]?\b|_ar|r[lr]$|\brw/i;
 const GLASS_PATTERN = /glass|window|windshield|windscreen|vitre|verre|pare.?brise/i;
 const LIGHT_PATTERN = /head.?l(ight|amp)|phare|tail.?l(ight|amp)|feu/i;
 
@@ -160,10 +166,36 @@ export async function loadCarModel(url, opts = {}) {
   const frontWheels = wheels.filter((w) => w.front);
   const spinAxis = 'x';
 
+  // Underglow, same as the generated car has. Built here rather than shared
+  // because the two cars have no common ancestor — and an authored model that
+  // silently lost a feature the procedural one had is exactly the kind of gap
+  // nobody notices until someone turns the setting on and nothing happens.
+  const glowMat = new THREE.MeshBasicMaterial({
+    color: new THREE.Color(0x22ccff),
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+  });
+  const glowGeo = new THREE.PlaneGeometry(3.4, 6.2);
+  glowGeo.rotateX(-Math.PI / 2);
+  const glow = new THREE.Mesh(glowGeo, glowMat);
+  glow.position.y = 0.06;
+  glow.renderOrder = 3;
+  glow.visible = false;
+  group.add(glow);
+
   return {
     group,
     wheels,
     source: 'gltf',
+    setUnderglow(on, colour, night = 1) {
+      glow.visible = !!on && night > 0.15;
+      if (!glow.visible) return;
+      if (colour != null) glowMat.color.setHex(colour);
+      glowMat.opacity = 0.55 * Math.min(1, (night - 0.15) / 0.35);
+    },
     setSteer(angle) {
       for (const w of frontWheels) w.node.rotation.y = w.baseRotation.y + angle;
     },
