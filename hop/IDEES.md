@@ -61,6 +61,59 @@ froid et plus bleu sous zéro, plus chaud et plus doré en juillet. Le
 
 ## 2. Garage, boutique et pièces moteur
 
+**Le public visé : les gars de char.** Pas les joueurs d'arcade. Des gens qui
+ont déjà ouvert un capot, qui savent ce qu'est un downpipe, et qui savent
+qu'un gros turbo ne fait pas que « plus de chevaux ».
+
+Ça change tout, parce que ce public **détecte le faux immédiatement**. Un
+curseur « +15 HP » qui ne change rien de mesurable est grillé au premier essai,
+et une fois grillé le jeu est mort pour eux. Ce qui les garde, à l'inverse, est
+exactement ce qui est le plus dur à truquer : des chiffres qui tiennent, et des
+compromis qui se sentent au volant.
+
+Ce qui achète la crédibilité, dans l'ordre :
+
+1. **Des unités réelles, pas des barres.** Chevaux et lb-pi, poids en livres,
+   boost en PSI, 0-100 et le quart de mille avec temps *et* vitesse de sortie.
+   Pas de « performance : ▮▮▮▮▯ ».
+2. **Un dyno.** La courbe de couple et de puissance en fonction du régime,
+   affichée, comparable avant/après. C'est l'artefact que ce monde-là partage
+   entre eux. `physics.js` a déjà une courbe de couple — elle est *dans* le
+   modèle, il ne manque que le graphe.
+3. **Des compromis vrais, pas des améliorations pures.** Un plus gros turbo
+   monte plus haut et répond plus tard. Une finale courte gagne au 0-100 et
+   perd en pointe. Une barre arrière plus raide fait sortir l'arrière. Si
+   chaque pièce est strictement meilleure, il n'y a pas de réglage, juste une
+   liste de courses.
+4. **Des mods qui en demandent d'autres.** Le boost sans injecteurs ni
+   intercooler, ça cogne et ça coupe. C'est ce qui transforme une boutique en
+   projet.
+5. **Le quart de mille.** Presque gratuit ici : le chrono, les portes et les
+   fantômes existent déjà (`game/timetrial.js`). Un huitième et un quart de
+   mille sur une vraie ligne droite de Montréal, avec l'arbre de Noël, le
+   temps de réaction et le trap speed.
+
+**Ce que la physique sait déjà faire**, et ce qu'il faudrait lui ajouter pour
+que le garage soit honnête :
+
+| Déjà dans `physics.js` | À écrire |
+|---|---|
+| Courbe de couple, `redline` | Modèle de turbo : inertie, seuil, lag, wastegate |
+| Rapports et finale | Différentiel : ouvert / autobloquant / soudé |
+| `grip`, `stiffnessPerN` | Composé de gomme et température |
+| `rearGripBias`, transfert de charge | Traction : propulsion / traction / intégrale |
+| `mass`, `izz` | Fiabilité : chaleur, détonation, casse |
+
+La transmission est le plus gros morceau : aujourd'hui le modèle est une
+propulsion. Une traction et une intégrale changent complètement le
+comportement, et un public de gars de char verra tout de suite la différence
+entre les trois. C'est probablement le premier gros chantier après le garage.
+
+**Le côté Montréal joue aussi.** Pneus d'hiver contre pneus d'été, ça n'est pas
+un détail folklorique ici — c'est la loi, et c'est une vraie différence
+d'adhérence. Combiné à l'idée de neige plus haut, ça donne quelque chose
+qu'aucun jeu de char ne fait sérieusement.
+
 **L'idée.** Acheter des voitures, les modifier, les régler. C'est le système
 qui donne une raison de rejouer, et c'est celui qui fait rester les gens.
 
@@ -119,6 +172,13 @@ moment le joueur cesse de progresser. Compter ça, pas la fenêtre du garage.
 **L'ordre suggéré.** Garage et peinture d'abord — visible immédiatement, aucun
 équilibrage. Puis les pièces mécaniques sur la voiture de départ. La boutique
 de véhicules en dernier, quand on saura ce que vaut un point.
+
+Une nuance si on vise vraiment les gars de char : la peinture est ce qui se
+montre le plus vite, mais ce n'est pas ce qui les attrape. **Le dyno et le
+quart de mille les attrapent**, et les deux sont presque déjà là — la courbe
+de couple est dans le modèle, le chronométrage et les fantômes aussi. Ça
+pourrait être fait avant même d'avoir une deuxième voiture à vendre, et ce
+serait la première chose qu'ils partageraient.
 
 ---
 
