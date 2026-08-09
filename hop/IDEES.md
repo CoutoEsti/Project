@@ -61,58 +61,92 @@ froid et plus bleu sous zéro, plus chaud et plus doré en juillet. Le
 
 ## 2. Garage, boutique et pièces moteur
 
-**Le public visé : les gars de char.** Pas les joueurs d'arcade. Des gens qui
-ont déjà ouvert un capot, qui savent ce qu'est un downpipe, et qui savent
-qu'un gros turbo ne fait pas que « plus de chevaux ».
+**Le public visé : les gars de char.** Pas les joueurs d'arcade — mais **pas
+les joueurs de *Car Mechanic Simulator* non plus**, et c'est la distinction la
+plus importante de tout ce fichier.
 
-Ça change tout, parce que ce public **détecte le faux immédiatement**. Un
-curseur « +15 HP » qui ne change rien de mesurable est grillé au premier essai,
-et une fois grillé le jeu est mort pour eux. Ce qui les garde, à l'inverse, est
-exactement ce qui est le plus dur à truquer : des chiffres qui tiennent, et des
-compromis qui se sentent au volant.
+> Le but est une **customisation poussée**, pas une **simulation poussée**.
 
-Ce qui achète la crédibilité, dans l'ordre :
+Beaucoup de pièces, beaucoup de choix, beaucoup de combinaisons. Pas de
+sous-systèmes à comprendre. Une pièce, c'est : un nom réel, un prix, un ou
+deux chiffres, et un effet qu'on sent en conduisant. On l'achète, on la pose,
+on repart. Personne ne devrait avoir à lire une explication pour acheter un
+échappement.
 
-1. **Des unités réelles, pas des barres.** Chevaux et lb-pi, poids en livres,
-   boost en PSI, 0-100 et le quart de mille avec temps *et* vitesse de sortie.
-   Pas de « performance : ▮▮▮▮▯ ».
-2. **Un dyno.** La courbe de couple et de puissance en fonction du régime,
-   affichée, comparable avant/après. C'est l'artefact que ce monde-là partage
-   entre eux. `physics.js` a déjà une courbe de couple — elle est *dans* le
-   modèle, il ne manque que le graphe.
-3. **Des compromis vrais, pas des améliorations pures.** Un plus gros turbo
-   monte plus haut et répond plus tard. Une finale courte gagne au 0-100 et
-   perd en pointe. Une barre arrière plus raide fait sortir l'arrière. Si
-   chaque pièce est strictement meilleure, il n'y a pas de réglage, juste une
-   liste de courses.
-4. **Des mods qui en demandent d'autres.** Le boost sans injecteurs ni
-   intercooler, ça cogne et ça coupe. C'est ce qui transforme une boutique en
-   projet.
-5. **Le quart de mille.** Presque gratuit ici : le chrono, les portes et les
-   fantômes existent déjà (`game/timetrial.js`). Un huitième et un quart de
-   mille sur une vraie ligne droite de Montréal, avec l'arbre de Noël, le
-   temps de réaction et le trap speed.
+**Ce qui reste non négociable**, malgré la simplicité : les chiffres doivent
+être vrais. Ce public détecte le faux immédiatement, et un curseur « +15 HP »
+qui ne change rien de mesurable est grillé au premier essai. Si la pièce dit
++28 HP, le modèle gagne +28 HP et le chrono le montre. C'est ça, l'honnêteté
+demandée — pas la complexité.
 
-**Ce que la physique sait déjà faire**, et ce qu'il faudrait lui ajouter pour
-que le garage soit honnête :
+Donc, concrètement :
 
-| Déjà dans `physics.js` | À écrire |
+| On fait | On ne fait pas |
 |---|---|
-| Courbe de couple, `redline` | Modèle de turbo : inertie, seuil, lag, wastegate |
-| Rapports et finale | Différentiel : ouvert / autobloquant / soudé |
-| `grip`, `stiffnessPerN` | Composé de gomme et température |
-| `rearGripBias`, transfert de charge | Traction : propulsion / traction / intégrale |
-| `mass`, `izz` | Fiabilité : chaleur, détonation, casse |
+| Chevaux, lb-pi, poids en livres | Barres de progression « perf ▮▮▮▯▯ » |
+| Un dyno simple : la courbe avant / après | Cartographie, AFR, avance à l'allumage |
+| Turbo = plus de puissance en haut, moins en bas | Inertie de turbine, wastegate, seuil de boost |
+| Pneus = plus ou moins d'adhérence | Température et usure de la gomme |
+| Suspension = plus ou moins de survirage | Ressorts, amortisseurs, carrossage, pincement |
+| Une pièce, un ou deux chiffres | Des pièces qui en exigent d'autres |
+| Rien ne casse | Fiabilité, chaleur, détonation |
 
-La transmission est le plus gros morceau : aujourd'hui le modèle est une
-propulsion. Une traction et une intégrale changent complètement le
-comportement, et un public de gars de char verra tout de suite la différence
-entre les trois. C'est probablement le premier gros chantier après le garage.
+**Le seul compromis à garder**, parce qu'il est simple à comprendre et qu'il
+fait exister le réglage : une pièce ne doit pas être *strictement* meilleure.
+Turbo — ça pousse en haut, c'est mou en bas. Finale courte — meilleur 0-100,
+moins de pointe. Suspension rabaissée — ça tourne mieux, c'est nerveux.
+Quatre ou cinq compromis de ce genre suffisent. S'il n'y en a aucun, la
+boutique n'est plus qu'une liste de courses.
 
-**Le côté Montréal joue aussi.** Pneus d'hiver contre pneus d'été, ça n'est pas
-un détail folklorique ici — c'est la loi, et c'est une vraie différence
-d'adhérence. Combiné à l'idée de neige plus haut, ça donne quelque chose
-qu'aucun jeu de char ne fait sérieusement.
+**Le quart de mille.** Presque gratuit ici : le chrono, les portes et les
+fantômes existent déjà (`game/timetrial.js`). Un huitième et un quart de mille
+sur une vraie ligne droite de Montréal, avec l'arbre de Noël, le temps de
+réaction et le trap speed. C'est là que les chiffres du garage deviennent
+visibles, et c'est ce qui se partage.
+
+**Ce que la physique sait déjà faire**, et le seul vrai manque :
+
+| Déjà dans `physics.js` | Sert à |
+|---|---|
+| Courbe de couple, `redline` | Moteur, admission, échappement, turbo |
+| Rapports et finale | Boîte, différentiel |
+| `grip`, `stiffnessPerN` | Pneus |
+| `rearGripBias`, transfert de charge | Suspension, barres |
+| `mass`, `izz` | Allègement, jantes |
+| Couple de freinage | Freins |
+
+Presque tout le garage tient donc dans des constantes que le modèle attend
+déjà. **Le seul vrai chantier, c'est la transmission** : aujourd'hui la
+voiture est une propulsion, point. Traction et intégrale changent complètement
+le comportement, et c'est la première chose qu'un gars de char remarque —
+mais c'est un choix de *véhicule*, pas un système à simuler. Un paramètre qui
+répartit le couple entre les essieux couvre les trois cas.
+
+### Les pneus d'hiver
+
+L'idée qui relie tout : **il faut acheter des pneus d'hiver, sinon ça spin.**
+
+C'est exactement le bon niveau. Aucune explication nécessaire, aucun
+sous-système, une seule décision — et une conséquence qu'on sent dans la
+première courbe. C'est aussi la loi au Québec du 1er décembre au 15 mars, donc
+c'est vrai *et* c'est local, ce qu'aucun jeu de char ne fait.
+
+Comment ça marche, en entier :
+
+- trois jeux de pneus à l'achat : **été**, **quatre saisons**, **hiver** ;
+- la météo réelle (idée 1) ou le réglage manuel décide de l'état du sol ;
+- la surface multiplie `grip`, et le type de pneu multiplie ce multiplicateur.
+  Été sur neige : autour de 0,35 — la voiture patine au démarrage, part au
+  freinage, et on ne monte pas Camillien-Houde. Hiver sur neige : autour de
+  0,75, ça roule. Hiver sur asphalte sec et chaud : un peu *moins* bon que
+  l'été, parce que c'est vrai, et parce que ça évite qu'un seul choix gagne
+  toute l'année ;
+- deux lignes de HUD suffisent : la surface, et les pneus montés. Si les deux
+  ne vont pas ensemble, on le voit.
+
+Ça donne une raison saisonnière de revenir au garage, ça fait vendre deux
+jeux de pneus au lieu d'un, et ça rend la neige (idée 1) *jouable* plutôt que
+décorative. À faire en même temps que la neige, pas après.
 
 **L'idée.** Acheter des voitures, les modifier, les régler. C'est le système
 qui donne une raison de rejouer, et c'est celui qui fait rester les gens.
@@ -179,6 +213,13 @@ quart de mille les attrapent**, et les deux sont presque déjà là — la courb
 de couple est dans le modèle, le chronométrage et les fantômes aussi. Ça
 pourrait être fait avant même d'avoir une deuxième voiture à vendre, et ce
 serait la première chose qu'ils partageraient.
+
+Et puisque la profondeur va dans la personnalisation plutôt que dans la
+simulation, c'est là qu'il faut être généreux : beaucoup de jantes, beaucoup
+de teintes et de finis, hauteur de caisse, ailerons, vitres, plaques,
+autocollants, numéros. Vingt jantes coûtent moins cher à faire qu'un modèle de
+turbo, et c'est ce qui remplit un fil de photos — pour lequel le mode photo
+existe déjà.
 
 ---
 
