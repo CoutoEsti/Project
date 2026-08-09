@@ -56,9 +56,10 @@ export class Hud {
     this._toastTimer = ms / 1000;
   }
 
-  setStatus(message) {
+  setStatus(message, tone = '') {
     this.statusEl.textContent = message || '';
     this.statusEl.classList.toggle('visible', !!message);
+    this.statusEl.classList.toggle('urgent', tone === 'urgent');
   }
 
   setPlace(name) {
@@ -165,7 +166,7 @@ export class Hud {
    * @param {object} car    {x, z, yaw}
    * @param {object} trial  optional {start, finish}
    */
-  drawMinimap(roads, car, trial, dt) {
+  drawMinimap(roads, car, trial, dt, waypoint = null) {
     this._minimapTimer -= dt;
     if (this._minimapTimer > 0) return;
     this._minimapTimer = 1 / 12;
@@ -226,6 +227,30 @@ export class Hud {
     }
 
     ctx.restore();
+
+    // The active checkpoint. Clamped to the rim when it is off the minimap,
+    // because "which way is it" matters more than "exactly where is it".
+    if (waypoint) {
+      const dx = waypoint.x - car.x, dz = waypoint.z - car.z;
+      const a = car.yaw - Math.PI;
+      // Same rotation the map got, applied by hand to a single point.
+      let sx = (dx * Math.cos(a) - dz * Math.sin(a)) * scale;
+      let sy = (dx * Math.sin(a) + dz * Math.cos(a)) * scale;
+      const rim = Math.min(w, h) / 2 - 9 * this._dpr;
+      const d = Math.hypot(sx, sy);
+      const clamped = d > rim;
+      if (clamped && d > 0) { sx = (sx / d) * rim; sy = (sy / d) * rim; }
+      ctx.save();
+      ctx.translate(w / 2 + sx, h / 2 + sy);
+      ctx.fillStyle = '#ffc857';
+      ctx.beginPath();
+      ctx.arc(0, 0, (clamped ? 4 : 5) * this._dpr, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(12,16,20,0.85)';
+      ctx.lineWidth = 1.5 * this._dpr;
+      ctx.stroke();
+      ctx.restore();
+    }
 
     // The car marker stays put in the middle, pointing up.
     ctx.save();

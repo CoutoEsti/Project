@@ -164,6 +164,8 @@ export class Menu {
     bind('#set-shadows', 'shadows');
     bind('#set-audio', 'audio');
     bind('#set-volume', 'volume', Number, 'input');
+    bind('#set-music', 'music');
+    bind('#set-music-volume', 'musicVolume', Number, 'input');
     bind('#set-touch', 'touch');
     bind('#set-weather', 'weather');
     bind('#set-units', 'units');

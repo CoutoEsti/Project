@@ -22,6 +22,11 @@ import { loadCarModel } from './vehicle/gltf.js';
 import { EngineAudio } from './vehicle/audio.js';
 import { TimeTrial, TrialState } from './game/timetrial.js';
 import { Score } from './game/score.js';
+import { PhotoMode } from './game/photo.js';
+import { Music } from './game/music.js';
+import { Challenges, ChallengeState } from './game/challenges.js';
+import { Birds } from './world/birds.js';
+import { Pedestrians } from './world/pedestrians.js';
 import { Hud } from './ui/hud.js';
 import { Menu } from './ui/menu.js';
 import { buildMapImage, paintMap, marker, carMarker } from './ui/map.js';
@@ -62,6 +67,7 @@ class Game {
     });
 
     this.weather = new Weather(this.scene);
+    this.birds = new Birds(this.scene);
 
     this.source = new TileSource({
       offline: this.offline,
@@ -73,6 +79,12 @@ class Game {
       settings: this.settings,
       onProgress: (p) => this._onWorldProgress(p),
     });
+
+    this.people = new Pedestrians(this.scene, {
+      count: this.settings.quality === 'low' ? 18 : 44,
+      groundAt: (x, z) => this.world.groundHeight(x, z),
+    });
+    this.people.setShadows(!!this.settings.shadows && this.settings.quality === 'high');
 
     this.vehicle = new Vehicle();
     this.car = createCar(THREE, { color: CAR_COLORS[0] });
@@ -90,10 +102,33 @@ class Game {
     this.audio.setEnabled(!!this.settings.audio);
     this.audio.setVolume(this.settings.volume);
 
+    // The soundtrack shares the engine's AudioContext — one context per page,
+    // and it only exists after a user gesture, hence the getter.
+    this.music = new Music({ getContext: () => this.audio.ctx });
+    this.music.setEnabled(!!this.settings.music);
+    this.music.setVolume(this.settings.musicVolume);
+
     this.input = new Input(window);
     this.hud = new Hud(root);
     this.score = new Score({ onEvent: (e) => this._onScoreEvent(e) });
     this.trial = null;
+
+    this.challenges = new Challenges({
+      scene: this.scene,
+      groundAt: (x, z) => this.world.groundHeight(x, z),
+      onEvent: (e) => this._onChallengeEvent(e),
+    });
+
+    this.photo = new PhotoMode({
+      root,
+      camera: this.camera,
+      renderer: this.renderer,
+      scene: this.scene,
+      // Photo mode redraws right before reading the pixels, so the shot is of
+      // the composed frame and not of whatever the last game frame left behind.
+      onRender: () => this.renderer.render(this.scene, this.camera),
+      onShot: () => this._flash(),
+    });
 
     this.menu = new Menu(root, {
       settings: this.settings,
@@ -229,8 +264,11 @@ class Game {
     this.mapCanvas.addEventListener('click', (e) => this._mapClick(e));
     window.addEventListener('resize', () => { if (this.mapOpen) this.drawFullMap(); });
 
+    this.flashEl = this.root.querySelector('#photo-flash');
+
     window.addEventListener('keydown', (e) => {
       if (e.code !== 'Escape') return;
+      if (this.photo.active) { this.photo.set(false); return; }
       if (this.mapOpen) { this.closeMap(); return; }
       if (this.menu.visible && this.spawned) { this.menu.hide(); this.audio.resume(); }
       else this.menu.show();
@@ -324,10 +362,13 @@ class Game {
     saveSettings(settings);
     if (key === 'audio') this.audio.setEnabled(settings.audio);
     if (key === 'volume') this.audio.setVolume(settings.volume);
+    if (key === 'music') this.music.setEnabled(settings.music);
+    if (key === 'musicVolume') this.music.setVolume(settings.musicVolume);
     if (key === 'shadows') {
       this.renderer.shadowMap.enabled = !!settings.shadows;
       this.sky.sun.castShadow = !!settings.shadows;
       this.scene.traverse((o) => { if (o.isMesh) o.castShadow = !!settings.shadows && o.castShadow; });
+      this.people.setShadows(!!settings.shadows && settings.quality === 'high');
     }
     if (key === 'touch') this._applyTouchMode();
     if (key === 'weather') this._applyWeather();
@@ -355,6 +396,9 @@ class Game {
       try { this.trial.loadFromParams(this.params); } catch { /* malformed link */ }
     }
 
+    // A route is a list of world coordinates, and the world origin just moved.
+    this.challenges.cancel();
+    this.people.reset();
     this.vehicle.reset(0, 0, 0);
     this.spawned = false;
     this._spawnRetry = 0;
@@ -392,6 +436,52 @@ class Game {
       this.hud.toast(`+${e.points.toLocaleString('fr-CA')} points (×${e.multiplier})`, 2200);
     } else if (e.type === 'lost' && e.points > 600) {
       this.hud.toast(`Chaîne perdue — ${e.points.toLocaleString('fr-CA')} points`, 2200);
+    }
+  }
+
+  _startChallenge() {
+    if (this.challenges.state === ChallengeState.RUNNING) {
+      this.challenges.cancel();
+      this.hud.setStatus('');
+      this.hud.toast('Défi abandonné.');
+      return;
+    }
+    const ok = this.challenges.generate(
+      this.vehicle.x, this.vehicle.z, this.world.allRoads(),
+      this.placeLabel || 'Montréal',
+    );
+    if (!ok) this.hud.toast('Pas assez de rues chargées ici pour tracer un défi.');
+  }
+
+  _onChallengeEvent(e) {
+    switch (e.type) {
+      case 'started': {
+        const best = e.best ? ` · record ${fmtTime(e.best)}` : '';
+        this.hud.toast(
+          `Défi : ${e.legs} points de passage, ${Math.round(e.distance)} m, `
+          + `${Math.round(e.seconds)} s${best}`, 5200,
+        );
+        break;
+      }
+      case 'checkpoint':
+        this.hud.toast(`Point ${e.index}/${e.legs} — +6 s`, 1800);
+        this.audio.horn();
+        break;
+      case 'finished': {
+        this.score.award(e.points, 'défi');
+        const record = e.improved
+          ? (e.previous === null ? 'Premier temps posé.' : 'Nouveau record du quartier.')
+          : `Record : ${fmtTime(e.previous)}`;
+        this.hud.toast(`Défi bouclé en ${fmtTime(e.time)} — +${e.points.toLocaleString('fr-CA')} pts. ${record}`, 6000);
+        this.hud.setStatus('');
+        break;
+      }
+      case 'failed':
+        this.hud.toast(`Temps écoulé — ${e.reached}/${e.legs} points atteints.`, 4200);
+        this.hud.setStatus('');
+        break;
+      default:
+        break;
     }
   }
 
@@ -444,7 +534,7 @@ class Game {
   update(dt) {
     this.input.sample(dt);
 
-    if (!this.menu.visible && !this.mapOpen && this.spawned) {
+    if (!this.menu.visible && !this.mapOpen && !this.photo.active && this.spawned) {
       const grids = this.world.gridsNear(this.vehicle.x, this.vehicle.z);
       this.vehicle.step(dt, {
         throttle: this.input.throttle,
@@ -465,6 +555,16 @@ class Game {
         dt, this.vehicle,
         nearestObstacle(this.vehicle.x, this.vehicle.z, this.vehicle.yaw, grids),
       );
+      this.challenges.update(dt, this.vehicle);
+      if (this.challenges.state === ChallengeState.RUNNING) {
+        const left = this.challenges.timeLeft;
+        const away = this.challenges.distanceTo(this.vehicle.x, this.vehicle.z);
+        this.hud.setStatus(
+          `Défi ${this.challenges.index + 1}/${this.challenges.route.length}`
+          + ` · ${Math.round(away)} m · ${left.toFixed(1)} s`,
+          left < 8 ? 'urgent' : '',
+        );
+      }
       if (this.trial) {
         this.trial.groundAt = (x, z) => this.world.groundHeight(x, z);
         this.trial.update(dt, {
@@ -492,6 +592,18 @@ class Game {
       this.trial.placeGate(v.x, v.z, v.yaw);
     }
     if (this.input.justPressed('map') && this.spawned) this.toggleMap();
+    if (this.input.justPressed('photo') && this.spawned && !this.menu.visible) {
+      this.photo.toggle(this.car.group.position);
+      if (this.photo.active) this.hud.toast('Mode photo — Espace pour déclencher, Échap pour sortir.', 4200);
+    }
+    if (this.photo.active
+        && (this.input.justPressed('handbrake') || this.input.pressed.has('Enter'))) {
+      this.photo.capture();
+    }
+    if (this.input.justPressed('horn') && this.spawned) this.audio.horn();
+    if (this.input.justPressed('challenge') && this.spawned && !this.menu.visible) {
+      this._startChallenge();
+    }
     if (this.input.justPressed('clearCourse') && this.trial) {
       this.trial.clear();
       this.hud.toast('Parcours effacé.');
@@ -509,6 +621,8 @@ class Game {
 
     // --- world -------------------------------------------------------------
     this.weather.update(dt, this.camera);
+    this.birds.update(dt, this.camera.position, this.sky.night);
+    if (this.spawned) this.people.update(dt, this.world.allRoads(), v);
     this.sky.setTime(this.settings.timeOfDay);
     this.sky.follow(v.x, v.z);
     this.sky.updateEnvironment(this.renderer, this.scene);
@@ -556,6 +670,7 @@ class Game {
       rpm: v.rpm, throttle: this.input.throttle, speed: v.speed,
       skid: v.skid, load: v.load, redline: v.spec.redline,
     }, dt);
+    this.music.update(dt, { speed: v.speed, rpm: v.rpm, redline: v.spec.redline });
 
     // --- hud ---------------------------------------------------------------
     this.hud.update({
@@ -567,7 +682,7 @@ class Game {
     this.hud.setScore(this.score.snapshot());
 
     if (!this.menu.visible) {
-      this.hud.drawMinimap(this.world.allRoads(), v, this.trial, dt);
+      this.hud.drawMinimap(this.world.allRoads(), v, this.trial, dt, this.challenges.target);
       if (this.trial) {
         this.hud.setTrial({
           state: this.trial.state,
@@ -657,10 +772,24 @@ class Game {
     this.hud.toast('Replacé sur la chaussée.');
   }
 
+  /** A one-shot white wash, so the shutter is felt as well as heard. */
+  _flash() {
+    if (!this.flashEl) return;
+    this.flashEl.classList.remove('fire');
+    void this.flashEl.offsetWidth;      // restart the animation
+    this.flashEl.classList.add('fire');
+    this.audio.shutter();
+  }
+
   _updateCamera(dt) {
     const v = this.vehicle;
     const fx = Math.sin(v.yaw), fz = Math.cos(v.yaw);
     const speedT = Math.min(1, v.speed / 45);
+
+    if (this.photo.active) {
+      this.photo.update(this.car.group.position);
+      return;
+    }
 
     if (this.cameraMode === 'hood') {
       const gy = this.groundY || 0;
@@ -724,6 +853,14 @@ class Game {
 }
 
 // ---------------------------------------------------------------------------
+
+/** m:ss.hh — the format every stopwatch in the game agrees on. */
+function fmtTime(seconds) {
+  if (seconds == null || !Number.isFinite(seconds)) return '—';
+  const m = Math.floor(seconds / 60);
+  const s = seconds - m * 60;
+  return `${m}:${s < 10 ? '0' : ''}${s.toFixed(2)}`;
+}
 
 function fail(message, detail) {
   const el = document.querySelector('#fatal');

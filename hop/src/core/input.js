@@ -18,6 +18,9 @@ const DEFAULT_BINDINGS = {
   gate: ['KeyG'],
   clearCourse: ['KeyX'],
   map: ['KeyM'],
+  photo: ['KeyP'],
+  horn: ['KeyH'],
+  challenge: ['KeyB'],
 };
 
 /** Human labels, in the order the settings panel shows them. */
@@ -33,6 +36,9 @@ export const BINDABLE = [
   ['gate', 'Poser une porte'],
   ['clearCourse', 'Effacer le parcours'],
   ['map', 'Carte'],
+  ['photo', 'Mode photo'],
+  ['horn', 'Klaxon'],
+  ['challenge', 'Lancer un défi'],
 ];
 
 /** "KeyW" -> "W", "ArrowUp" -> "↑", "Space" -> "Espace". */

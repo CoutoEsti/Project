@@ -12,9 +12,9 @@ Un serveur est nécessaire : le jeu est en modules ES et `file://` les bloque.
 
 ---
 
-## État actuel — 7 août 2026
+## État actuel — 9 août 2026
 
-Vérifié par `node hop/tools/smoke.mjs`, 18 contrôles automatisés à chaque commit.
+Vérifié par `node hop/tools/smoke.mjs`, 26 contrôles automatisés à chaque commit.
 
 **Monde.** Streamé depuis les vraies données Montréal — 19 618 bâtiments,
 7 672 tronçons, 28 150 arbres, 1 219 feux, 549 lampadaires, sur 11 × 9 km.
@@ -36,9 +36,36 @@ virage tenu à 62 km/h pour 0,76 rad/s, frein à main qui décroche l'arrière �
 1,48 rad. Joystick flottant analogique sur mobile, manette, et onze commandes
 remappables.
 
+**Relief.** Le mont Royal est une montagne : altitudes tirées des tuiles
+terrarium (AWS Open Data), lissées avant usage parce que 30 m d'échantillonnage
+donne des terrasses sur lesquelles une voiture tressaute. Le sol, les
+bâtiments, le mobilier et la caméra suivent tous la pente ; la gravité te coûte
+de la vitesse en montée et te la rend en descente.
+
+**Météo et heure.** Dégagé, couvert, pluie — la pluie mouille l'asphalte, qui
+devient réfléchissant. Cycle jour/nuit, automatique ou au curseur.
+
+**Vie.** Des piétons marchent les trottoirs (torse, tête et deux jambes qui
+alternent, tout en instancié, jamais solides). Des oiseaux tournent au-dessus
+de la ville et rentrent à la tombée du jour. Les haies `barrier=hedge` et les
+buissons des parcs sont générés.
+
 **Jeu.** Portes départ/arrivée posées n'importe où, chronométrage, fantôme
 translucide du meilleur tour, lien de partage. Carte plein écran cliquable pour
-se téléporter.
+se téléporter. Chaînes de talent façon Forza — dérive, frôlement, vitesse
+tenue, kilomètre propre — qui se banquent ou se perdent au premier choc. Défis
+tirés de la carte (touche `B`) : trois à cinq points de passage posés sur de
+vraies rues autour de toi, budget de temps calculé sur la longueur réelle du
+trajet, meilleur temps gardé par quartier.
+
+**Mode photo** (touche `P`) : caméra libre en orbite, focale réglable de 18 à
+90 mm, interface qui s'efface, et un PNG à la fin. La lecture des pixels se
+fait dans la même image que le rendu, ce qui évite `preserveDrawingBuffer` et
+sa bande passante sur *toutes* les autres images.
+
+**Musique.** Générée dans le même graphe Web Audio que le moteur : nappe
+d'accords, mélodie pentatonique en marche aléatoire, filtre qui s'ouvre avec la
+vitesse. Aucun fichier à charger — donc aucune licence, et zéro octet.
 
 **Assets.** Déposer `models/car.glb`, `tree.glb` ou `lamp.glb` remplace la
 version générée, sans configuration. `tools/prepare-model.mjs` compresse un
@@ -70,10 +97,11 @@ vendorisés sous `vendor/jsm/`.
 **5. L'île complète.** Voir `data/README.md` : la bbox est prête, il ne manque
 que l'export. Au-delà, PMTiles pour ne plus jamais charger la ville d'un bloc.
 
-**6. Relief**, puis suspension quatre roues — dans cet ordre, parce que sans
-dénivelé une vraie suspension ne se voit pas.
+**6. Suspension quatre roues.** Le relief est là, donc elle se verrait
+maintenant : quatre points de contact au lieu d'un plan incliné, et les
+débattements qui vont avec.
 
-Volontairement écartés : trafic, piétons, imagerie satellite.
+Volontairement écartés : trafic, imagerie satellite.
 
 ---
 
@@ -119,9 +147,16 @@ Trois autres choix comptent :
 | `src/world/ground.js` | la texture de sol par tuile |
 | `src/world/roads.js` | classification, jonctions, marquages |
 | `src/world/buildings.js` | extrusion, fenêtres, escaliers extérieurs |
-| `src/world/props.js` | lampadaires, arbres, feux, voitures garées |
+| `src/world/props.js` | lampadaires, arbres, feux, haies, buissons |
+| `src/world/terrain.js` | altitudes terrarium, échantillonnage lissé |
+| `src/world/birds.js` | le vol au-dessus de la ville |
+| `src/world/pedestrians.js` | les piétons des trottoirs |
 | `src/vehicle/` | physique, modèle, audio, collisions |
 | `src/game/timetrial.js` | portes, chrono, fantômes, partage |
+| `src/game/score.js` | chaînes de talent, multiplicateur, banque |
+| `src/game/challenges.js` | parcours tirés du réseau routier |
+| `src/game/photo.js` | caméra libre, focale, capture PNG |
+| `src/game/music.js` | la bande son générative |
 | `tools/prepare-data.mjs` | compacte un export Overpass brut |
 | `tools/smoke.mjs` | test navigateur headless |
 

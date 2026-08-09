@@ -49,6 +49,8 @@ const DEFAULT_SETTINGS = {
   shadows: true,
   audio: true,
   volume: 0.7,
+  music: true,
+  musicVolume: 0.4,
   camera: 'chase',      // 'chase' | 'hood' | 'orbit'
   touch: 'auto',        // 'auto' | 'on' | 'off'
   weather: 'clear',     // 'clear' | 'overcast' | 'rain'

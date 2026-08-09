@@ -133,6 +133,19 @@ function getPrototypes(THREE) {
   }
   const canopy = mergeUv(THREE, canopyPlanes);
 
+  // --- shrub --------------------------------------------------------------
+  // Two crossed quads rather than three: a bush is smaller than a tree and
+  // seen from closer to eye level, where the third plane only shows up as a
+  // seam. Four triangles, and hedges run to hundreds of them a street.
+  const shrubPlanes = [];
+  for (let k = 0; k < 2; k++) {
+    const q = new THREE.PlaneGeometry(1.85, 1.5);
+    q.rotateY((k * Math.PI) / 2);
+    q.translate(0, 0.72, 0);
+    shrubPlanes.push(tint(THREE, q, [1, 1, 1]));
+  }
+  const shrub = mergeUv(THREE, shrubPlanes);
+
   // --- traffic signal -----------------------------------------------------
   const makeSignal = (lit) => {
     const p = new THREE.CylinderGeometry(0.07, 0.09, 4.6, 6);
@@ -180,7 +193,7 @@ function getPrototypes(THREE) {
   pool.rotateX(-Math.PI / 2);
 
   prototypes = {
-    lamp, head, trunk, canopy,
+    lamp, head, trunk, canopy, shrub,
     signalRed: makeSignal('red'), signalGreen: makeSignal('green'),
     signPost, plate, body, carTrim, pool,
   };
@@ -235,6 +248,26 @@ const CANOPY_COLORS = [
   [0.44, 0.55, 0.29], [0.30, 0.41, 0.23],
 ];
 
+// Shrubs sit lower and in more shade than a canopy, so they read darker and
+// slightly bluer than the tree palette.
+const SHRUB_COLORS = [
+  [0.24, 0.38, 0.20], [0.21, 0.34, 0.19], [0.29, 0.42, 0.22],
+  [0.26, 0.40, 0.26], [0.33, 0.45, 0.24],
+];
+
+/** Winding number, so a bush lands inside a park and not in the pond next to it. */
+function pointInPolygon(pts, x, z) {
+  let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const zi = pts[i].z, zj = pts[j].z;
+    if ((zi > z) !== (zj > z)) {
+      const t = (z - zi) / (zj - zi);
+      if (x < pts[i].x + t * (pts[j].x - pts[i].x)) inside = !inside;
+    }
+  }
+  return inside;
+}
+
 function insideBounds(b, x, z, margin = 0) {
   return x >= b.x0 - margin && x <= b.x1 + margin && z >= b.z0 - margin && z <= b.z1 + margin;
 }
@@ -259,6 +292,7 @@ export function buildProps(THREE, args) {
   const signalsGreen = [];
   const stops = [];
   const cars = [];         // {x, z, yaw, colour}
+  const shrubs = [];       // {x, z, scale, colour}
   const colliders = [];
 
   // --- mapped features ------------------------------------------------------
@@ -375,6 +409,71 @@ export function buildProps(THREE, args) {
     }
   }
 
+  // --- hedges ---------------------------------------------------------------
+  // A hedge is mapped as a line, so it becomes a row of shrubs spaced closely
+  // enough to close up. The jitter matters: a hedge planted on a perfect grid
+  // reads as a fence, and OSM hedges are almost always along a lot line where
+  // the eye is looking for something organic.
+  if (opts.hedges !== false) {
+    for (const barrier of args.barriers || []) {
+      if (barrier.kind !== 'hedge') continue;
+      const len = polylineLength(barrier.points);
+      if (len < 2) continue;
+      const seed = Math.round(barrier.points[0].x * 5 + barrier.points[0].z * 9);
+      const height = 0.72 + hash01(seed) * 0.5;      // one hedge, one height
+      for (let d = 0.4; d < len; d += 1.05) {
+        sampleAt(barrier.points, d, s);
+        const j = hash01(seed + Math.round(d * 31));
+        const off = (j - 0.5) * 0.5;
+        const x = s.x - s.tz * off;
+        const z = s.z + s.tx * off;
+        if (!insideBounds(bounds, x, z)) continue;
+        shrubs.push({
+          x, z,
+          scale: height * (0.86 + j * 0.28),
+          yaw: Math.atan2(s.tz, s.tx) + (j - 0.5) * 0.5,
+          colour: SHRUB_COLORS[Math.floor(hash01(seed + Math.round(d * 7)) * SHRUB_COLORS.length) % SHRUB_COLORS.length],
+        });
+      }
+    }
+
+    // Loose bushes scattered through parks. Sampled on a jittered grid over
+    // the polygon's bounding box and rejected outside it, which is far cheaper
+    // than triangulating the park and does not care about concave shapes.
+    for (const area of args.areas || []) {
+      if (area.kind !== 'park' && area.kind !== 'garden'
+          && area.kind !== 'scrub' && area.kind !== 'village_green') continue;
+      const pts = area.points;
+      if (pts.length < 3) continue;
+      let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+      for (const p of pts) {
+        if (p.x < minX) minX = p.x;
+        if (p.x > maxX) maxX = p.x;
+        if (p.z < minZ) minZ = p.z;
+        if (p.z > maxZ) maxZ = p.z;
+      }
+      if ((maxX - minX) * (maxZ - minZ) > 400000) continue;   // a whole forest
+      const step = area.kind === 'scrub' ? 9 : 15;
+      const seed = Math.round(minX * 3 + minZ * 7);
+      for (let gx = minX + step / 2; gx < maxX; gx += step) {
+        for (let gz = minZ + step / 2; gz < maxZ; gz += step) {
+          const r = hash01(seed + Math.round(gx) * 131 + Math.round(gz));
+          if (r > 0.55) continue;
+          const x = gx + (hash01(r * 811) - 0.5) * step * 0.8;
+          const z = gz + (hash01(r * 419 + 5) - 0.5) * step * 0.8;
+          if (!insideBounds(bounds, x, z)) continue;
+          if (!pointInPolygon(pts, x, z)) continue;
+          shrubs.push({
+            x, z,
+            scale: 0.8 + r * 0.75,
+            yaw: r * 6.28,
+            colour: SHRUB_COLORS[Math.floor(r * 991) % SHRUB_COLORS.length],
+          });
+        }
+      }
+    }
+  }
+
   // --- build the instanced meshes ------------------------------------------
   const group = new THREE.Group();
   const dummy = new THREE.Object3D();
@@ -456,6 +555,20 @@ export function buildProps(THREE, args) {
     }
   }
 
+  const shrubMesh = addInstanced(P.shrub, mats.foliage, shrubs, (d, it) => {
+    d.position.set(it.x, lift(it.x, it.z), it.z);
+    d.rotation.set(0, it.yaw || 0, 0);
+    d.scale.setScalar(it.scale);
+  });
+  if (shrubMesh) {
+    shrubMesh.castShadow = !!args.shadows;
+    for (let i = 0; i < shrubs.length; i++) {
+      colour.setRGB(shrubs[i].colour[0], shrubs[i].colour[1], shrubs[i].colour[2]);
+      shrubMesh.setColorAt(i, colour);
+    }
+    if (shrubMesh.instanceColor) shrubMesh.instanceColor.needsUpdate = true;
+  }
+
   addInstanced(P.signalRed, mats.vertex, signalsRed, placeUpright);
   addInstanced(P.signalGreen, mats.vertex, signalsGreen, placeUpright);
   addInstanced(P.signPost, mats.vertex, stops, placeUpright);
@@ -476,6 +589,7 @@ export function buildProps(THREE, args) {
     group,
     colliders: new Float32Array(colliders),
     lampCount: lamps.length,
+    shrubCount: shrubs.length,
     poolMesh,
     headMesh,
   };

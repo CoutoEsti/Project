@@ -185,6 +185,19 @@ html, body {
 #toast { bottom: 15%; }
 #status.visible, #toast.visible { opacity: 1; }
 
+/* The last few seconds of a challenge. A pulse rather than a static red,
+   because the status line is in peripheral vision by then. */
+#status.urgent {
+  color: #ffd08a;
+  border-color: rgba(255, 200, 87, 0.55);
+  animation: status-pulse 0.7s ease-in-out infinite;
+}
+
+@keyframes status-pulse {
+  0%, 100% { background: var(--panel); }
+  50% { background: rgba(120, 70, 20, 0.7); }
+}
+
 #minimap-wrap {
   position: absolute;
   left: max(20px, env(safe-area-inset-left));
@@ -738,6 +751,118 @@ kbd {
 }
 
 #minimap { cursor: pointer; pointer-events: auto; }
+
+/* ── Photo mode ───────────────────────────────────────────────────────── */
+
+/* The whole point is an empty frame, so everything else goes away — and it
+   goes away in CSS rather than in JS, because a class on <body> cannot get
+   out of step with the mode the way a dozen `.style.display` writes can. */
+body.photo-mode #hud,
+body.photo-mode #touch,
+body.photo-mode #vignette { display: none !important; }
+
+#photo {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: none;
+  pointer-events: none;
+}
+
+#photo.visible { display: block; }
+
+/* A thin letterbox, drawn with shadows so nothing overlaps the canvas: it
+   frames the shot on screen without appearing in the file. */
+#photo::before,
+#photo::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0;
+  height: 6vh;
+  background: rgba(6, 9, 12, 0.55);
+}
+#photo::before { top: 0; }
+#photo::after { bottom: 0; }
+
+#photo-bar {
+  position: absolute;
+  bottom: calc(6vh + 22px);
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 9px 9px 9px 18px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  backdrop-filter: blur(10px);
+  pointer-events: auto;
+}
+
+#photo-fov-wrap {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+
+#photo-fov { width: 116px; }
+
+#photo-shoot {
+  padding: 8px 20px;
+  font: 600 13px var(--font);
+  color: #0d1512;
+  background: var(--accent);
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+#photo-shoot:active { transform: translateY(1px); }
+
+#photo-close {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+#photo-hint {
+  position: absolute;
+  top: calc(6vh + 16px);
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  font-size: 12px;
+  color: rgba(238, 242, 246, 0.55);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+
+/* The flash of a shutter. Short, and it never touches layout. */
+#photo-flash {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: #fff;
+  opacity: 0;
+  pointer-events: none;
+}
+
+#photo-flash.fire { animation: photo-flash 340ms ease-out; }
+
+@keyframes photo-flash {
+  0% { opacity: 0.85; }
+  100% { opacity: 0; }
+}
+
+@media (max-width: 560px) {
+  #photo-fov-wrap span { display: none; }
+  #photo-fov { width: 84px; }
+}
 
 /* ── Key bindings ─────────────────────────────────────────────────────── */
 

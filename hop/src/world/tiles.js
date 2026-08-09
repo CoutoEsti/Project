@@ -247,6 +247,7 @@ export class World {
     const buildings = [];
     const nodes = [];
     const rails = [];
+    const barriers = [];
 
     const toWorld = (geometry) => {
       const pts = new Array(geometry.length);
@@ -283,6 +284,13 @@ export class World {
         rails.push({ points: toWorld(el.geometry) });
         continue;
       }
+      // A hedge is a line of shrubs, not an area — it never reaches the
+      // painter, so it has to be picked up here or it is lost entirely.
+      if (tags.barrier) {
+        const pts = toWorld(el.geometry);
+        if (pts.length >= 2) barriers.push({ points: pts, kind: tags.barrier });
+        continue;
+      }
       const kind = areaKindFromTags(tags);
       if (kind) {
         const pts = toWorld(el.geometry);
@@ -301,7 +309,7 @@ export class World {
       }
     }
 
-    tile.parsed = { roads, clipped, areas, buildings, nodes, rails, junctions };
+    tile.parsed = { roads, clipped, areas, buildings, nodes, rails, barriers, junctions };
     tile.roads = clipped;
     tile.elements = null;   // release the raw payload
   }
@@ -417,7 +425,7 @@ export class World {
 
   // -- step 4: street furniture ----------------------------------------------
   _props(tile) {
-    const { clipped, junctions, nodes } = tile.parsed;
+    const { clipped, junctions, nodes, barriers, areas } = tile.parsed;
     if (!tile.detailed) {
       // Distant tiles get their buildings and their ground, and nothing else.
       // The colliders still matter — you can drive into a far tile before it
@@ -429,7 +437,7 @@ export class World {
       return;
     }
     const props = buildProps(THREE, {
-      nodes, roads: clipped, junctions, bounds: tile.bounds,
+      nodes, roads: clipped, junctions, barriers, areas, bounds: tile.bounds,
       groundAt: this.terrain.enabled ? (x, z) => this.groundHeight(x, z) : null,
       materials: this.materials.props,
       shadows: !!this.settings.shadows && this.settings.quality === 'high',
@@ -458,6 +466,7 @@ export class World {
     tile.parsed.areas = null;
     tile.parsed.buildings = null;
     tile.parsed.nodes = null;
+    tile.parsed.barriers = null;
   }
 
   _disposeTile(tile) {

@@ -53,6 +53,20 @@ export class Score {
     this.idle = 0;
   }
 
+  /**
+   * Points awarded outright, outside the chain — a finished challenge, say.
+   * They go straight to the total: a reward you can lose by crashing on the
+   * way home is not a reward.
+   */
+  award(points, label) {
+    const p = Math.round(points);
+    if (p <= 0) return;
+    this.total += p;
+    this.lastEvent = { label: label || 'Bonus', points: p };
+    this.flash = 1;
+    this.onEvent({ type: 'awarded', points: p, label });
+  }
+
   /** Lose everything not yet banked. */
   drop() {
     if (this.chain > 0) this.onEvent({ type: 'lost', points: Math.round(this.chain * this.multiplier) });

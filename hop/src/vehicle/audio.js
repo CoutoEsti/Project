@@ -178,6 +178,66 @@ export class EngineAudio {
     osc.stop(t + 0.32);
   }
 
+  /**
+   * The horn. Two detuned square waves a minor third apart, which is roughly
+   * what a real car horn is — a single tone sounds like a test signal.
+   */
+  horn() {
+    if (!this.ready || !this._nodes || !this.enabled) return;
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.16, t + 0.02);
+    g.gain.setValueAtTime(0.16, t + 0.34);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.46);
+
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 2600;
+    g.connect(lp).connect(this._nodes.master);
+
+    for (const f of [370, 440]) {
+      const osc = ctx.createOscillator();
+      osc.type = 'square';
+      osc.frequency.value = f;
+      osc.detune.value = f === 440 ? 6 : -6;
+      const og = ctx.createGain();
+      og.gain.value = 0.5;
+      osc.connect(og).connect(g);
+      osc.start(t);
+      osc.stop(t + 0.5);
+    }
+  }
+
+  /** A camera shutter: one click, made of filtered noise. */
+  shutter() {
+    if (!this.ready || !this._nodes || !this.enabled) return;
+    const ctx = this.ctx;
+    const t = ctx.currentTime;
+    const len = Math.floor(ctx.sampleRate * 0.08);
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    let seed = 7717;
+    for (let i = 0; i < len; i++) {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      // Two clicks: the mirror up, then the shutter closing.
+      const env = Math.exp(-i / (ctx.sampleRate * 0.006))
+        + 0.7 * Math.exp(-Math.abs(i - ctx.sampleRate * 0.035) / (ctx.sampleRate * 0.004));
+      d[i] = ((seed / 2147483648) - 1) * env * 0.5;
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 2800;
+    bp.Q.value = 1.1;
+    const g = ctx.createGain();
+    g.gain.value = 0.5;
+    src.connect(bp).connect(g).connect(this._nodes.master);
+    src.start(t);
+  }
+
   setEnabled(on) { this.enabled = !!on; }
   setVolume(v) { this.volume = Math.max(0, Math.min(1, v)); }
 

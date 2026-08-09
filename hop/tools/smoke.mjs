@@ -454,6 +454,165 @@ async function main() {
   if (scoring.gainedOnMiss < 50) problem('le frôlement ne rapporte rien');
   if (scoring.afterCrash !== 0) problem('un impact ne coûte pas la chaîne');
 
+  // --- birds ----------------------------------------------------------------
+  // Column-major 4×4: the translation sits at 12, 13, 14 of each instance.
+  // Sampling on a wall-clock timer is no good here — software rendering runs
+  // at about five frames a second, so a short window can contain no frames at
+  // all and a perfectly healthy flock looks frozen. Wait on the flock's own
+  // clock instead.
+  const birdBefore = await page.evaluate(() => ({
+    t: window.__ruelle.birds.time,
+    p: Array.from(window.__ruelle.birds.body.instanceMatrix.array.slice(12, 15)),
+  }));
+  const stepped = await page.waitForFunction(
+    (t0) => window.__ruelle.birds.time > t0 + 0.4, birdBefore.t, { timeout: 15000 },
+  ).then(() => true).catch(() => false);
+  if (!stepped) problem('l’horloge des oiseaux n’avance pas');
+  const flock = await page.evaluate((before) => {
+    const b = window.__ruelle.birds;
+    const c = Array.from(b.body.instanceMatrix.array.slice(12, 15));
+    return {
+      count: b.body.count,
+      elapsed: b.time - before.t,
+      moved: Math.hypot(c[0] - before.p[0], c[1] - before.p[1], c[2] - before.p[2]),
+      // Height above the ground *under the bird*, not under the car: with
+      // real relief the two differ by tens of metres.
+      altitude: c[1] - window.__ruelle.world.groundHeight(c[0], c[2]),
+      meshes: b.group.children.length,
+    };
+  }, birdBefore);
+  note(`oiseaux : ${flock.count} en vol, ${flock.meshes} maillages, `
+    + `${flock.moved.toFixed(1)} m en ${flock.elapsed.toFixed(1)} s, altitude ${flock.altitude.toFixed(0)} m`);
+  if (flock.count < 4) problem('aucun oiseau en vol de jour');
+  if (flock.moved < 0.1) problem('les oiseaux ne bougent pas');
+  if (flock.altitude < 10) problem('les oiseaux volent trop bas');
+
+  // Night: they should go home.
+  await page.evaluate(() => { window.__ruelle.settings.timeOfDay = 23.5; });
+  const roosted = await page.waitForFunction(
+    () => window.__ruelle.birds.body.count === 0, null, { timeout: 15000 },
+  ).then(() => true).catch(() => false);
+  await page.evaluate(() => { window.__ruelle.settings.timeOfDay = 9.5; });
+  if (!roosted) problem('les oiseaux volent encore en pleine nuit');
+  else note('oiseaux : aucun en vol la nuit');
+
+  // --- generated challenge --------------------------------------------------
+  const challenge = await page.evaluate(async () => {
+    const g = window.__ruelle;
+    const v = g.vehicle;
+    const home = { x: v.x, z: v.z };
+    const ok = g.challenges.generate(v.x, v.z, g.world.allRoads(), 'Test');
+    if (!ok) return { ok };
+    const route = g.challenges.route.map((p) => ({ x: p.x, z: p.z }));
+    const budget = g.challenges.timeLeft;
+    // Legs must be reachable distances apart, not points on top of each other.
+    let shortest = Infinity;
+    let prev = { x: v.x, z: v.z };
+    for (const p of route) {
+      shortest = Math.min(shortest, Math.hypot(p.x - prev.x, p.z - prev.z));
+      prev = p;
+    }
+    // Teleport through the route and confirm each checkpoint registers.
+    const seen = [];
+    for (const p of route) {
+      v.x = p.x; v.z = p.z;
+      g.challenges.update(1 / 60, v);
+      seen.push(g.challenges.index);
+    }
+    const state = g.challenges.state;
+    const total = g.score.total;
+    g.challenges.cancel();
+    // Put the car back where it was: teleporting a kilometre away leaves the
+    // tile ring and every pedestrian stranded, and the next tests read those.
+    v.x = home.x; v.z = home.z;
+    g.world.update(v.x, v.z);
+    return { ok, legs: route.length, budget, shortest, seen, state, total };
+  });
+  if (!challenge.ok) {
+    problem('impossible de générer un défi sur une carte chargée');
+  } else {
+    note(`défi : ${challenge.legs} étapes, ${Math.round(challenge.budget)} s alloués, `
+      + `plus courte ${Math.round(challenge.shortest)} m, état final ${challenge.state}`);
+    if (challenge.legs < 2) problem('défi trop court');
+    if (challenge.shortest < 60) problem('deux points de passage se chevauchent');
+    if (challenge.state !== 'done') problem('parcourir tout le trajet ne termine pas le défi');
+    if (!(challenge.total > 0)) problem('un défi terminé ne rapporte aucun point');
+  }
+
+  // --- pedestrians ----------------------------------------------------------
+  const walkers = await page.waitForFunction(
+    () => window.__ruelle.people.torso.count >= 5, null, { timeout: 25000 },
+  ).then(() => true).catch(() => false);
+  if (!walkers) {
+    problem('personne ne marche sur les trottoirs');
+  } else {
+    const crowd = await page.evaluate(async () => {
+      const g = window.__ruelle;
+      const p = g.people;
+      const first = p.people.find((q) => q.active);
+      const before = { x: first.x, z: first.z };
+      const t0 = p.people.filter((q) => q.active).length;
+      await new Promise((r) => setTimeout(r, 900));
+      // Nobody should still be loaded on the far side of the neighbourhood.
+      let far = 0;
+      for (const q of p.people) {
+        if (!q.active) continue;
+        if (Math.hypot(q.x - g.vehicle.x, q.z - g.vehicle.z) > 200) far++;
+      }
+      return {
+        active: t0,
+        parts: p.group.children.length,
+        moved: Math.hypot(first.x - before.x, first.z - before.z),
+        far,
+      };
+    });
+    note(`piétons : ${crowd.active} actifs, ${crowd.parts} maillages, `
+      + `le premier a fait ${crowd.moved.toFixed(2)} m, ${crowd.far} hors de portée`);
+    if (crowd.active < 5) problem(`trop peu de piétons (${crowd.active})`);
+    // Recycling is spread over frames on purpose, so a few stragglers a frame
+    // after a teleport are expected; a majority stranded is not.
+    if (crowd.far > crowd.active / 2) problem('les piétons ne sont pas recyclés autour de la voiture');
+  }
+
+  // --- hedges and bushes ----------------------------------------------------
+  const green = await page.evaluate(() => {
+    let shrubs = 0;
+    for (const t of window.__ruelle.world.tiles.values()) {
+      if (t.propMeshes && t.propMeshes.shrubCount) shrubs += t.propMeshes.shrubCount;
+    }
+    return shrubs;
+  });
+  note(`buissons et haies : ${green} instances`);
+  if (green < 1) problem('aucun buisson généré dans les parcs');
+
+  // --- photo mode -----------------------------------------------------------
+  const photo = await page.evaluate(async () => {
+    const g = window.__ruelle;
+    g.photo.toggle(g.car.group.position);
+    const on = g.photo.active;
+    const hudHidden = getComputedStyle(document.querySelector('#hud')).display === 'none';
+    const barVisible = document.querySelector('#photo').classList.contains('visible');
+    // Orbit a quarter turn and make sure the camera actually goes round.
+    const p0 = g.camera.position.clone();
+    g.photo.yaw += Math.PI / 2;
+    g.photo.update(g.car.group.position);
+    const swung = g.camera.position.distanceTo(p0);
+    const url = await g.photo.capture();
+    g.photo.set(false);
+    return {
+      on, hudHidden, barVisible, swung,
+      shot: typeof url === 'string' && url.startsWith('blob:'),
+      off: !g.photo.active,
+      hudBack: getComputedStyle(document.querySelector('#hud')).display !== 'none',
+    };
+  });
+  note(`mode photo : actif ${photo.on}, hud masqué ${photo.hudHidden}, orbite ${photo.swung.toFixed(1)} m, fichier ${photo.shot}`);
+  if (!photo.on || !photo.barVisible) problem('le mode photo ne s’active pas');
+  if (!photo.hudHidden) problem('le hud reste visible en mode photo');
+  if (photo.swung < 1) problem('la caméra photo ne tourne pas');
+  if (!photo.shot) problem('le mode photo ne produit pas d’image');
+  if (!photo.off || !photo.hudBack) problem('impossible de sortir du mode photo');
+
   // --- frame rate ----------------------------------------------------------
   const fps = await page.evaluate(() => window.__ruelle.loop.fps);
   note(`fps (rendu logiciel headless) : ${fps.toFixed(1)}`);
@@ -470,8 +629,12 @@ async function main() {
   });
   await page.waitForTimeout(1500);
   const after = await page.evaluate(() => window.__ruelle.world.tiles.size);
+  // Driving in a straight line leaves a corridor behind: everything within a
+  // Chebyshev radius of KEEP_RADIUS (3) of the finish that was ever created,
+  // which is 7 columns by the build ring's 5 rows = 35. Anything materially
+  // above that means retirement has stopped happening.
   note(`tuiles actives avant/après 3,6 km : ${before} → ${after}`);
-  if (after > 30) problem(`les tuiles ne sont pas recyclées (${after} actives)`);
+  if (after > 38) problem(`les tuiles ne sont pas recyclées (${after} actives)`);
 
   await finish(browser, server, page);
 }

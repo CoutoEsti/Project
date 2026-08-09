@@ -109,9 +109,12 @@
       <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>conduire</span></div>
       <div><kbd>Espace</kbd><span>frein à main</span></div>
       <div><kbd>G</kbd><span>poser départ / arrivée</span></div>
+      <div><kbd>B</kbd><span>défi tiré de la carte</span></div>
       <div><kbd>M</kbd><span>carte plein écran</span></div>
+      <div><kbd>P</kbd><span>mode photo</span></div>
       <div><kbd>R</kbd><span>replacer sur la route</span></div>
       <div><kbd>C</kbd><span>caméra</span></div>
+      <div><kbd>H</kbd><span>klaxon</span></div>
       <div><kbd>L</kbd><span>phares</span></div>
       <div><kbd>Échap</kbd><span>menu</span></div>
       <div class="keys-note">Tout est remappable dans ⚙ Réglages.</div>
@@ -154,6 +157,16 @@
     <label>
       <span>Volume</span>
       <input type="range" id="set-volume" min="0" max="1" step="0.05">
+    </label>
+
+    <label class="check">
+      <input type="checkbox" id="set-music">
+      <span>Musique</span>
+    </label>
+
+    <label>
+      <span>Volume musique</span>
+      <input type="range" id="set-music-volume" min="0" max="1" step="0.05">
     </label>
 
     <label>
@@ -219,6 +232,21 @@
     <button id="mapview-close" aria-label="Fermer la carte">✕</button>
   </div>
 </div>
+
+<!-- ── Photo mode ────────────────────────────────────────────────────── -->
+<div id="photo">
+  <div id="photo-bar">
+    <label id="photo-fov-wrap">
+      <span>Focale</span>
+      <input type="range" id="photo-fov" min="18" max="90" step="1" value="55"
+             aria-label="Focale">
+    </label>
+    <button id="photo-shoot" class="primary">Photo</button>
+    <button id="photo-close" aria-label="Quitter le mode photo">✕</button>
+  </div>
+  <p id="photo-hint">Glisse pour tourner · molette ou pincement pour zoomer</p>
+</div>
+<div id="photo-flash"></div>
 
 <!-- ── Fatal error ───────────────────────────────────────────────────── -->
 <div id="fatal">
