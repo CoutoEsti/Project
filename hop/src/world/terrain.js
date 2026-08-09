@@ -37,6 +37,7 @@ export class Terrain {
     this.originLat = 0;
     this.originLon = 0;
     this.ready = false;
+    this.lastError = null;
   }
 
   _key(x, y) { return `${x}/${y}`; }
@@ -74,8 +75,31 @@ export class Terrain {
    */
   async ensureOrigin(lat, lon) {
     if (!this.enabled) return;
-    await this.ensure({ north: lat, south: lat, east: lon, west: lon });
+
+    // The tile you land in, and its eight neighbours.
+    //
+    // Not overkill: at this zoom one tile is nine kilometres, so the ring
+    // covers about twenty-eight — which is what the horizon mesh spans. Load
+    // only the centre one and everything past nine kilometres reads as flat,
+    // and a flat horizon at the height you are standing buries the city below
+    // you. Nine PNGs, under a megabyte, once per hop.
+    const cx = Math.floor(lonToTileX(lon, ZOOM));
+    const cy = Math.floor(latToTileY(lat, ZOOM));
+    let centre = null;
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const key = this._key(cx + dx, cy + dy);
+        if (this.tiles.has(key)) continue;
+        this.tiles.set(key, 'pending');
+        const job = this._load(cx + dx, cy + dy, key);
+        if (dx === 0 && dy === 0) centre = job;
+      }
+    }
+    // Only the centre tile carries the anchor, so the hop waits on that one.
+    // The other eight matter only for the far horizon and can land late.
+    if (centre) await centre;
     this._resolveBaseline();
+    this.ready = true;
   }
 
   async _load(x, y, key) {
@@ -100,9 +124,24 @@ export class Terrain {
       // The origin's own tile may only have arrived now; until it does, every
       // height in the world is measured against a placeholder.
       this._resolveBaseline();
-    } catch {
+    } catch (err) {
       this.tiles.set(key, 'failed');
+      // A silent elevation failure is indistinguishable from flat ground, and
+      // "the mountain is missing" is not a bug report anyone can act on. Keep
+      // the first reason so the game can say what actually went wrong.
+      if (!this.lastError) this.lastError = String((err && err.message) || err);
     }
+  }
+
+  /** {loaded, failed, pending} — what the elevation layer actually has. */
+  stats() {
+    let loaded = 0, failed = 0, pending = 0;
+    for (const v of this.tiles.values()) {
+      if (v === 'failed') failed++;
+      else if (v === 'pending') pending++;
+      else loaded++;
+    }
+    return { loaded, failed, pending, error: this.lastError || null };
   }
 
   /**

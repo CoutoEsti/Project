@@ -36,15 +36,26 @@ const RING = { low: 1, medium: 2, high: 2 };
 const DETAIL_RING = { low: 1, medium: 1, high: 1 };
 const KEEP_RADIUS = 3;         // tiles kept alive beyond the build ring
 
-// How far the horizon plane sits below the ground you are standing on.
+// The horizon.
 //
-// That plane exists only so unbuilt distance shows ground colour instead of
-// sky. It used to sit at a fixed −8 cm, which was correct while the world was
-// flat — and the moment relief arrived it punched through every street that
-// sloped downhill and swallowed it. Forty metres clears anything Montréal
-// does within sight, and at four kilometres it is half a degree below the
-// true horizon, which nobody can see.
-const BACKDROP_DROP = 40;
+// Built tiles reach about three kilometres. Everything past that was a single
+// flat plane — which is why the mountain you are standing beside can be built
+// correctly and still not look like a mountain: from a car you are mostly
+// looking at the distance, and the distance was a sheet of card.
+//
+// So the horizon follows the height field too. One elevation tile covers about
+// nine kilometres, so the data for this is almost always already in memory —
+// it costs one displaced grid, rebuilt only when you have travelled far enough
+// to matter.
+//
+// It sits below the real ground because it is coarser: 14 km across at 96
+// segments is a hundred and fifty metres a step, and on a slope like Mount Royal's that
+// can miss the fine mesh by a good ten metres. Fourteen metres of clearance
+// hides that, and at a kilometre it is under a degree low.
+const BACKDROP_SPAN = 14000;
+const BACKDROP_SEGMENTS = 96;
+const BACKDROP_DROP = 14;
+const BACKDROP_REFRESH = 700;   // metres of travel before it is redisplaced
 
 // Hysteresis: upgrade a tile when it comes within the detail ring, but do not
 // downgrade it until it is well outside. Without the gap, driving along a
@@ -85,16 +96,18 @@ export class World {
     this.materials.props.lightPool = this.materials.lightPool;
 
     this.backdrop = new THREE.Mesh(
-      new THREE.PlaneGeometry(16000, 16000),
+      new THREE.PlaneGeometry(BACKDROP_SPAN, BACKDROP_SPAN,
+                              BACKDROP_SEGMENTS, BACKDROP_SEGMENTS),
       new THREE.MeshStandardMaterial({
         color: new THREE.Color(GROUND_COLORS.base), roughness: 1, metalness: 0,
       }),
     );
     this.backdrop.rotation.x = -Math.PI / 2;
-    // Height is set per frame in update() — see BACKDROP_DROP.
     this.backdrop.position.y = -BACKDROP_DROP;
     this.backdrop.receiveShadow = false;
+    this.backdrop.frustumCulled = false;
     this.group.add(this.backdrop);
+    this._backdropAt = null;      // where it was last displaced, world metres
 
     this.readyTiles = 0;
     this.requestedTiles = 0;
@@ -109,9 +122,17 @@ export class World {
     this.projection = new Projection(lat, lon);
     this.terrain.setOrigin(lat, lon);
     this.clear();
+    // The horizon mesh holds baked heights measured against the *old* anchor.
+    // Hopping from the Plateau to the summit moves that anchor a hundred and
+    // sixty metres, so a horizon nobody invalidated ends up hanging in the air
+    // over the city. It has to be thrown away with everything else.
+    this._backdropAt = null;
+    this._backdropTiles = -1;
     // Nothing may build until the elevation anchor is real — see
     // Terrain.ensureOrigin. Failures resolve too; flat is a fine fallback.
-    this._originTerrain = this.terrain.ensureOrigin(lat, lon).catch(() => {});
+    this._originTerrain = this.terrain.ensureOrigin(lat, lon)
+      .catch(() => {})
+      .then(() => { this._backdropAt = null; });
   }
 
   /** Height of the ground at a world position. */
@@ -139,7 +160,7 @@ export class World {
     const centre = tileAt(ll.lat, ll.lon, ZOOM);
     const ring = this.ring;
 
-    this.backdrop.position.y = this.terrain.height(ll.lat, ll.lon) - BACKDROP_DROP;
+    this._updateBackdrop(x, z);
 
     for (let dy = -ring; dy <= ring; dy++) {
       for (let dx = -ring; dx <= ring; dx++) {
@@ -166,6 +187,44 @@ export class World {
 
     // Nearest-first, so the tile you are about to drive into is built first.
     this.buildQueue.sort((a, b) => this._distanceTo(a, x, z) - this._distanceTo(b, x, z));
+  }
+
+  /**
+   * Recentre the horizon on the player and lay it back over the relief.
+   *
+   * Only when it is worth it: a few hundred metres of travel changes nothing
+   * about a fourteen-kilometre grid, and displacing twenty thousand vertices
+   * every frame would show up in the frame time.
+   */
+  _updateBackdrop(x, z, force = false) {
+    if (!this.terrain.enabled) {
+      this.backdrop.position.set(x, -BACKDROP_DROP, z);
+      return;
+    }
+    // Elevation arrives over the network, so the first displacement is against
+    // whatever had landed by then. Redo it whenever more has.
+    const loaded = this.terrain.stats().loaded;
+    const grew = loaded !== this._backdropTiles;
+    this._backdropTiles = loaded;
+
+    const moved = !this._backdropAt
+      || Math.hypot(x - this._backdropAt.x, z - this._backdropAt.z) > BACKDROP_REFRESH;
+    if (!moved && !grew && !force) {
+      // Between refreshes it stays put; sliding it would drag the relief with
+      // it, which reads as the whole landscape swimming.
+      return;
+    }
+    this._backdropAt = { x, z };
+    this.backdrop.position.set(x, -BACKDROP_DROP, z);
+
+    // The plane is built in XY and rotated flat, so its local +Z is world −Y
+    // after the rotation: displacing along it is what lifts the ground.
+    const pos = this.backdrop.geometry.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      pos.setZ(i, this.groundHeight(x + pos.getX(i), z - pos.getY(i)));
+    }
+    pos.needsUpdate = true;
+    this.backdrop.geometry.computeVertexNormals();
   }
 
   _distanceTo(tile, x, z) {

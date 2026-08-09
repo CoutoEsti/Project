@@ -399,6 +399,7 @@ class Game {
     // A route is a list of world coordinates, and the world origin just moved.
     this.challenges.cancel();
     this.people.reset();
+    this._terrainWarned = false;
     this.vehicle.reset(0, 0, 0);
     this.spawned = false;
     this._spawnRetry = 0;
@@ -411,6 +412,24 @@ class Game {
 
   _onWorldProgress() {
     if (!this.spawned) this._trySpawn();
+    this._checkTerrain();
+  }
+
+  /**
+   * Say so when the ground has no elevation.
+   *
+   * A failed elevation fetch and perfectly flat ground look identical, so a
+   * silent failure turns into "the mountain is missing" with nothing to go on.
+   * Once, per hop, and only when everything asked for has come back empty.
+   */
+  _checkTerrain() {
+    if (this._terrainWarned || !this.settings.terrain) return;
+    const s = this.world.terrain.stats();
+    if (s.loaded > 0 || s.failed < 2 || s.pending > 0) return;
+    this._terrainWarned = true;
+    this.hud.toast('Altitude indisponible — le sol reste plat. '
+      + (s.error ? `(${s.error})` : ''), 7000);
+    console.warn('[ruelle] altitude :', s);
   }
 
   /** Put the car on an actual street, once one has loaded. */

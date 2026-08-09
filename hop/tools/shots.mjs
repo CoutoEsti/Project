@@ -78,8 +78,33 @@ for (const [name, lat, lon] of PLACES) {
       window.__ruelle.settings.timeOfDay = h;
     }, [mode, hour]);
     await page.waitForTimeout(2500);
-    await page.screenshot({ path: path.join(OUT, `${name}-${mode}.png`) });
+    await page.screenshot({ path: path.join(OUT, `${name}-${mode}.png`), timeout: 120000 });
   }
+
+  const diag = await page.evaluate(() => {
+    const g = window.__ruelle;
+    const b = g.world.backdrop;
+    const pos = b.geometry.attributes.position;
+    let above = 0, lo = Infinity, hi = -Infinity, worst = 0;
+    for (let i = 0; i < pos.count; i++) {
+      const h = pos.getZ(i);
+      if (h < lo) lo = h;
+      if (h > hi) hi = h;
+      const gh = g.world.groundHeight(b.position.x + pos.getX(i), b.position.z - pos.getY(i));
+      const over = (h + b.position.y) - gh;
+      if (over > 0) { above++; if (over > worst) worst = over; }
+    }
+    return {
+      carY: g.car.group.position.y.toFixed(1),
+      groundY: g.groundY.toFixed(1),
+      planeY: b.position.y.toFixed(1),
+      relief: (hi - lo).toFixed(0),
+      above, worst: worst.toFixed(1),
+      terrain: g.world.terrain.stats(),
+    };
+  });
+  console.log(`   ${JSON.stringify(diag)}`);
+  if (diag.above > 0) console.log(`   ✗ HORIZON AU-DESSUS DU SOL (${diag.above}, jusqu'à ${diag.worst} m)`);
 
   const stats = await page.evaluate(() => {
     const r = window.__ruelle.renderer.info.render;

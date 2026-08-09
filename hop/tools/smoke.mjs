@@ -443,22 +443,32 @@ async function main() {
     }
     return { worst, at, anchored: g.world.terrain.baselineReady, baseline: g.world.terrain.baseline };
   });
-  // The horizon plane must stay under every bit of ground you can see, or it
-  // hides the street you are driving on.
+  // The horizon has to carry the relief too. A flat one erases the mountain
+  // you are standing beside — from a car most of the frame is distance, and
+  // the distance is this mesh, not the built tiles. It also has to stay under
+  // every bit of ground you can see, or it hides the street.
   const horizon = await page.evaluate(() => {
     const g = window.__ruelle;
-    const v = g.vehicle;
-    let lowest = Infinity;
-    for (let dz = -600; dz <= 600; dz += 60) {
-      for (let dx = -600; dx <= 600; dx += 60) {
-        lowest = Math.min(lowest, g.world.groundHeight(v.x + dx, v.z + dz));
-      }
+    const b = g.world.backdrop;
+    const pos = b.geometry.attributes.position;
+    let lo = Infinity, hi = -Infinity, above = 0, worst = 0;
+    for (let i = 0; i < pos.count; i++) {
+      const h = pos.getZ(i);
+      if (h < lo) lo = h;
+      if (h > hi) hi = h;
+      const gh = g.world.groundHeight(b.position.x + pos.getX(i), b.position.z - pos.getY(i));
+      const over = (h + b.position.y) - gh;
+      if (over > 0) { above++; if (over > worst) worst = over; }
     }
-    return { plane: g.world.backdrop.position.y, lowest };
+    return { relief: hi - lo, drop: b.position.y, above, worst, verts: pos.count };
   });
-  note(`plan d'horizon à ${horizon.plane.toFixed(1)} m, sol le plus bas ${horizon.lowest.toFixed(1)} m`);
-  if (horizon.plane > horizon.lowest) {
-    problem('le plan d’horizon perce le sol et masque la rue');
+  note(`horizon : ${horizon.verts} sommets, ${horizon.relief.toFixed(0)} m de dénivelé, `
+    + `${horizon.drop.toFixed(0)} m sous le sol, ${horizon.above} au-dessus`);
+  if (horizon.above > 0) {
+    problem(`le plan d’horizon perce le sol (${horizon.above} sommets, jusqu’à ${horizon.worst.toFixed(0)} m)`);
+  }
+  if (relief.enabled && relief.loaded > 0 && horizon.relief < 20) {
+    problem('l’horizon est plat alors que le relief est chargé — la montagne disparaît au loin');
   }
 
   note(`continuité du sol : plus gros saut ${continuity.worst.toFixed(1)} m sur 50 m`
@@ -665,6 +675,37 @@ async function main() {
   // --- frame rate ----------------------------------------------------------
   const fps = await page.evaluate(() => window.__ruelle.loop.fps);
   note(`fps (rendu logiciel headless) : ${fps.toFixed(1)}`);
+
+  // --- hopping resets the horizon -------------------------------------------
+  // Last, because it reloads the world: the anchor moves a hundred and sixty
+  // metres between the Plateau and the summit, and the horizon carries baked
+  // heights, so a hop that does not invalidate it leaves a mesh hanging in the
+  // air over the city. That is exactly the bug this is here to catch.
+  const rehop = await page.evaluate(async () => {
+    const g = window.__ruelle;
+    g.hop(45.5088, -73.5878, 'Mont Royal', true);
+    // Wait on the elevation layer, not on a clock: in software rendering the
+    // page runs at four frames a second and a fixed wait is a coin toss.
+    for (let i = 0; i < 160; i++) {
+      await new Promise((r) => setTimeout(r, 250));
+      const t = g.world.terrain.stats();
+      if (i > 8 && !t.pending && g.world.terrain.baselineReady) break;
+    }
+    const b = g.world.backdrop;
+    const pos = b.geometry.attributes.position;
+    let above = 0, worst = 0;
+    for (let i = 0; i < pos.count; i++) {
+      const gh = g.world.groundHeight(b.position.x + pos.getX(i), b.position.z - pos.getY(i));
+      const over = (pos.getZ(i) + b.position.y) - gh;
+      if (over > 0) { above++; if (over > worst) worst = over; }
+    }
+    return { above, worst, baseline: g.world.terrain.baseline };
+  });
+  note(`horizon après un saut au mont Royal : ancrage ${rehop.baseline.toFixed(0)} m, `
+    + `${rehop.above} sommets au-dessus du sol`);
+  if (rehop.above > 0) {
+    problem(`sauter ne réinitialise pas l’horizon (${rehop.above} sommets, jusqu’à ${rehop.worst.toFixed(0)} m)`);
+  }
 
   // --- memory: drive far enough to retire tiles ----------------------------
   const before = await page.evaluate(() => window.__ruelle.world.tiles.size);
