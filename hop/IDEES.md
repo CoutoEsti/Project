@@ -445,6 +445,41 @@ quelqu'un qui n'a jamais touché au jeu, au clavier, sans explication.
 
 ---
 
+## La vraie fourche : procédural pour toujours, ou générer puis sculpter ?
+
+Le débat Unity contre navigateur cache une décision plus importante, et qui
+doit se prendre en premier parce que c'est elle qui choisit le moteur.
+
+Aujourd'hui la ville est **générée à l'exécution**, à partir d'OpenStreetMap.
+Conséquence directe : **personne ne peut la modifier à la main.** On ne peut pas
+déplacer une intersection bizarre, poser un commerce précis, ou creuser une
+piste de drag quelque part. On règle le *générateur*, pas la ville.
+
+L'alternative est de **cuire** la ville une fois — l'exporter en scène — puis de
+la sculpter à la main. On gagne le contrôle total. On perd le fait de pouvoir
+régénérer : le jour où on améliore les façades ou les routes, il faut choisir
+entre relancer le générateur et jeter ses retouches, ou garder ses retouches et
+ne jamais bénéficier des améliorations.
+
+**C'est une porte à sens unique, et elle l'est dans n'importe quel moteur.** Ce
+n'est pas Unity qui l'ouvre — Unity rend juste le côté sculpté nettement plus
+agréable, parce qu'il a l'éditeur de scène que le navigateur n'aura jamais.
+
+Donc la question à trancher avant tout le reste :
+
+> Est-ce que Montréal doit être **exacte et régénérable**, ou **arrangée à la
+> main pour bien jouer** ?
+
+Si c'est la première : rester sur le web, le générateur est l'atout du projet.
+Si c'est la seconde : Unity devient le bon outil, et il faudrait basculer tôt
+plutôt que tard.
+
+**Un pont existe entre les deux**, et il vaut la peine d'être noté : le
+générateur est de la *logique*, pas du rendu. Il pourrait exporter un quartier
+en glTF — un fichier que Unity, Blender ou Godot ouvrent directement. Ça
+laisserait sculpter sans rien réécrire, et ça garde les deux portes ouvertes
+jusqu'à ce qu'on sache laquelle on veut.
+
 ## Unity, et pourquoi non
 
 Question légitime : le propriétaire du projet sait se servir de Unity et ne sait
