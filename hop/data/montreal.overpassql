@@ -9,6 +9,8 @@
 //     [bbox:45.494,-73.578,45.520,-73.545]
 //   Saint-Léonard
 //     [bbox:45.575,-73.612,45.605,-73.575]
+//   ÎLE DE MONTRÉAL EN ENTIER — compter 150 à 300 Mo et un long timeout
+//     [bbox:45.400,-73.980,45.720,-73.470]
 //
 // Lancer :
 //   curl -o hop/data/montreal.raw.json \

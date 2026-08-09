@@ -14,66 +14,66 @@ Un serveur est nécessaire : le jeu est en modules ES et `file://` les bloque.
 
 ## État actuel — 7 août 2026
 
-**Ce qui fonctionne, vérifié par le test automatisé** (`node hop/tools/smoke.mjs`) :
+Vérifié par `node hop/tools/smoke.mjs`, 18 contrôles automatisés à chaque commit.
 
-- Monde streamé depuis les vraies données Montréal (19 618 bâtiments,
-  7 672 tronçons, 28 150 arbres, 1 219 feux, 549 lampadaires, 11 × 9 km).
-- Physique : 0-50 en 2,6 s, 0-100 en 7,0 s, pointe 183 km/h, freinage à 1 g,
-  frein à main qui décroche l'arrière à 1,47 rad de dérive.
-- 9 tuiles construites, 1 700 tronçons visibles, 117 draw calls, 3,7 M
-  triangles par image.
-- Nuit : fenêtres allumées, halos de lampadaires, phares.
-- Chrono : portes départ/arrivée, parcours armé, lien de partage.
-- Recyclage des tuiles après 3,6 km de route (pas de fuite mémoire).
-- Zéro erreur console, zéro erreur de page.
+**Monde.** Streamé depuis les vraies données Montréal — 19 618 bâtiments,
+7 672 tronçons, 28 150 arbres, 1 219 feux, 549 lampadaires, sur 11 × 9 km.
+Anneau de 5 × 5 tuiles, soit 4,3 km de portée, avec deux niveaux de détail :
+les tuiles lointaines gardent sol et bâtiments, perdent le mobilier urbain et
+un quart de leur texture. Recyclage vérifié après 3,6 km de route.
 
-**Corrigé depuis** : les vitres reflètent le ciel au lieu d'être des trous
-noirs, et la caméra de poursuite ne traverse plus les murs — elle se rapproche
-jusqu'au dernier point dégagé.
+**Rendu.** Éclairage par image : le ciel est cuit en carte d'environnement
+préfiltrée, re-cuite quand l'heure bouge, et c'est lui que reflètent vitres,
+eau et carrosserie. Matériaux PBR partout, cartes de rugosité et de normales
+générées. Quatre familles de façades dans un atlas — brique du Plateau, pierre
+grise, commerce, bloc d'après-guerre — choisies d'après les tags OSM, en un
+seul appel de rendu. Occlusion entre bâtiments approchée par comptage de
+voisinage. Grain d'asphalte tuilé. Feuillage en panneaux croisés alpha testés.
+Nuit complète : fenêtres allumées, halos, phares en projecteur.
+
+**Conduite.** 0-50 en 2,3 s, 0-100 en 6,7 s, pointe 184 km/h, freinage à 1 g,
+virage tenu à 62 km/h pour 0,76 rad/s, frein à main qui décroche l'arrière à
+1,48 rad. Joystick flottant analogique sur mobile, manette, et onze commandes
+remappables.
+
+**Jeu.** Portes départ/arrivée posées n'importe où, chronométrage, fantôme
+translucide du meilleur tour, lien de partage. Carte plein écran cliquable pour
+se téléporter.
+
+**Assets.** Déposer `models/car.glb`, `tree.glb` ou `lamp.glb` remplace la
+version générée, sans configuration. `tools/prepare-model.mjs` compresse un
+modèle de vitrine par vingt à cinquante.
 
 ---
 
-## Prochaine session : le réalisme, par ordre de rendement
+## Ce qui reste, par ordre de rendement
 
-Le classement est fait au rapport « effet perçu / coût », pas par difficulté.
+**1. De vraies textures.** C'est le plafond actuel, et il est net : tout ce que
+tu vois est *dessiné*, pas photographié. Quatre familles de façades générées
+valent mieux qu'une, mais une photo de brique montréalaise vaudra mieux que
+mes quatre. Même chose pour l'asphalte. Voir `models/README.md` et la section
+splat mapping ci-dessous.
 
-**1. Montréal en entier, en PMTiles.** Aujourd'hui le jeu télécharge 10,6 Mo
-d'un coup pour 11 × 9 km. Un fichier PMTiles interrogé par requêtes HTTP Range
-ne charge que les tuiles sous les roues : l'île complète tiendrait dans
-150-250 Mo hébergés pour ~200 Ko par tuile, et la même architecture monte
-jusqu'à la planète. C'est le prérequis de tout le reste, parce que ça libère le
-budget mémoire que les points suivants vont dépenser.
+**2. Splat mapping du sol.** Le sol est un composite peint — routes, trottoirs,
+gazon dans un seul canvas par tuile — donc on ne peut pas y échanger une
+photo. La vraie solution garde ce canvas comme *masque* et laisse un shader
+mélanger trois ou quatre jeux PBR tuilés par-dessus, chacun à son échelle.
+Textures attendues sous `assets/surfaces/{asphalt,sidewalk,grass}/`.
 
-**2. Sortir la construction des tuiles dans un Web Worker.** Le budget de 8 ms
-par image est ce qui plafonne la densité. Avec `OffscreenCanvas`, la peinture du
-sol et la construction des maillages partent d'un fil séparé et reviennent en
-`ImageBitmap` et en `ArrayBuffer` transférables. Le fil principal ne fait plus
-que du rendu.
+**3. Occlusion.** Depuis une rue, neuf bâtiments sur dix sont cachés derrière
+ceux de devant, et on les dessine quand même. C'est le budget qui paiera les
+assets haute qualité.
 
-**3. Éclairage.** C'est là que se joue le gros de la sensation de réel, pas dans
-le nombre de polygones. Dans l'ordre : occlusion ambiante en espace écran, pour
-que les bâtiments touchent enfin le sol ; cartes d'ombres en cascade, pour des
-ombres nettes de près et lointaines à la fois ; puis une carte d'environnement
-recalculée selon l'heure, qui donnera aux vitres un vrai reflet plutôt qu'un
-dégradé peint.
+**4. Post-traitement.** SSAO, bloom, étalonnage. Les addons three.js sont déjà
+vendorisés sous `vendor/jsm/`.
 
-**4. Matériaux.** Passer les façades en PBR avec des cartes de rugosité et de
-normales générées, ajouter l'asphalte mouillé et les flaques, salir les bas de
-murs. Cher en travail d'auteur, mais sans risque architectural.
+**5. L'île complète.** Voir `data/README.md` : la bbox est prête, il ne manque
+que l'export. Au-delà, PMTiles pour ne plus jamais charger la ville d'un bloc.
 
-**5. Relief.** Les tuiles Terrarium d'AWS (ouvertes, sans clé) donnent une
-altitude tous les 30 m. Montréal est plate, donc le gain local se limite au
-mont Royal — mais c'est ce qui débloque San Francisco et les Laurentides. Piège
-connu : à 30 m de résolution, il faut draper puis lisser les routes sur le
-modèle, sinon la voiture tressaute à chaque sommet.
+**6. Relief**, puis suspension quatre roues — dans cet ordre, parce que sans
+dénivelé une vraie suspension ne se voit pas.
 
-**6. Le véhicule.** Suspension par raycast sur quatre roues au lieu du modèle
-bicyclette, transfert de charge latéral, et un moteur audio à couches
-croisées par régime. À faire seulement une fois qu'il y a du relief : sans
-dénivelé, une vraie suspension ne se voit pas.
-
-Volontairement écartés pour l'instant : trafic, piétons, et toute imagerie
-satellite.
+Volontairement écartés : trafic, piétons, imagerie satellite.
 
 ---
 
