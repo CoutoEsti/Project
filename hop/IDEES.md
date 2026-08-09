@@ -1,5 +1,69 @@
 # Idées
 
+## L'ordre
+
+Ce qu'on ferait, dans cet ordre, et pourquoi celui-là. Chaque étape rend la
+suivante possible ou mesurable.
+
+| # | Quoi | Pourquoi maintenant | Taille |
+|---|---|---|---|
+| 0 | **Panneau de réglage en direct + `tuning.js`** | Rien ne peut être réglé par le propriétaire du jeu aujourd'hui. C'est l'outil de toutes les étapes suivantes | Petit |
+| 1 | **Courbe de pneu + sensibilité à la charge** | La signature de conduite. Tout le reste — neige, pneus, pièces — ne veut rien dire sans elle | Moyen |
+| 2 | **Quart de mille + dyno** | Rend le talent et les pièces *visibles* et partageables. Le chrono, les portes et les fantômes existent déjà | Petit |
+| 3 | **Garage v1 : peinture, jantes, hauteur** | Personnalisation visible immédiatement, zéro équilibrage à faire | Moyen |
+| 4 | **Pièces mécaniques v1** | Moteur, boîte, pneus, suspension, freins, allègement — sur la voiture de départ. La monnaie existe déjà (le score) | Moyen |
+| 5 | **Neige + pneus d'hiver + météo réelle** | Un seul bloc. L'identité montréalaise, et le premier achat qui change vraiment la conduite | Moyen |
+| 6 | **Traction / propulsion / intégrale** | Nécessaire *avant* de vendre une deuxième voiture : le train moteur est l'identité d'un char | Moyen |
+| 7 | **Boutique de véhicules** | En dernier, quand on saura ce que vaut un point. Bloqué par le poids des modèles | Gros |
+
+Deux règles pour ne pas se perdre : l'étape 1 se fait avec le banc d'essai
+existant (`tools/smoke.mjs`), et rien après l'étape 4 ne se construit avant que
+l'économie ait des chiffres.
+
+## Le plafond technique du navigateur
+
+Pour savoir jusqu'où ça peut aller avant de promettre quoi que ce soit.
+
+| | Aujourd'hui | Le plafond réaliste | Ce qui bloque |
+|---|---|---|---|
+| Poids total | ~50 Mo | 150-200 Mo si chargé à la demande | La patience au premier lancement |
+| Triangles | ~4 M | 8-10 M | Les mobiles, pas les ordinateurs |
+| Appels de rendu | ~110 | ~1500 | Le CPU par image |
+| Ville | 11 × 9 km chargés d'un bloc | La planète | PMTiles + un R2 à ~2 $/mois |
+| Éclairage | IBL + ombres temps réel | + SSAO, bloom, étalonnage | Rien : les addons sont déjà vendorisés |
+| Voitures | 1 générée + 1 glTF | 10-15 en streaming | 2-5 Mo pièce après compression |
+
+**Le plafond honnête, en une phrase :** on peut atteindre « très beau stylisé,
+fluide sur téléphone ». On n'atteindra pas le photoréalisme AAA — pas à cause
+du navigateur, mais parce que ça demande des années d'artistes. Ce n'est pas la
+technique qui limite ce projet.
+
+Une note d'avenir : WebGPU est supporté par three.js et arrive partout. Ça
+donnera surtout du calcul (foules, particules, culling), pas un saut visuel.
+
+## Comment modifier le jeu sans savoir coder
+
+Le langage est **JavaScript**, sans étape de compilation : les fichiers de
+`src/` sont exécutés tels quels par le navigateur. Concrètement, modifier le
+jeu, c'est éditer un fichier texte sur GitHub — le site se redéploie tout seul.
+
+Le problème réel n'est pas le langage, c'est que **les nombres qui comptent
+sont éparpillés dans quinze fichiers**. D'où l'étape 0, qui est deux choses :
+
+1. **`src/tuning.js`** — un seul fichier, commenté ligne par ligne, qui
+   rassemble tout ce qui se règle : masse, puissance, adhérence, biais
+   arrière, angle de braquage, réglages de caméra, couleurs, intensités,
+   densité des piétons, prix plus tard. Éditable depuis le téléphone, dans
+   l'éditeur web de GitHub, sans rien installer.
+2. **`?tune=1`** — un panneau de curseurs dans le jeu, qui applique les
+   changements **en direct pendant qu'on roule**, et qui recrache à la fin le
+   contenu de `tuning.js` à copier-coller. On sent le changement avant de
+   l'écrire.
+
+C'est aussi, et surtout, le bon outil pour l'étape 1 : trouver le sweet spot
+entre réaliste et plaisant demande de conduire en changeant un chiffre, pas de
+relire du code.
+
 Le carnet. Rien ici n'est construit — c'est ce qu'on ferait ensuite, avec
 assez de détail pour qu'une prochaine session puisse attaquer sans redécouvrir
 le terrain.
@@ -378,6 +442,45 @@ au lieu d'un décor par-dessus une voiture qui glisse déjà tout le temps.
 n'es pas bon » se joue là, pas sur la durée. Si les trente premières secondes
 sont frustrantes, personne ne découvre jamais le plafond. À tester sur
 quelqu'un qui n'a jamais touché au jeu, au clavier, sans explication.
+
+---
+
+## Unity, et pourquoi non
+
+Question légitime : le propriétaire du projet sait se servir de Unity et ne sait
+pas lire du JavaScript. Un outil qu'on maîtrise vaut mieux qu'un outil élégant
+qu'on ne peut pas toucher. Alors pourquoi rester ?
+
+**La raison qui tranche : l'iPhone.** Unity WebGL est notoirement fragile sur
+Safari iOS — mémoire, pauses, plantages au chargement. Le jeu est testé sur
+téléphone depuis le début et le but affiché est « ça reste dans le navigateur ».
+Ça, à soi seul, suffirait.
+
+Les autres, dans l'ordre :
+
+- **Le poids.** Unity WebGL, c'est 20 à 40 Mo de moteur *avant* le premier
+  polygone. Ici, tout le jeu, ville comprise, tient dans ce budget-là.
+- **Ce qu'on jetterait.** Environ 70 % du code n'est pas du rendu : c'est le
+  générateur de ville OSM — classification des routes, jonctions, marquages,
+  peinture du sol, extrusion des bâtiments, atlas de façades, mobilier,
+  altitude. C'est la partie qui a de la valeur, et c'est celle qu'il faudrait
+  réécrire en C#. Avec elle, on réécrirait aussi tous les bugs déjà trouvés et
+  corrigés : la falaise d'altitude, l'horizon qui perce, la largeur des rues,
+  les marquages aux intersections.
+- **L'hébergement.** GitHub Pages sert le jeu gratuitement, aujourd'hui, en
+  poussant un fichier.
+
+**Et la vraie réponse au vrai problème.** « Je ne peux pas modifier le jeu »
+n'est pas un problème de moteur, c'est un problème d'accès aux réglages. C'est
+exactement ce que règle l'étape 0. Après elle, changer le comportement de la
+voiture veut dire bouger un curseur en roulant — ce qui est *plus* direct que
+dans Unity, où il faudrait ouvrir le projet, trouver le composant et
+recompiler.
+
+**Quand il faudrait reconsidérer :** si le projet vise un jour une sortie
+Steam plutôt que le navigateur. Là, Unity ou Godot redeviennent la bonne
+réponse — et le générateur de ville, lui, se porte : c'est de la logique, pas
+du rendu.
 
 ---
 
