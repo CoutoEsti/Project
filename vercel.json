@@ -1,0 +1,41 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "_comment": [
+    "Le jeu vit dans hop/. Le réglage propre est Root Directory: hop dans le",
+    "tableau de bord Vercel — et dans ce cas ce fichier n'est jamais lu, c'est",
+    "hop/vercel.json qui s'applique.",
+    "",
+    "Ceci est le filet pour le cas où la racine du dépôt est servie telle",
+    "quelle : chaque requête est réécrite vers hop/, donc / sert le jeu au lieu",
+    "de renvoyer 404. Les URL restent propres, il n'y a pas de redirection —",
+    "une réécriture ne change pas la barre d'adresse.",
+    "",
+    "La première règle laisse passer ce qui vise déjà hop/, sans quoi une",
+    "requête sur /hop/x irait chercher /hop/hop/x."
+  ],
+  "rewrites": [
+    { "source": "/hop/:path*", "destination": "/hop/:path*" },
+    { "source": "/", "destination": "/hop/index.html" },
+    { "source": "/:path*", "destination": "/hop/:path*" }
+  ],
+  "headers": [
+    {
+      "source": "/hop/vendor/:path*",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    },
+    {
+      "source": "/hop/models/:path*",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    },
+    {
+      "source": "/hop/data/:path*",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=604800" }
+      ]
+    }
+  ]
+}
