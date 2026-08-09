@@ -441,7 +441,10 @@ function addStaircase(mb, ring, roads, wallColour, seed) {
     const d = Math.hypot(mx - target.x, mz - target.z);
     if (d < bestScore) { bestScore = d; bestEdge = { a, b, mx, mz, len }; }
   }
-  if (!bestEdge || bestScore > 45) return;
+  // Only on buildings that actually front a street. Beyond this the stair
+  // ends up marooned in the middle of a garden, which is what made them read
+  // as random concrete blocks by the roadside.
+  if (!bestEdge || bestScore > 22) return;
 
   const { a, b, mx, mz, len } = bestEdge;
   // Outward normal: away from the building centre.
@@ -452,7 +455,7 @@ function addStaircase(mb, ring, roads, wallColour, seed) {
 
   const yaw = Math.atan2(nz, nx);
   const rise = 3.05;
-  const run = 2.9;
+  const run = 2.3;
   const steps = 6;
   const stepColour = [0.52, 0.50, 0.48];
   const railColour = [
@@ -474,11 +477,11 @@ function addStaircase(mb, ring, roads, wallColour, seed) {
     const top = rise * ((i + 1) / steps);
     const outward = run * (1 - t);
     mb.box(baseX + nx * outward, top / 2, baseZ + nz * outward,
-           1.35, top, run / steps + 0.06, yaw, stepColour);
+           1.12, top, run / steps + 0.05, yaw, stepColour);
   }
 
   // Small landing at the door.
-  mb.box(baseX + nx * 0.30, rise + 0.09, baseZ + nz * 0.30, 1.5, 0.18, 0.85, yaw, stepColour);
+  mb.box(baseX + nx * 0.26, rise + 0.09, baseZ + nz * 0.26, 1.3, 0.18, 0.75, yaw, stepColour);
 
   // Two inclined railings, approximated by three short segments each.
   for (const side of [-1, 1]) {
@@ -486,14 +489,14 @@ function addStaircase(mb, ring, roads, wallColour, seed) {
       const t0 = k / 2, t1 = (k + 1) / 2;
       const y0 = 0.55 + rise * t0, y1 = 0.55 + rise * t1;
       const o0 = run * (1 - t0), o1 = run * (1 - t1);
-      const cx = baseX + nx * (o0 + o1) / 2 + ax * side * 0.66;
-      const cz = baseZ + nz * (o0 + o1) / 2 + az * side * 0.66;
+      const cx = baseX + nx * (o0 + o1) / 2 + ax * side * 0.56;
+      const cz = baseZ + nz * (o0 + o1) / 2 + az * side * 0.56;
       const dy = y1 - y0;
       const dh = Math.hypot(o1 - o0, 0);
       mb.box(cx, (y0 + y1) / 2, cz, 0.07, Math.hypot(dy, dh), 0.07, yaw, railColour);
     }
     // Vertical post at the bottom.
-    mb.box(baseX + nx * run + ax * side * 0.66, 0.55, baseZ + nz * run + az * side * 0.66,
+    mb.box(baseX + nx * run + ax * side * 0.56, 0.55, baseZ + nz * run + az * side * 0.56,
            0.08, 1.1, 0.08, yaw, railColour);
   }
 }

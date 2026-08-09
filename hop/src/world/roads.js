@@ -9,17 +9,49 @@
 
 const DEG = Math.PI / 180;
 
-/** Carriageway width in metres, by highway class, when nothing better is tagged. */
+/**
+ * Width of the *travel* lanes in metres, by highway class. Kerbside parking is
+ * added separately below — see parkingAllowance().
+ */
 const DEFAULT_WIDTH = {
   motorway: 15, motorway_link: 8,
   trunk: 13, trunk_link: 7.5,
-  primary: 12, primary_link: 7,
-  secondary: 10.5, secondary_link: 6.5,
-  tertiary: 9, tertiary_link: 6,
-  unclassified: 7.5, residential: 8,
-  living_street: 6.5, pedestrian: 6,
-  service: 5, track: 4, road: 7.5, busway: 7,
+  primary: 11, primary_link: 7,
+  secondary: 9.5, secondary_link: 6.5,
+  tertiary: 7.5, tertiary_link: 6,
+  unclassified: 6.6, residential: 6.8,
+  living_street: 6.0, pedestrian: 6,
+  service: 5, track: 4, road: 6.8, busway: 7,
 };
+
+const PARKING_LANE = 2.25;   // metres of kerb a parked car occupies
+
+// Classes where a city street has cars parked along it unless told otherwise.
+const PARKED_ON = new Set(['residential', 'unclassified', 'living_street',
+  'tertiary', 'secondary', 'road']);
+
+/**
+ * How much kerbside parking to add to the carriageway.
+ *
+ * OpenStreetMap's `lanes` counts *travel* lanes only. In Montréal almost every
+ * street also has a parked car on each side, which is four and a half metres
+ * of asphalt that `lanes` never mentions — so a street tagged lanes=2 came out
+ * at seven metres when the real kerb-to-kerb is eleven. That is why the roads
+ * looked like alleys.
+ */
+function parkingAllowance(tags, hw) {
+  const present = (v) => v != null && v !== 'no' && v !== 'none' && v !== 'separate';
+  const both = tags['parking:both'] ?? tags['parking:lane:both'];
+  const left = tags['parking:left'] ?? tags['parking:lane:left'];
+  const right = tags['parking:right'] ?? tags['parking:lane:right'];
+
+  if (both != null) return (present(both) ? 2 : 0) * PARKING_LANE;
+  if (left != null || right != null) {
+    return ((present(left) ? 1 : 0) + (present(right) ? 1 : 0)) * PARKING_LANE;
+  }
+  // Untagged, which is the overwhelming majority: assume the local norm.
+  return PARKED_ON.has(hw) ? 2 * PARKING_LANE : 0;
+}
 
 /** Rank used for draw order: bigger roads are painted last, so they win. */
 const RANK = {
@@ -53,11 +85,14 @@ export function classifyRoad(tags) {
   const lanes = num(tags.lanes);
   let width = num(tags.width);
   if (!Number.isFinite(width) || width <= 0) {
+    // A tagged `width` is kerb to kerb and already includes parking; anything
+    // we derive ourselves has to add it.
     if (Number.isFinite(lanes) && lanes > 0) {
       width = Math.min(lanes, 8) * 3.35 + (MAJOR.has(hw) ? 1.0 : 0.4);
     } else {
       width = DEFAULT_WIDTH[hw] ?? 7;
     }
+    if (!isAlley) width += parkingAllowance(tags, hw);
   }
   if (isAlley) width = Math.min(width, 4.8);
   width = Math.max(3, Math.min(30, width));
@@ -72,9 +107,9 @@ export function classifyRoad(tags) {
   let sidewalk = 0, verge = 0;
   if (isAlley) { sidewalk = 0; verge = 0.4; }
   else if (hw === 'service' || hw === 'track') { sidewalk = 1.2; verge = 0.8; }
-  else if (hw === 'residential' || hw === 'living_street' || hw === 'unclassified') { sidewalk = 2.6; verge = 2.4; }
+  else if (hw === 'residential' || hw === 'living_street' || hw === 'unclassified') { sidewalk = 2.4; verge = 1.8; }
   else if (hw === 'motorway' || hw === 'trunk') { sidewalk = 0; verge = 6; }
-  else { sidewalk = 3.0; verge = 1.8; }
+  else { sidewalk = 2.8; verge = 1.4; }
 
   return {
     highway: hw,
