@@ -82,6 +82,10 @@ async function main() {
   });
 
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+  // Software rendering a few million triangles takes a quarter of a second a
+  // frame, and a screenshot has to wait for one. Playwright's 30 s default
+  // turns a slow machine into a failed test, which is the wrong signal.
+  page.setDefaultTimeout(120000);
 
   // Serve the elevation tiles from disk. The test then verifies that Mount
   // Royal is actually a hill rather than hoping AWS is reachable — and it
@@ -672,6 +676,77 @@ async function main() {
   if (!photo.shot) problem('le mode photo ne produit pas d’image');
   if (!photo.off || !photo.hudBack) problem('impossible de sortir du mode photo');
 
+  // --- engine character -----------------------------------------------------
+  // The whole point of a synthesised engine is that a swap changes the sound
+  // for free. That only holds if the cylinder count actually reaches the audio
+  // graph, so check the number the oscillators are being tuned to.
+  const engine = await page.evaluate(async () => {
+    const g = window.__ruelle;
+    await g.audio.resume().catch(() => {});
+    if (!g.audio.ready) return { skipped: true };
+    const read = () => g.audio._nodes.oscs.find((o) => o.ratio === 1).osc.frequency.value;
+    const state = {
+      rpm: 4000, throttle: 1, speed: 20, skid: 0, load: 1, redline: 7000,
+      exhaust: 1, induction: 0,
+    };
+    g.audio.update({ ...state, cylinders: 4 }, 1);
+    await new Promise((r) => setTimeout(r, 260));
+    const four = read();
+    g.audio.update({ ...state, cylinders: 8 }, 1);
+    await new Promise((r) => setTimeout(r, 260));
+    const eight = read();
+    return { four, eight, spec: g.vehicle.spec.cylinders };
+  });
+  if (engine.skipped) {
+    note('moteur : contexte audio indisponible en headless, non vérifié');
+  } else {
+    note(`moteur : 4 cyl à ${engine.four.toFixed(0)} Hz, 8 cyl à ${engine.eight.toFixed(0)} Hz`
+      + ` (spec ${engine.spec})`);
+    if (!(engine.eight > engine.four * 1.5)) {
+      problem('changer le nombre de cylindres ne change pas le son');
+    }
+  }
+
+  // --- underglow ------------------------------------------------------------
+  // Wait on the sky's own state, not on a clock: `night` eases toward its
+  // target, so at four frames a second a fixed wait can sample it at nought.
+  await page.evaluate(() => {
+    const g = window.__ruelle;
+    g.settings.underglow = true;
+    g.settings.underglowColor = 'purple';
+    g.settings.timeOfDay = 23;
+  });
+  await page.waitForFunction(() => window.__ruelle.sky.night > 0.8, null, { timeout: 30000 })
+    .catch(() => {});
+  const glowNight = await page.evaluate(() => {
+    const mesh = window.__ruelle.car.group.children.find(
+      (c) => c.material && c.material.blending === 2
+        && c.geometry && c.geometry.type === 'PlaneGeometry');
+    if (!mesh) return null;
+    return { on: mesh.visible, o: mesh.material.opacity, c: mesh.material.color.getHex() };
+  });
+  await page.evaluate(() => { window.__ruelle.settings.timeOfDay = 12; });
+  await page.waitForFunction(() => window.__ruelle.sky.night < 0.1, null, { timeout: 30000 })
+    .catch(() => {});
+  const glow = await page.evaluate(() => {
+    const g = window.__ruelle;
+    const mesh = g.car.group.children.find(
+      (c) => c.material && c.material.blending === 2
+        && c.geometry && c.geometry.type === 'PlaneGeometry');
+    g.settings.underglow = false;
+    g.settings.timeOfDay = 10.5;
+    return { day: mesh ? mesh.visible : null, found: !!mesh };
+  });
+  glow.night = glowNight;
+  if (!glow.found) {
+    problem('aucun néon sous caisse sur la voiture');
+  } else {
+    note(`néons : nuit visible ${glow.night.on} (opacité ${glow.night.o.toFixed(2)}, `
+      + `couleur ${glow.night.c.toString(16)}), jour visible ${glow.day}`);
+    if (!glow.night.on || glow.night.o < 0.2) problem('les néons ne s’allument pas la nuit');
+    if (glow.day) problem('les néons restent allumés en plein jour');
+  }
+
   // --- frame rate ----------------------------------------------------------
   const fps = await page.evaluate(() => window.__ruelle.loop.fps);
   note(`fps (rendu logiciel headless) : ${fps.toFixed(1)}`);
@@ -689,7 +764,11 @@ async function main() {
     for (let i = 0; i < 160; i++) {
       await new Promise((r) => setTimeout(r, 250));
       const t = g.world.terrain.stats();
-      if (i > 8 && !t.pending && g.world.terrain.baselineReady) break;
+      // Not just "the data has landed" — "a frame has since redisplaced the
+      // horizon with it". The mesh is rebuilt inside world.update(), so at
+      // four frames a second the two are seconds apart.
+      const seen = g.world._backdropTiles === t.loaded;
+      if (i > 8 && !t.pending && g.world.terrain.baselineReady && seen) break;
     }
     const b = g.world.backdrop;
     const pos = b.geometry.attributes.position;

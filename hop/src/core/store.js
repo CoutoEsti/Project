@@ -57,6 +57,8 @@ const DEFAULT_SETTINGS = {
   terrain: true,        // ground elevation from the AWS terrain tiles
   timeOfDay: 10.5,      // hours, 0-24
   autoTime: false,
+  underglow: false,
+  underglowColor: 'cyan',
   units: 'kmh',         // 'kmh' | 'mph'
   showFps: false,
 };

@@ -171,9 +171,48 @@ export function createCar(THREE, opts = {}) {
     wheels.push({ pivot, spin, front: p.front });
   }
 
+  // --- underglow ------------------------------------------------------------
+  // A coloured pool on the road under the sills, additive so it lights the
+  // asphalt rather than painting a decal on it. Pure decoration, and exactly
+  // the kind of decoration the people this game is for actually want. It costs
+  // one transparent quad and turns itself off in daylight, where a glow on lit
+  // ground reads as a smudge.
+  let glowMat = null;
+  let glow = null;
+  if (!ghost) {
+    glowMat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(0x22ccff),
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+    });
+    const glowGeo = new THREE.PlaneGeometry(3.4, 6.2);
+    glowGeo.rotateX(-Math.PI / 2);
+    glow = new THREE.Mesh(glowGeo, glowMat);
+    // Just off the deck: any lower and it z-fights the road on a slope.
+    glow.position.y = 0.06;
+    glow.renderOrder = 3;
+    glow.visible = false;
+    group.add(glow);
+  }
+
   return {
     group,
     wheels,
+    /**
+     * @param {boolean} on
+     * @param {number} colour   hex
+     * @param {number} night    0..1 from the sky — it fades out at dawn
+     */
+    setUnderglow(on, colour, night = 1) {
+      if (!glow) return;
+      glow.visible = !!on && night > 0.15;
+      if (!glow.visible) return;
+      if (colour != null) glowMat.color.setHex(colour);
+      glowMat.opacity = 0.55 * Math.min(1, (night - 0.15) / 0.35);
+    },
     /** @param {number} angle radians, positive = right */
     setSteer(angle) {
       for (const w of wheels) if (w.front) w.pivot.rotation.y = angle;

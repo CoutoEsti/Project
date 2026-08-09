@@ -33,6 +33,12 @@ import { buildMapImage, paintMap, marker, carMarker } from './ui/map.js';
 
 const DEFAULT_PLACE = { lat: 45.5265, lon: -73.5795, label: 'Plateau-Mont-Royal, Montréal' };
 
+/** Underglow colours. Six is plenty; a full picker belongs in the garage. */
+const UNDERGLOW = {
+  cyan: 0x22ccff, purple: 0xa03cff, pink: 0xff2fa0,
+  green: 0x2bff7a, red: 0xff2a1c, amber: 0xffa022,
+};
+
 class Game {
   constructor(root) {
     this.root = root;
@@ -86,7 +92,12 @@ class Game {
     });
     this.people.setShadows(!!this.settings.shadows && this.settings.quality === 'high');
 
-    this.vehicle = new Vehicle();
+    // Until the garage exists, the engine is swappable from the address bar:
+    //   ?cyl=8&exhaust=1.6&turbo=1
+    // Worth having now rather than later — the whole point of a synthesised
+    // engine is that you can hear the change immediately, and nobody will
+    // believe that until they have heard it.
+    this.vehicle = new Vehicle(this._engineFromParams());
     this.car = createCar(THREE, { color: CAR_COLORS[0] });
     this.scene.add(this.car.group);
     this._tryLoadCarModel();
@@ -183,6 +194,24 @@ class Game {
   }
 
   // -------------------------------------------------------------------------
+
+  /** Engine overrides from the URL. Anything absent keeps the spec's value. */
+  _engineFromParams() {
+    const num = (key, min, max) => {
+      const raw = this.params.get(key);
+      if (raw === null) return null;
+      const v = Number(raw);
+      return Number.isFinite(v) ? Math.max(min, Math.min(max, v)) : null;
+    };
+    const out = {};
+    const cyl = num('cyl', 3, 12);
+    if (cyl !== null) out.cylinders = Math.round(cyl);
+    const exhaust = num('exhaust', 0.5, 1.8);
+    if (exhaust !== null) out.exhaust = exhaust;
+    const turbo = num('turbo', 0, 1);
+    if (turbo !== null) out.induction = turbo;
+    return out;
+  }
 
   _bootstrap() {
     // Careful: Number(null) is 0, so a missing parameter would otherwise read
@@ -673,6 +702,10 @@ class Game {
     this.car.setSpin(v.wheelSpin);
     const nightLights = this.headlightsOn || this.sky.night > 0.35;
     this.car.setLights(nightLights, this.input.brake > 0.1 && v.u > 0.5);
+    if (this.car.setUnderglow) {
+      this.car.setUnderglow(this.settings.underglow, UNDERGLOW[this.settings.underglowColor]
+        ?? UNDERGLOW.cyan, this.sky.night);
+    }
     const fx2 = Math.sin(v.yaw), fz2 = Math.cos(v.yaw);
     this.headlight.position.set(v.x + fx2 * 2.0, hMid + 0.9, v.z + fz2 * 2.0);
     this.headlight.target.position.set(
@@ -688,6 +721,9 @@ class Game {
     this.audio.update({
       rpm: v.rpm, throttle: this.input.throttle, speed: v.speed,
       skid: v.skid, load: v.load, redline: v.spec.redline,
+      // The engine's character travels with the car, not with the audio
+      // engine — so swapping a motor in the garage will swap the sound.
+      cylinders: v.spec.cylinders, exhaust: v.spec.exhaust, induction: v.spec.induction,
     }, dt);
     this.music.update(dt, { speed: v.speed, rpm: v.rpm, redline: v.spec.redline });
 

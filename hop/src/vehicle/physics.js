@@ -37,6 +37,15 @@ const SPEC = {
   peakTorque: 215,          // Nm
   redline: 7000,
   idle: 850,
+  // Cylinder count is not a physics term — it never enters a single equation
+  // here. It lives in the spec because it is what the engine *sounds* like,
+  // and because the day a garage sells engines, the sound has to come with
+  // them. A four and a V8 differ by this number and nothing else.
+  cylinders: 4,
+  // Two shape knobs for the same reason: how open the exhaust is, and how much
+  // the intake whistles. Parts move these; the physics never reads them.
+  exhaust: 1.0,             // 0.6 stock and muffled … 1.6 straight pipe
+  induction: 0,             // 0 atmo … 1 turbo whistle and blow-off
   gears: [4.20, 2.60, 1.85, 1.42, 1.14, 0.95],
   reverseGear: 3.9,
   finalDrive: 4.45,
