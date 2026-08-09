@@ -223,6 +223,108 @@ existe déjà.
 
 ---
 
+## 3. Notre propre physique
+
+**L'idée.** Chaque jeu de char a sa signature, et on la reconnaît en dix
+secondes les yeux fermés. Forza pardonne et récupère. Gran Turismo est précis
+et punitif. Need for Speed part en travers au frein. GTA flotte. Ce n'est
+jamais une question de « plus ou moins réaliste » — c'est une poignée de
+décisions assumées. Il nous en faut une.
+
+Et il ne s'agit pas d'ajouter du réalisme jusqu'à ce que ce soit bon. Il s'agit
+de savoir *ce qu'on veut que ça fasse*, puis d'aller chercher dans la vraie
+physique de quoi le faire tenir debout.
+
+**Où est la base actuelle.** Le modèle est honnête pour ce qu'il est : modèle
+bicyclette, vrais angles de dérive, transfert de charge longitudinal, ellipse
+de friction par essieu, 120 Hz découplé du rendu. Ça, c'est déjà mieux que
+beaucoup de jeux web. Ce qui lui manque pour avoir une *signature* :
+
+- **une vraie courbe de pneu.** C'est le cœur du sujet. La forme de la courbe —
+  où est le pic d'adhérence, et surtout à quelle vitesse ça retombe *après* le
+  pic — décide à peu près tout le ressenti. Une chute douce pardonne et se
+  rattrape ; une chute raide claque et punit ;
+- **la sensibilité à la charge.** Dans la vraie vie l'adhérence ne monte pas
+  proportionnellement à la charge : un pneu deux fois plus chargé ne tient pas
+  deux fois plus. C'est *ça* qui donne un sens au transfert de masse, au
+  freinage appuyé qui fait tourner, au lever de pied qui fait pivoter ;
+- **quatre roues au lieu de deux**, pour que gauche et droite existent — et
+  donc le roulis, l'appui en courbe, la roue intérieure qui se déleste ;
+- **le différentiel**, qui décide si l'accélération en sortie de courbe
+  redresse ou fait glisser.
+
+**Ce qu'il faut aller chercher.** La recherche à faire, nommée, pour qu'on
+sache quoi lire :
+
+| Sujet | Ce que ça donne |
+|---|---|
+| Formule magique de Pacejka, ou le modèle « brosse » | La forme de la courbe pic + chute |
+| Taux de glissement (longitudinal) vs angle de dérive | Freinage et motricité, pas juste les virages |
+| Glissement combiné / ellipse de friction | Déjà là — freiner *et* tourner |
+| Sensibilité à la charge | Le transfert de masse qui compte pour de vrai |
+| Répartition du couple de roulis | Le sur/sous-virage réglable par les barres |
+| Couple d'auto-alignement, chasse | Le volant qui revient tout seul |
+| Inertie en lacet | Pourquoi une longue voiture ne pivote pas comme une courte |
+
+**Comment trouver le sweet spot — la partie qui compte.** On ne le trouve pas
+en changeant des chiffres jusqu'à ce que ça semble correct : au bout de dix
+essais on ne sait plus ce qu'on a changé, et une régression passe inaperçue.
+
+La bonne nouvelle : **le banc d'essai existe déjà**. `tools/smoke.mjs` mesure à
+chaque exécution le 0-50, le 0-100, la vitesse de pointe, la distance de
+freinage, la vitesse en virage tenu, le taux de lacet et le décrochage au frein
+à main. C'est littéralement un dyno et une piste d'essai automatisés qui
+tournent depuis le début du projet.
+
+La méthode :
+
+1. **Fixer les cibles avec de vrais chiffres.** Une berline sportive ordinaire :
+   0-100 autour de 6 s, freinage 100-0 autour de 36 m, un peu plus d'1 g en
+   virage sur du sec. On n'invente pas, on vise.
+2. **Un paramètre à la fois**, et on relit les mesures. Le test dit tout de
+   suite si le freinage a doublé pendant qu'on cherchait autre chose.
+3. **Une liste de scénarios de ressenti**, toujours les mêmes, à conduire à la
+   main : un virage qui se resserre, une ruelle à prendre au frein à main, un
+   lever de pied en pleine courbe, une bosse à 80, un départ arrêté sur du
+   mouillé. C'est là qu'on juge, pas dans les chiffres.
+4. **Enregistrer les réglages qui valaient quelque chose**, avec leurs mesures,
+   pour pouvoir y revenir. Un fichier de presets suffit.
+
+**Là où réel et plaisant divergent — les tweaks assumés.** C'est utile de les
+écrire d'avance, parce que ce sont toujours les mêmes :
+
+- **le pic est trop étroit dans la vraie vie.** On l'élargit : il faut pouvoir
+  vivre au bord de l'adhérence, pas passer dessus par accident ;
+- **la chute après le pic est trop raide.** On l'adoucit, sinon toute perte
+  d'adhérence est définitive ;
+- **la récupération est trop lente.** Dans la réalité, rattraper un décrochage
+  demande un contre-braquage précis et immédiat. Au clavier, ce geste n'existe
+  pas — donc l'adhérence doit revenir plus vite qu'en vrai ;
+- **le périphérique décide.** Un clavier n'a pas d'angle : la direction est
+  déjà lissée à l'entrée (`core/input.js`), et c'est une décision de physique
+  autant que d'interface. Une manette et un volant méritent des réglages
+  différents, pas le même ;
+- **la caméra fait la moitié du ressenti.** Le champ de vision qui s'ouvre avec
+  la vitesse, le retard du ressort, le décalage vers l'extérieur en glisse :
+  tout ça est déjà dans `_updateCamera`, et ça change plus l'impression de
+  vitesse que n'importe quel paramètre de pneu. À régler *avec* la physique,
+  jamais séparément.
+
+**Notre signature, à décider.** La question à trancher avant de toucher au
+code, parce que tout le reste en découle : on veut une voiture **lourde et
+posée qui récompense la conduite propre**, ou **vive et joueuse qui part en
+travers dès qu'on le demande** ? Les deux sont défendables. Ce qui ne l'est
+pas, c'est de ne pas choisir — c'est comme ça qu'on obtient un jeu dont
+personne ne se rappelle la conduite.
+
+Vu le reste du projet — une vraie ville, des rues étroites, du relief, de la
+neige — je pencherais pour **lourd et posé, avec un arrière qui se réveille
+quand on va le chercher**. Ça laisse la neige et les pneus d'hiver être une
+vraie différence, au lieu d'un décor par-dessus une voiture qui glisse déjà
+tout le temps.
+
+---
+
 ## Autres, en vrac
 
 - **Une voiture qui s'abîme.** Les impacts sont déjà mesurés (`lastImpact`) et
