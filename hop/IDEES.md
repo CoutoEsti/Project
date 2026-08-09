@@ -71,6 +71,12 @@ le terrain.
 Le classement de `README.md` (« Ce qui reste, par ordre de rendement ») reste
 la liste technique. Celle-ci est la liste des idées de jeu.
 
+**Décision de moteur, prise le 9 août 2026 : on reste sur le web.** Unity reste
+une convergence possible et acceptée — c'est plus de travail, et ce n'est pas
+exclu. Ce qui suit est écrit pour que ça reste vrai : les étapes 0 à 2 sont de
+la *logique* et gardent leur valeur dans n'importe quel moteur. Voir « La vraie
+fourche » plus bas pour la question qui tranchera vraiment.
+
 ---
 
 ## 1. La vraie météo de Montréal
@@ -519,14 +525,103 @@ du rendu.
 
 ---
 
-## Autres, en vrac
+## Le reste du carnet
 
-- **Une voiture qui s'abîme.** Les impacts sont déjà mesurés (`lastImpact`) et
-  coûtent la chaîne de points ; ils pourraient aussi coûter de la carrosserie.
-- **Le trafic**, un jour. Écarté pour l'instant, et pour une bonne raison :
-  mal fait, il transforme la ville en obstacle. Le réseau routier et les
-  jonctions sont pourtant déjà là.
-- **Le multijoueur fantôme.** Pas de serveur, mais un fantôme s'encode déjà
-  dans une URL — donc défier quelqu'un tient dans un lien.
-- **L'île complète, puis le monde.** Voir `README.md` : PMTiles, et le planet
-  Protomaps sur R2 pour environ deux dollars par mois.
+Rangé grossièrement du meilleur rapport effet/effort au plus lourd.
+
+### Le son du moteur qui suit les pièces
+
+**Presque gratuit, et énorme pour le public visé.** Le moteur audio est
+synthétisé, pas échantillonné : `vehicle/audio.js` calcule la fréquence de
+combustion à partir du régime et du **nombre de cylindres**, qui est
+aujourd'hui une constante à 4.
+
+En faire un paramètre de la voiture, c'est un quatre cylindres qui sonne comme
+un quatre cylindres et un V8 comme un V8, sans un octet de son à charger. Le
+régime maxi, déjà réglable, décale tout le reste. Une pièce d'échappement peut
+ouvrir le filtre, un turbo ajouter un souffle et une décharge au lever de pied.
+
+Rapport crédibilité/effort le plus élevé du carnet. À faire en même temps que
+les pièces moteur, pas après.
+
+### Les repères de Montréal
+
+Une poignée de bâtiments faits à la main vaut mieux que mille génériques.
+OpenStreetMap donne l'empreinte au sol et la hauteur, jamais la forme — donc
+l'enseigne Farine Five Roses, le Stade olympique, le pont Jacques-Cartier, la
+croix du mont Royal et l'Oratoire sortent aujourd'hui en boîtes.
+
+Cinq ou six objets modélisés, posés à leurs vraies coordonnées, feraient plus
+pour « ça ressemble à Montréal » que n'importe quelle amélioration de rendu.
+Le chargement de modèles à des coordonnées existe déjà (`world/models.js`).
+
+### Les rassemblements
+
+**La feature du public visé.** Les gars de char se rassemblent — c'est le
+rituel, plus que la course. Un stationnement en ville où des voitures sont
+garées, capot ouvert, avec leur fiche : proprio, pièces posées, meilleur quart
+de mille.
+
+Et ça se fait **sans serveur**, parce que la voiture d'un joueur est déjà
+sérialisable : peinture, jantes, pièces, chronos — tout tient dans une chaîne
+courte, comme les fantômes tiennent déjà dans une URL. On peuple le
+rassemblement avec les voitures partagées par lien, plus les siennes. Une vraie
+liste synchronisée demanderait un service ; le lien, non.
+
+### Le rejeu
+
+Un tampon des trente dernières secondes, rejouable avec la caméra libre du mode
+photo — qui existe déjà. Ce sont les clips qui circulent, pas les captures
+fixes. Le fantôme enregistre déjà une trajectoire : c'est la même mécanique,
+avec plus de canaux (braquage, gaz, régime, glisse).
+
+### Les livrées et les autocollants
+
+Un éditeur simple : formes, numéros, textes, placés sur la carrosserie. Le
+résultat tient dans une chaîne compacte, donc il se partage par lien comme le
+reste. Beaucoup de valeur perçue pour du travail d'interface, sans toucher au
+rendu — et ça alimente les rassemblements et le mode photo.
+
+À faire avec le garage v1, une fois la peinture en place.
+
+### Les néons et l'éclairage
+
+Sous-caisse, intérieur, phares teintés. La nuit est déjà complète — fenêtres
+allumées, halos, projecteur — donc l'infrastructure d'émission et de lumière
+existe. Purement décoratif, très demandé par ce public, et ça donne une raison
+de rouler la nuit.
+
+### Une voiture qui s'abîme
+
+Les impacts sont déjà mesurés (`lastImpact`) et coûtent la chaîne de points.
+Ils pourraient coûter de la carrosserie : trois ou quatre paliers visuels, et
+une facture au garage.
+
+**À garder cosmétique.** Des dégâts mécaniques — radiateur percé, moteur qui
+casse — ramèneraient exactement la complexité qu'on a décidé d'éviter.
+
+### Le trafic
+
+Écarté jusqu'ici pour une bonne raison : mal fait, il transforme la ville en
+obstacle. Mais l'argument pour est réel — **une ville vide n'a aucun risque**,
+et le frôlement, qui rapporte déjà des points, n'a rien à frôler.
+
+La version défendable : des voitures lentes et prévisibles qui suivent le
+réseau routier, jamais agressives, avec un réglage de densité. Le graphe et les
+jonctions sont déjà calculés. À ne pas tenter avant que la physique ait sa
+signature — sinon on réglera la conduite contre un trafic qu'on n'a pas encore
+compris.
+
+### Le multijoueur fantôme
+
+Pas de serveur, mais un fantôme s'encode déjà dans une URL : défier quelqu'un
+tient dans un lien. Étape suivante sans serveur : un tableau des temps par
+quartier, alimenté par les liens reçus. Un vrai classement mondial demande un
+service — c'est le premier vrai coût d'infrastructure du projet, et il est
+volontairement repoussé.
+
+### L'île complète, puis le monde
+
+Voir `README.md` : PMTiles pour ne plus jamais charger la ville d'un bloc, et
+le planet Protomaps sur R2 pour environ deux dollars par mois. Techniquement
+résolu, jamais commencé. À faire quand le jeu mérite plus grand — pas avant.
