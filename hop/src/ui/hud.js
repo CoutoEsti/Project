@@ -26,6 +26,11 @@ export class Hud {
     this.toastEl = root.querySelector('#toast');
     this.statusEl = root.querySelector('#status');
     this.fpsEl = root.querySelector('#fps');
+    this.scoreEl = root.querySelector('#score');
+    this.scoreTotal = root.querySelector('#score-total');
+    this.scoreChain = root.querySelector('#score-chain');
+    this.scoreMult = root.querySelector('#score-mult');
+    this.scoreLabel = root.querySelector('#score-label');
 
     this._toastTimer = 0;
     this._minimapTimer = 0;
@@ -84,6 +89,24 @@ export class Hud {
     if (this.fpsEl) {
       this.fpsEl.style.display = s.showFps ? 'block' : 'none';
       if (s.showFps) this.fpsEl.textContent = `${Math.round(s.fps)} fps`;
+    }
+  }
+
+  /** @param {object} s from Score.snapshot() */
+  setScore(s) {
+    if (!this.scoreEl) return;
+    this.scoreTotal.textContent = s.total.toLocaleString('fr-CA');
+    const active = s.chain > 0;
+    this.scoreEl.classList.toggle('chaining', active);
+    this.scoreChain.textContent = active ? `+${s.chain.toLocaleString('fr-CA')}` : '';
+    this.scoreMult.textContent = s.multiplier > 1 ? `×${s.multiplier}` : '';
+    if (s.label) {
+      this.scoreLabel.textContent = s.label.points
+        ? `${s.label.label} +${s.label.points}`
+        : s.label.label;
+      this.scoreLabel.style.opacity = String(Math.min(1, s.flash * 1.6));
+    } else {
+      this.scoreLabel.style.opacity = '0';
     }
   }
 
@@ -163,8 +186,13 @@ export class Hud {
     ctx.fillRect(0, 0, w, h);
 
     // Car-up: translate to the car, rotate so its heading points up-screen.
+    //
+    // World forward is (sin ψ, cos ψ), and canvas y grows downward, so after
+    // ctx.rotate(θ) that vector lands at (sin(ψ−θ), cos(ψ−θ)). Screen-up is
+    // (0, −1), which needs ψ−θ = π. Rotating by ψ alone — the obvious guess —
+    // puts the map exactly upside down.
     ctx.translate(w / 2, h / 2);
-    ctx.rotate(car.yaw);
+    ctx.rotate(car.yaw - Math.PI);
     ctx.scale(scale, scale);
     ctx.translate(-car.x, -car.z);
 

@@ -470,18 +470,27 @@ function addStaircase(mb, ring, roads, wallColour, seed) {
   const baseX = mx + ax * along;
   const baseZ = mz + az * along;
 
-  // Each tread is a solid block from the ground up, so the flight reads as a
-  // staircase rather than as a stack of floating slabs.
+  // Real Montréal stairs are open: treads carried on two inclined stringers,
+  // with daylight between them. Solid blocks from the ground up read as a
+  // concrete ramp, which is what made these look like roadside rubble.
   for (let i = 0; i < steps; i++) {
     const t = (i + 0.5) / steps;
     const top = rise * ((i + 1) / steps);
     const outward = run * (1 - t);
-    mb.box(baseX + nx * outward, top / 2, baseZ + nz * outward,
-           1.12, top, run / steps + 0.05, yaw, stepColour);
+    mb.box(baseX + nx * outward, top, baseZ + nz * outward,
+           1.05, 0.09, run / steps + 0.16, yaw, stepColour);
+  }
+
+  // The two stringers carrying them, as one inclined box each.
+  const midOut = run / 2;
+  const stringerLen = Math.hypot(rise, run);
+  for (const side of [-1, 1]) {
+    mb.box(baseX + nx * midOut + ax * side * 0.52, rise / 2, baseZ + nz * midOut + az * side * 0.52,
+           0.09, stringerLen * 0.92, 0.22, yaw, railColour);
   }
 
   // Small landing at the door.
-  mb.box(baseX + nx * 0.26, rise + 0.09, baseZ + nz * 0.26, 1.3, 0.18, 0.75, yaw, stepColour);
+  mb.box(baseX + nx * 0.26, rise + 0.09, baseZ + nz * 0.26, 1.25, 0.14, 0.72, yaw, stepColour);
 
   // Two inclined railings, approximated by three short segments each.
   for (const side of [-1, 1]) {
@@ -495,9 +504,16 @@ function addStaircase(mb, ring, roads, wallColour, seed) {
       const dh = Math.hypot(o1 - o0, 0);
       mb.box(cx, (y0 + y1) / 2, cz, 0.07, Math.hypot(dy, dh), 0.07, yaw, railColour);
     }
-    // Vertical post at the bottom.
-    mb.box(baseX + nx * run + ax * side * 0.56, 0.55, baseZ + nz * run + az * side * 0.56,
-           0.08, 1.1, 0.08, yaw, railColour);
+    // Balusters: the wrought iron is most of what you actually see of a
+    // Montréal staircase from a car.
+    for (let k = 0; k <= 3; k++) {
+      const t = k / 3;
+      const out = run * (1 - t);
+      const y = 0.5 + rise * t;
+      mb.box(baseX + nx * out + ax * side * 0.56, y / 2 + rise * t * 0.5,
+             baseZ + nz * out + az * side * 0.56,
+             0.05, y, 0.05, yaw, railColour);
+    }
   }
 }
 

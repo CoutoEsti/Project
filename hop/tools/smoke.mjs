@@ -387,6 +387,39 @@ async function main() {
   if (traffic > 0) problem(`des voitures garées sont encore générées (${traffic / 4} objets)`);
   else note('aucun autre véhicule dans le monde');
 
+  // --- skill chain ----------------------------------------------------------
+  const scoring = await page.evaluate(async () => {
+    const g = window.__ruelle;
+    const s = g.score;
+    s.reset();
+    // A committed drift: sideways, at speed, for a second and a half.
+    const v = g.vehicle;
+    for (let i = 0; i < 180; i++) {
+      v.slipRear = 0.42;
+      v.speed_ = 0;
+      Object.defineProperty(v, 'speed', { value: 24, configurable: true });
+      v.lastImpact = 0;
+      s.update(1 / 120, v, Infinity);
+    }
+    const drifted = s.chain;
+    const mult = s.multiplier;
+    // A near miss at speed.
+    v.slipRear = 0;
+    s.update(1 / 120, v, 1.2);
+    const afterMiss = s.chain;
+    // Then a crash, which must cost the lot.
+    v.lastImpact = 6;
+    s.update(1 / 120, v, Infinity);
+    const afterCrash = s.chain;
+    delete v.speed;
+    s.reset();
+    return { drifted, mult, gainedOnMiss: afterMiss - drifted, afterCrash };
+  });
+  note(`score : dérive ${Math.round(scoring.drifted)} pts (×${scoring.mult}), frôlement +${Math.round(scoring.gainedOnMiss)}, chaîne après crash ${scoring.afterCrash}`);
+  if (scoring.drifted < 100) problem('la dérive ne rapporte rien');
+  if (scoring.gainedOnMiss < 50) problem('le frôlement ne rapporte rien');
+  if (scoring.afterCrash !== 0) problem('un impact ne coûte pas la chaîne');
+
   // --- frame rate ----------------------------------------------------------
   const fps = await page.evaluate(() => window.__ruelle.loop.fps);
   note(`fps (rendu logiciel headless) : ${fps.toFixed(1)}`);

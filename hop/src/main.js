@@ -16,11 +16,12 @@ import { Sky } from './world/sky.js';
 import { Weather, WEATHER } from './world/weather.js';
 import { nearestRoadPoint } from './world/roads.js';
 import { Vehicle } from './vehicle/physics.js';
-import { rayClearance } from './vehicle/collision.js';
+import { rayClearance, nearestObstacle } from './vehicle/collision.js';
 import { createCar, CAR_COLORS } from './vehicle/model.js';
 import { loadCarModel } from './vehicle/gltf.js';
 import { EngineAudio } from './vehicle/audio.js';
 import { TimeTrial, TrialState } from './game/timetrial.js';
+import { Score } from './game/score.js';
 import { Hud } from './ui/hud.js';
 import { Menu } from './ui/menu.js';
 import { buildMapImage, paintMap, marker, carMarker } from './ui/map.js';
@@ -91,6 +92,7 @@ class Game {
 
     this.input = new Input(window);
     this.hud = new Hud(root);
+    this.score = new Score({ onEvent: (e) => this._onScoreEvent(e) });
     this.trial = null;
 
     this.menu = new Menu(root, {
@@ -377,9 +379,18 @@ class Game {
     const offset = Math.max(1.6, target.spec.width / 4);
     const nx = -target.dirZ, nz = target.dirX;
     this.vehicle.reset(target.x + nx * offset, target.z + nz * offset, target.heading);
+    this.score.reset();
     this.spawned = true;
     this.hud.setStatus('');
     this.hud.toast('G : poser une porte · R : replacer sur la route · C : caméra', 5200);
+  }
+
+  _onScoreEvent(e) {
+    if (e.type === 'banked' && e.points > 400) {
+      this.hud.toast(`+${e.points.toLocaleString('fr-CA')} points (×${e.multiplier})`, 2200);
+    } else if (e.type === 'lost' && e.points > 600) {
+      this.hud.toast(`Chaîne perdue — ${e.points.toLocaleString('fr-CA')} points`, 2200);
+    }
   }
 
   _onTrialEvent(e) {
@@ -441,6 +452,10 @@ class Game {
       }, grids);
 
       if (this.vehicle.lastImpact > 1.2) this.audio.impact(this.vehicle.lastImpact);
+      this.score.update(
+        dt, this.vehicle,
+        nearestObstacle(this.vehicle.x, this.vehicle.z, this.vehicle.yaw, grids),
+      );
       if (this.trial) {
         this.trial.update(dt, {
           x: this.vehicle.x, z: this.vehicle.z, yaw: this.vehicle.yaw, speed: this.vehicle.speed,
@@ -525,6 +540,8 @@ class Game {
       reversing: v.reversing, units: this.settings.units,
       fps: this.loop.fps, showFps: this.settings.showFps,
     }, dt);
+
+    this.hud.setScore(this.score.snapshot());
 
     if (!this.menu.visible) {
       this.hud.drawMinimap(this.world.allRoads(), v, this.trial, dt);

@@ -199,4 +199,26 @@ function segmentHit(ax, az, dx, dz, sx, sz, ex, ez) {
   return t;
 }
 
+/**
+ * Distance from the car's shell to the closest solid geometry, or Infinity.
+ * Used to spot a near miss: the gap you just threaded at speed.
+ */
+export function nearestObstacle(x, z, yaw, grids, limit = 3) {
+  if (!grids.length) return Infinity;
+  const fx = Math.sin(yaw), fz = Math.cos(yaw);
+  let best = Infinity;
+  for (let p = 0; p < PROBES.length; p++) {
+    const px = x + fx * PROBES[p];
+    const pz = z + fz * PROBES[p];
+    for (let g = 0; g < grids.length; g++) {
+      grids[g].forEachNear(px, pz, (ax, az, bx, bz) => {
+        closestOnSegment(ax, az, bx, bz, px, pz, _c);
+        const d = Math.hypot(px - _c.x, pz - _c.z);
+        if (d < best) best = d;
+      });
+    }
+  }
+  return best > limit ? Infinity : best;
+}
+
 export { PROBE_RADIUS };
