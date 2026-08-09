@@ -39,6 +39,39 @@ node hop/tools/prepare-data.mjs hop/data/montreal.raw.json hop/data/montreal.jso
 Le jeu charge `montreal.json` s'il existe. `montreal.raw.json` n'a pas besoin
 d'être versionné une fois la conversion faite.
 
+## Découper, pour aller plus grand que le quartier
+
+Le fichier unique tient jusqu'à quelques centaines d'éléments au kilomètre
+carré, puis décroche. L'extrait actuel fait **107 km² pour 10,6 Mo**, soit
+0,10 Mo/km² — l'île entière donnerait une cinquantaine de mégaoctets dans un
+seul fichier : un demi-million d'éléments à analyser avant même d'afficher le
+menu, et un balayage linéaire de toute la liste pour chacune des trente-cinq
+tuiles présentes autour de la voiture.
+
+```bash
+node hop/tools/pack-data.mjs hop/data/montreal.json hop/data/mtl
+```
+
+Le paquet contient quatre choses :
+
+| | Contenu |
+|---|---|
+| `index.json` | le manifeste : zoom, bornes, et quelles tuiles existent |
+| `{x}/{y}.json` | les éléments d'une tuile z15, récupérée seulement si on y roule |
+| `overview.json` | les routes seules, simplifiées — ce que rasterise la carte du menu |
+| `far.json` | l'horizon : une boîte orientée par bâtiment digne d'être vu de loin |
+
+Les lignes sont classées dans les tuiles que leurs segments traversent
+réellement, pas dans leur boîte englobante. Les grandes surfaces — le fleuve,
+le mont Royal — sont **découpées** par tuile plutôt que recopiées entières,
+sans quoi un seul anneau de plusieurs milliers de sommets pèserait plus lourd
+que le reste de la ville.
+
+`far.json` ne retient qu'un bâtiment sur quarante : 15 m de haut ou 1 200 m² au
+sol. Sur le Plateau, 473 sur 19 732, soit 30 Ko et 5 700 triangles pour tout
+l'horizon. **Le générateur est écrit et vérifié ; le rendu ne l'est pas
+encore** — voir `IDEES.md`, section 4.
+
 ## Licence des données
 
 Les données de carte proviennent d'OpenStreetMap, sous

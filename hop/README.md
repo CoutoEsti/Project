@@ -71,6 +71,12 @@ vitesse. Aucun fichier à charger — donc aucune licence, et zéro octet.
 version générée, sans configuration. `tools/prepare-model.mjs` compresse un
 modèle de vitrine par vingt à cinquante.
 
+**Essences d'arbres.** `tree.glb` à `tree6.glb` : une essence par fichier,
+réparties par un champ de quartier plutôt qu'au hasard — 80 % des arbres
+voisins partagent leur essence, 17 % à 900 m, soit le pur hasard. Une rue est
+plantée d'une essence, le quartier d'à côté d'une autre. Voir
+`models/README.md`.
+
 ---
 
 ## Ce qui reste, par ordre de rendement

@@ -648,6 +648,46 @@ async function main() {
   note(`buissons et haies : ${green} instances`);
   if (green < 1) problem('aucun buisson généré dans les parcs');
 
+  // --- tree species by neighbourhood ---------------------------------------
+  // The point of the species field is that it sits between "every tree the
+  // same" and "every tree random": neighbours agree, distant streets do not.
+  // Both ends have to be measured, because either one alone passes for a
+  // constant function.
+  const flora = await page.evaluate(async () => {
+    const { speciesAt } = await import('/src/world/props.js');
+    const N = 6;
+    const agree = (d) => {
+      let same = 0;
+      for (let i = 0; i < 4000; i++) {
+        const x = (Math.random() - 0.5) * 8000;
+        const z = (Math.random() - 0.5) * 8000;
+        if (speciesAt(x, z, N) === speciesAt(x + d, z, N)) same++;
+      }
+      return same / 4000;
+    };
+    const tally = {};
+    let trees = 0;
+    for (const t of window.__ruelle.world.tiles.values()) {
+      if (!t.propMeshes || !t.propMeshes.treeSpecies) continue;
+      trees += t.propMeshes.treeCount;
+      for (const [s, n] of Object.entries(t.propMeshes.treeSpecies)) {
+        tally[s] = (tally[s] || 0) + n;
+      }
+    }
+    return {
+      near: agree(12), far: agree(900), chance: 1 / N,
+      stable: speciesAt(1234.5, -678.25, N) === speciesAt(1234.5, -678.25, N),
+      trees, kinds: Object.keys(tally).length,
+    };
+  });
+  note(`essences d'arbres : ${(flora.near * 100).toFixed(0)} % identiques à 12 m, `
+    + `${(flora.far * 100).toFixed(0)} % à 900 m (hasard ${(flora.chance * 100).toFixed(0)} %) · `
+    + `${flora.trees} arbres, ${flora.kinds} essences présentes`);
+  if (!flora.stable) problem("le champ d'essences n'est pas déterministe");
+  if (flora.near < 0.6) problem(`essences trop dispersées : ${(flora.near * 100).toFixed(0)} % seulement à 12 m`);
+  if (flora.far > flora.chance + 0.08) problem(`essences corrélées trop loin : ${(flora.far * 100).toFixed(0)} % à 900 m`);
+  if (flora.trees > 40 && flora.kinds < 2) problem('une seule essence dans tout le monde chargé');
+
   // --- photo mode -----------------------------------------------------------
   const photo = await page.evaluate(async () => {
     const g = window.__ruelle;

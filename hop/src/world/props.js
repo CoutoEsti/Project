@@ -11,7 +11,7 @@
 import { hash01 } from '../core/geo.js';
 import { polylineLength, sampleAt } from './roads.js';
 import { makeFoliageTexture } from './materials.js';
-import { propParts, hasPropModel } from './models.js';
+import { propParts, hasPropModel, propVariantCount } from './models.js';
 
 // ---------------------------------------------------------------------------
 // Geometry helpers
@@ -243,10 +243,107 @@ const CAR_COLORS = [
   [0.32, 0.34, 0.38], [0.82, 0.72, 0.30],
 ];
 
-const CANOPY_COLORS = [
-  [0.33, 0.48, 0.24], [0.28, 0.44, 0.21], [0.39, 0.53, 0.27],
-  [0.44, 0.55, 0.29], [0.30, 0.41, 0.23],
+// ---------------------------------------------------------------------------
+// Tree species, by neighbourhood
+// ---------------------------------------------------------------------------
+//
+// Montréal does not plant at random. A street was planted in one go, so it is
+// silver maples for six blocks and then honey locusts for the next six — and
+// the boroughs kept records of it. Picking a species per tree from a hash gets
+// the variety but loses that, and the result reads as noise; picking one
+// species for the whole city loses the variety. So the species comes from a
+// low-frequency field instead of from the tree.
+//
+// The field is a jittered Voronoi: each cell of the grid hashes to a site
+// somewhere inside itself, and a tree takes the species of the nearest site.
+// Jittering matters — an unjittered grid gives straight species boundaries on
+// exact multiples of the cell size, which is instantly readable as a grid.
+const DISTRICT_CELL = 240;   // metres between species sites, ~two blocks
+const STRAY_SHARE = 0.12;    // trees that take the runner-up species instead
+
+/**
+ * Which species belongs at this point.
+ *
+ * Deterministic in world metres, so a tree on a tile seam gets the same answer
+ * from both tiles and no species boundary ever falls on a tile boundary.
+ *
+ * @param {number} x world metres
+ * @param {number} z world metres
+ * @param {number} count how many species are available
+ * @returns {number} index in [0, count)
+ */
+export function speciesAt(x, z, count) {
+  if (count <= 1) return 0;
+  const cx = Math.floor(x / DISTRICT_CELL);
+  const cz = Math.floor(z / DISTRICT_CELL);
+
+  let bestD = Infinity, bestSeed = 0;
+  let nextD = Infinity, nextSeed = 0;
+  for (let dz = -1; dz <= 1; dz++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const gx = cx + dx, gz = cz + dz;
+      const seed = Math.imul(gx, 73856093) ^ Math.imul(gz, 19349663);
+      const sx = (gx + hash01(seed)) * DISTRICT_CELL;
+      const sz = (gz + hash01(seed ^ 0x5f356495)) * DISTRICT_CELL;
+      const d = (sx - x) ** 2 + (sz - z) ** 2;
+      if (d < bestD) {
+        nextD = bestD; nextSeed = bestSeed;
+        bestD = d; bestSeed = seed;
+      } else if (d < nextD) {
+        nextD = d; nextSeed = seed;
+      }
+    }
+  }
+
+  // A handful of trees take the neighbouring district's species. Without this
+  // the boundaries are too clean to be believable: real streets have the odd
+  // survivor from whatever was there before the replanting.
+  const stray = hash01(Math.imul(Math.round(x * 8), 83492791) ^ Math.round(z * 8));
+  const seed = (stray < STRAY_SHARE && nextD < Infinity) ? nextSeed : bestSeed;
+  return Math.floor(hash01(seed ^ 0x2545f491) * count) % count;
+}
+
+/**
+ * Per-species look for the procedural tree — used when no model was shipped,
+ * and as the shape jitter on top of an authored one. Loosely: maple, ash,
+ * hackberry, linden, spruce, honey locust.
+ */
+const SPECIES_LOOK = [
+  { canopy: [0.33, 0.48, 0.24], spread: 1.10, lift: 1.00 },
+  { canopy: [0.28, 0.44, 0.21], spread: 0.92, lift: 1.12 },
+  { canopy: [0.39, 0.53, 0.27], spread: 1.18, lift: 0.92 },
+  { canopy: [0.44, 0.55, 0.29], spread: 1.02, lift: 1.05 },
+  { canopy: [0.24, 0.39, 0.25], spread: 0.72, lift: 1.28 },
+  { canopy: [0.46, 0.57, 0.31], spread: 1.24, lift: 0.88 },
 ];
+
+/**
+ * How many species the world can draw on.
+ *
+ * When models were shipped this is exactly how many, so every species maps to
+ * a distinct model. Taking the larger of the two instead would fold six
+ * species onto two files and the field would come out as stripes.
+ */
+function speciesCount() {
+  return propVariantCount('tree') || SPECIES_LOOK.length;
+}
+
+/** One tree, with its species already decided. */
+function makeTree(x, z, scale, count) {
+  const species = speciesAt(x, z, count);
+  const look = SPECIES_LOOK[species % SPECIES_LOOK.length];
+  // Same species, slightly different tree: age and light do that on a real
+  // street, and without it a block of one species looks stamped.
+  const j = (hash01(Math.round(x * 17 + z * 23)) - 0.5) * 0.07;
+  return {
+    x, z, scale, species,
+    colour: [
+      Math.max(0, Math.min(1, look.canopy[0] + j)),
+      Math.max(0, Math.min(1, look.canopy[1] + j)),
+      Math.max(0, Math.min(1, look.canopy[2] + j)),
+    ],
+  };
+}
 
 // Shrubs sit lower and in more shade than a canopy, so they read darker and
 // slightly bluer than the tree palette.
@@ -286,8 +383,9 @@ export function buildProps(THREE, args) {
   const opts = args.opts || {};
   const P = getPrototypes(THREE);
 
+  const species = speciesCount();
   const lamps = [];        // {x, z, yaw}
-  const trees = [];        // {x, z, scale, colour}
+  const trees = [];        // {x, z, scale, species, colour}
   const signalsRed = [];
   const signalsGreen = [];
   const stops = [];
@@ -307,11 +405,8 @@ export function buildProps(THREE, args) {
         break;
       }
       case 'tree':
-        trees.push({
-          x: n.x, z: n.z,
-          scale: 0.75 + hash01(Math.round(n.x * 13 + n.z * 7)) * 0.6,
-          colour: CANOPY_COLORS[Math.floor(hash01(Math.round(n.x * 31 + n.z * 17)) * CANOPY_COLORS.length) % CANOPY_COLORS.length],
-        });
+        trees.push(makeTree(n.x, n.z,
+          0.75 + hash01(Math.round(n.x * 13 + n.z * 7)) * 0.6, species));
         mappedTrees++;
         break;
       case 'traffic_signals': {
@@ -375,11 +470,8 @@ export function buildProps(THREE, args) {
         const z = s.z + s.tx * side * off;
         if (!insideBounds(bounds, x, z)) continue;
         if (nearJunction(junctions, x, z, 8)) continue;
-        trees.push({
-          x, z,
-          scale: 0.7 + hash01(seedBase + Math.round(d * 11)) * 0.7,
-          colour: CANOPY_COLORS[Math.floor(hash01(seedBase + Math.round(d * 5)) * CANOPY_COLORS.length) % CANOPY_COLORS.length],
-        });
+        trees.push(makeTree(x, z,
+          0.7 + hash01(seedBase + Math.round(d * 11)) * 0.7, species));
       }
     }
 
@@ -528,23 +620,44 @@ export function buildProps(THREE, args) {
     d.scale.setScalar(it.scale);
   };
 
-  if (hasPropModel('tree')) {
-    // An authored tree: one InstancedMesh per material, all sharing the same
-    // per-tree transforms. Its own foliage colour is better than our tint, so
-    // instance colours are left alone.
-    for (const part of propParts('tree')) {
-      const mesh = addInstanced(part.geometry, part.material, trees, placeTree);
-      if (mesh) mesh.castShadow = !!args.shadows;
+  const variants = propVariantCount('tree');
+  if (variants > 0) {
+    // Authored trees: one InstancedMesh per material per species. Grouping by
+    // species is what lets a street be all maples — every tree in a group
+    // shares a model, so the draw-call count is variants × materials, not one
+    // per tree. Their own foliage colour is better than our tint, so instance
+    // colours are left alone.
+    const groups = new Map();
+    for (const t of trees) {
+      const v = t.species % variants;
+      let g = groups.get(v);
+      if (!g) { g = []; groups.set(v, g); }
+      g.push(t);
+    }
+    for (const [v, items] of groups) {
+      for (const part of propParts('tree', v)) {
+        const mesh = addInstanced(part.geometry, part.material, items, placeTree);
+        if (mesh) mesh.castShadow = !!args.shadows;
+      }
     }
   } else {
+    // Procedural: the species shows up as canopy colour and proportion —
+    // a spruce narrow and tall, a hackberry wide and low.
+    const shape = (it) => SPECIES_LOOK[it.species % SPECIES_LOOK.length];
+
     const trunkMesh = addInstanced(P.trunk, mats.vertex, trees, (d, it) => {
       d.position.set(it.x, lift(it.x, it.z), it.z);
       d.rotation.set(0, hash01(Math.round(it.x * 3 + it.z * 5)) * 6.28, 0);
-      d.scale.setScalar(it.scale);
+      const s = shape(it);
+      d.scale.set(it.scale, it.scale * s.lift, it.scale);
     });
     if (trunkMesh) trunkMesh.castShadow = !!args.shadows;
 
-    const canopyMesh = addInstanced(P.canopy, mats.foliage, trees, placeTree);
+    const canopyMesh = addInstanced(P.canopy, mats.foliage, trees, (d, it) => {
+      placeTree(d, it);
+      const s = shape(it);
+      d.scale.set(it.scale * s.spread, it.scale * s.lift, it.scale * s.spread);
+    });
     if (canopyMesh) {
       canopyMesh.castShadow = !!args.shadows;
       for (let i = 0; i < trees.length; i++) {
@@ -585,11 +698,18 @@ export function buildProps(THREE, args) {
   }
   addInstanced(P.carTrim, mats.vertex, cars, placeUpright);
 
+  // Species tally, so a tile can be checked for monoculture without having to
+  // reach into the instanced meshes.
+  const treeSpecies = {};
+  for (const t of trees) treeSpecies[t.species] = (treeSpecies[t.species] || 0) + 1;
+
   return {
     group,
     colliders: new Float32Array(colliders),
     lampCount: lamps.length,
     shrubCount: shrubs.length,
+    treeCount: trees.length,
+    treeSpecies,
     poolMesh,
     headMesh,
   };

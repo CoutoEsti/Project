@@ -625,3 +625,135 @@ volontairement repoussé.
 Voir `README.md` : PMTiles pour ne plus jamais charger la ville d'un bloc, et
 le planet Protomaps sur R2 pour environ deux dollars par mois. Techniquement
 résolu, jamais commencé. À faire quand le jeu mérite plus grand — pas avant.
+
+---
+
+## 4. La distance de vue, et pourquoi le brouillard est laid
+
+Mesuré, pas estimé. Trois choses différentes limitent la vue, et une seule
+coûte cher.
+
+| Ce qui arrête l'œil | Aujourd'hui | Coût pour le repousser |
+|---|---|---|
+| Brouillard (`sky.js`) | **1 250 m** ← le vrai plafond | gratuit, c'est un réglage |
+| Plan *far* de la caméra | 5 200 m | gratuit |
+| Relief à l'horizon | 14 km ✅ | déjà fait |
+| Bâtiments détaillés | ~2,1 km (anneau de tuiles) | très cher : ~200 Ko et la géométrie complète par tuile |
+| Silhouettes au loin | néant | **~5 700 triangles** pour tout l'extrait |
+
+Sur l'extrait du Plateau, seulement **473 bâtiments sur 19 732 (2,4 %)** méritent
+d'être dessinés au loin — ceux de 15 m et plus, ou de plus de 1 200 m² au sol.
+Un triplex fait deux pixels de haut à quatre kilomètres ; une tour du
+centre-ville est la raison pour laquelle on sait dans quelle direction on
+roule. `pack-data.mjs` produit déjà ce calque : `far.json`, une boîte orientée
+par bâtiment, 30 Ko. **Le générateur est écrit et testé ; le rendu ne l'est
+pas.**
+
+### Le brouillard fait faux, et c'est structurel
+
+`THREE.Fog` est linéaire : la couleur se mélange proportionnellement à la
+distance, entre `near` et `far`. L'atmosphère réelle ne fait pas ça — elle
+suit une exponentielle, et surtout elle **ne masque pas tout de la même
+façon** : le ciel derrière reste lumineux, les objets sombres pâlissent plus
+vite que les clairs. D'où l'impression de rideau gris.
+
+Trois remplacements possibles, du moins cher au plus juste :
+
+1. **`FogExp2`** — une ligne à changer. La densité devient exponentielle, le
+   proche reste net beaucoup plus longtemps et seul le lointain se dissout. Ça
+   corrige la moitié du problème pour rien.
+2. **Fondu par distance sur l'alpha plutôt que sur la couleur** — les
+   silhouettes s'effacent au lieu de virer au gris. C'est ce qui donne
+   l'impression de « ça continue là-bas » au lieu de « ça s'arrête ici ». Il
+   faut un `onBeforeCompile` sur le matériau des silhouettes, une trentaine de
+   lignes.
+3. **Diffusion atmosphérique** — la couleur du brouillard varie selon l'angle
+   au soleil : chaude quand on regarde vers lui, bleue à l'opposé. C'est ce qui
+   fait qu'une ville au loin a l'air lointaine et pas délavée. Le plus beau, le
+   plus long.
+
+L'ordre à suivre : `FogExp2`, puis les silhouettes, puis le fondu alpha. La
+diffusion en dernier, si le reste tient.
+
+### Un réglage, pas une constante
+
+`Court / Moyen / Loin / Très loin` → 1 250 / 2 500 / 4 500 / 7 000 m, qui pilote
+à la fois la densité du brouillard et le plan *far*. Les silhouettes rendent
+« loin » utile ; sans elles, repousser le brouillard ne dévoile que du relief
+nu, ce qui est pire que le brouillard.
+
+---
+
+## 5. L'asphalte : ce qui manque vraiment
+
+### Où on en est
+
+Tout le sol d'une tuile — herbe, parc, eau, trottoir, bordure, asphalte — est
+**peint dans un seul canvas** qui devient la texture de la tuile (`ground.js`).
+C'est ce qui donne des jonctions parfaites sans z-fighting ni couture : il n'y
+a qu'une seule surface. L'asphalte a donc aujourd'hui une couleur (`#4b4b50`),
+une carte de rugosité peinte, et un grain normal généré à `normalScale 0.22`.
+
+Conséquence : **la route, la bordure et le trottoir sont exactement au même
+niveau.** Il n'y a aucun relief nulle part. C'est ça qui fait « décalcomanie »
+plutôt que « chaussée ».
+
+### Monter l'asphalte de 1 ½ pouce ? Ce n'est pas le bon pouce
+
+3,8 cm à cinq mètres de l'œil, à hauteur de conducteur, ça fait environ 0,4° —
+sept pixels en 1080p. Visible, mais marginal.
+
+La **bordure de trottoir fait 15 cm**, soit quatre fois plus, et c'est elle que
+l'œil lit comme « la route est une dalle ». Et dans la réalité l'asphalte est
+le point *bas* : c'est le trottoir qui est monté, pas la chaussée. Donc la
+bonne question n'est pas « comment monter l'asphalte » mais **« comment
+descendre la chaussée de 15 cm sous le trottoir »**.
+
+### Trois façons, du bricolage au vrai
+
+| | Méthode | Ce qu'on gagne | Ce qu'on perd | Effort |
+|---|---|---|---|---|
+| **A** | Marquer la bordure dans la carte normale | La lumière accroche l'arête | Aucune silhouette : à angle rasant c'est plat | ~30 min |
+| **B** | Déplacer les sommets du sol | Vrai relief, aucune géométrie en plus | Une marche de 15 cm sur 20 cm demande des sommets sub-métriques le long de chaque bordure — ça se bat contre tout le design « un seul canvas » | élevé |
+| **C** | **La bordure comme géométrie propre** | Vraie silhouette, vraies ombres, et la chaussée peut enfin passer 4 cm sous le trottoir | Les jonctions : il faut arrêter et arrondir les bordures aux coins | moyen |
+
+**C est la bonne.** Les routes ont déjà une polyligne et une largeur ; on
+extrude un ruban le long de chaque rive — une face verticale de 15 cm, une face
+supérieure de 20 cm, soit 4 triangles par paire de segments. Sur les 941
+tronçons du test, ça fait quelques milliers de triangles par tuile : rien. Et
+la logique de découpe aux carrefours existe déjà, c'est celle qui coupe les
+marquages à 9,5 m des jonctions.
+
+Une fois la bordure en géométrie, le 1 ½ pouce d'asphalte devient gratuit et
+cohérent : la chaussée se pose sous le dessus du trottoir au lieu d'être au
+même Y.
+
+### « De la vraie asphalte » — c'est la matière, pas un modèle 3D
+
+Une chaussée n'est pas un modèle : c'est une surface de forme quelconque. Ce
+qui la fait lire comme de l'asphalte, dans l'ordre d'importance :
+
+1. **Les traces de roues.** Deux bandes plus sombres et plus polies là où les
+   pneus passent. C'est *le* signe d'une route vraie, et c'est presque gratuit :
+   deux traits dans le canvas, le long de la ligne médiane déjà calculée.
+2. **Le granulat à la bonne échelle.** Des pierres de 8 à 14 mm, donc une
+   normale et une rugosité qui se répètent au mètre — pas à la tuile.
+3. **Les rapiéçages et les serpents de goudron.** Les tranchées rebouchées en
+   rectangles plus sombres et les coulées noires sur les fissures. C'est
+   exactement ce qui fait qu'une rue ressemble à Montréal et pas à une rue
+   générique.
+4. **Le dévers.** 2 % de pente du centre vers le caniveau. Vient gratuitement
+   avec la géométrie de bordure du point C.
+
+### Ce qui peut vraiment être un modèle 3D
+
+Pas la chaussée — ce qui est *dessus* : plaques d'égout, grilles de caniveau,
+plaques d'acier de chantier, nids-de-poule, cônes orange. Ça se pose en
+instancié comme les lampadaires, aux jonctions et le long des caniveaux. Les
+plaques d'égout et les cônes orange sont probablement le meilleur rapport
+travail/reconnaissance de toute cette section.
+
+### L'ordre
+
+Traces de roues (canvas, ~1 h) → bordures en géométrie (C) → chaussée 4 cm plus
+bas → rapiéçages et goudron → plaques et cônes en modèles.

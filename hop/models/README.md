@@ -7,9 +7,44 @@ absent ou illisible n'est pas une erreur — le procédural reprend la main.
 | Fichier | Remplace | Hauteur cible |
 |---|---|---|
 | `car.glb` | la voiture du joueur | 4,30 m de long |
-| `tree.glb` | tous les arbres | 8,5 m |
+| `tree.glb` … `tree6.glb` | les arbres — une essence par fichier | 8,5 m |
 | `lamp.glb` | tous les lampadaires | 6,2 m |
 | `bench.glb` | les bancs | 0,9 m |
+
+## Plusieurs essences d'arbres
+
+Dépose `tree.glb`, puis `tree2.glb`, `tree3.glb`… jusqu'à `tree6.glb`. Le jeu
+sonde les six, garde ceux qui existent, et **rien d'autre n'est à configurer**.
+Un seul fichier fonctionne exactement comme avant.
+
+Ce qui compte, c'est comment ils sont répartis. Montréal ne plante pas au
+hasard : une rue a été plantée d'un coup, donc c'est de l'érable argenté sur
+six pâtés puis du févier sur les six suivants. Tirer l'essence au hasard par
+arbre donnerait la variété mais perdrait ça, et le résultat se lit comme du
+bruit. Alors l'essence ne vient pas de l'arbre, elle vient d'un **champ de
+quartier** — un Voronoï perturbé, une essence par cellule d'environ 240 m :
+
+| Deux arbres distants de | Même essence |
+|---|---|
+| 12 m — voisins de rue | **80 %** |
+| 60 m — demi-pâté | 67 % |
+| 120 m — un pâté | 50 % |
+| 240 m — deux pâtés | 23 % |
+| 900 m et plus | 17 % = **pur hasard** |
+
+Un arbre sur huit prend quand même l'essence du quartier voisin : sans ça les
+frontières sont trop propres pour être crédibles — une vraie rue a toujours
+deux ou trois survivants de ce qui était là avant le replantage.
+
+Le champ est déterministe et exprimé en mètres monde, donc un arbre posé sur
+une couture de tuile reçoit la même réponse des deux côtés : aucune frontière
+d'essence ne tombe jamais sur une frontière de tuile.
+
+**Conseil de modélisation :** fais-les franchement différents en *silhouette*,
+pas seulement en couleur. À trente mètres, c'est la forme de la couronne qui
+distingue une épinette d'un micocoulier ; la teinte, non. Sans aucun fichier,
+le procédural applique déjà six proportions distinctes (étalement 0,72 à 1,24,
+hauteur 0,88 à 1,28) — c'est le genre d'écart à viser.
 
 ## Ce que le jeu fait tout seul
 
