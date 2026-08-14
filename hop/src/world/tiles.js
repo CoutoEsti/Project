@@ -11,12 +11,13 @@ import {
   Projection, tileAt, tileBounds, tileKey, tileSizeMetres,
 } from '../core/geo.js';
 import { classifyRoad, findJunctions, buildMarkings, StripBuilder } from './roads.js';
+import { buildKerbs, KerbBuilder } from './kerbs.js';
 import { paintTile, paintRoughnessTile, areaKindFromTags, GROUND_COLORS } from './ground.js';
 import { buildBuildings } from './buildings.js';
 import { buildProps, makePropMaterials } from './props.js';
 import {
   makeWallMaterial, makeCapMaterial, makeGroundMaterial,
-  makeMarkingMaterial, makeLightPoolMaterial,
+  makeMarkingMaterial, makeKerbMaterial, makeLightPoolMaterial,
 } from './materials.js';
 import { CollisionGrid } from '../vehicle/collision.js';
 import { Terrain } from './terrain.js';
@@ -90,6 +91,7 @@ export class World {
       wall: makeWallMaterial(THREE),
       cap: makeCapMaterial(THREE),
       marking: makeMarkingMaterial(THREE),
+      kerb: makeKerbMaterial(THREE),
       lightPool: makeLightPoolMaterial(THREE),
       props: makePropMaterials(THREE),
     };
@@ -458,11 +460,34 @@ export class World {
     tile.canvas = canvas;
   }
 
-  // -- step 3: buildings + painted markings ----------------------------------
+  // -- step 3: buildings + painted markings + kerbs ---------------------------
   _structures(tile) {
     const { clipped, junctions, buildings } = tile.parsed;
+    const groundSample = this.terrain.enabled ? (x, z) => this.groundHeight(x, z) : null;
 
-    const strips = new StripBuilder(this.terrain.enabled ? (x, z) => this.groundHeight(x, z) : null);
+    // Kerbs give the carriageway an edge, so the road reads as a slab you are
+    // driving on rather than a texture painted on a field. Near tiles only:
+    // fifteen centimetres of relief is worth nothing two kilometres away, and
+    // it is by some distance the cheapest triangle to skip.
+    if (tile.detailed) {
+      const kerbs = new KerbBuilder(groundSample);
+      buildKerbs(clipped, junctions, kerbs);
+      if (kerbs.count) {
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.Float32BufferAttribute(kerbs.positions, 3));
+        geo.setAttribute('color', new THREE.Float32BufferAttribute(kerbs.colors, 3));
+        geo.setIndex(kerbs.indices);
+        geo.computeVertexNormals();
+        geo.computeBoundingSphere();
+        const mesh = new THREE.Mesh(geo, this.materials.kerb);
+        mesh.receiveShadow = !!this.settings.shadows;
+        this.group.add(mesh);
+        tile.objects.push(mesh);
+        tile.kerbCount = kerbs.count;
+      }
+    }
+
+    const strips = new StripBuilder(groundSample);
     buildMarkings(clipped, junctions, strips);
     if (strips.count) {
       const geo = new THREE.BufferGeometry();
@@ -477,9 +502,8 @@ export class World {
       tile.objects.push(mesh);
     }
 
-    const groundAt = this.terrain.enabled ? (x, z) => this.groundHeight(x, z) : null;
     const built = buildBuildings(THREE, buildings, clipped, {
-      groundAt,
+      groundAt: groundSample,
       staircases: tile.detailed && this.settings.quality === 'high',
       rooftops: tile.detailed && this.settings.quality !== 'low',
     });

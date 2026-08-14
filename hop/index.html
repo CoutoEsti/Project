@@ -44,6 +44,8 @@
   <div id="status"></div>
   <div id="toast"></div>
 
+  <div id="players"></div>
+
   <div id="minimap-wrap">
     <canvas id="minimap" width="200" height="200"></canvas>
   </div>
@@ -104,6 +106,35 @@
     </div>
 
     <p id="menu-hint" class="hint"></p>
+
+    <!-- ── Multiplayer ─────────────────────────────────────────────────── -->
+    <div id="multiplayer" class="offline">
+      <div class="mp-head">
+        <h2>Rouler ensemble</h2>
+        <span id="mp-status" class="mp-badge">hors ligne</span>
+      </div>
+
+      <div class="mp-fields">
+        <input id="mp-name" type="text" maxlength="16" autocomplete="off" spellcheck="false"
+               placeholder="Ton nom" aria-label="Ton nom">
+        <input id="mp-room" type="text" maxlength="12" autocomplete="off" spellcheck="false"
+               placeholder="Code du salon" aria-label="Code du salon">
+      </div>
+
+      <div class="menu-actions mp-actions">
+        <button id="mp-join" class="primary">Créer ou rejoindre</button>
+        <button id="mp-invite" class="ghost">Copier l’invitation</button>
+        <button id="mp-leave" class="ghost">Quitter</button>
+      </div>
+
+      <p id="mp-hint" class="hint">
+        Aucun serveur de jeu : les voitures se parlent directement, de navigateur
+        à navigateur. Laisse le code vide pour en créer un, ou colle celui qu’on
+        t’a donné. Huit voitures par salon.
+      </p>
+
+      <div id="mp-players"></div>
+    </div>
 
     <div class="keys">
       <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>conduire</span></div>

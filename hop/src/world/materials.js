@@ -293,6 +293,18 @@ export function makeGroundMaterial(THREE, texture, roughnessMap) {
   });
 }
 
+/**
+ * Kerbs: poured concrete, which is matte, slightly lighter than asphalt, and
+ * carries its face and cap colours per vertex — see kerbs.js.
+ */
+export function makeKerbMaterial(THREE) {
+  return new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 0.94,
+    metalness: 0,
+  });
+}
+
 /** Road markings: worn paint with a hint of sheen. */
 export function makeMarkingMaterial(THREE) {
   return new THREE.MeshStandardMaterial({

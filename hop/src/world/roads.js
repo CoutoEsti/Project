@@ -182,12 +182,20 @@ function nearJunction(junctions, x, z, limit) {
 }
 
 /**
- * A cheaper junction test for long polylines: precompute the arc-length
- * positions of junction vertices along the line, then ask whether a given
- * arc-length is inside any clearance window.
+ * Where along a polyline its junctions are, in metres from the start.
+ *
+ * Everything that has to get out of a junction's way — painted markings, and
+ * the kerb ribbons in kerbs.js — needs the same answer, so it is computed once
+ * here and read differently by each: markings step around a hard window, kerbs
+ * fade over a distance.
  */
-function junctionWindows(points, junctions) {
-  const windows = [];
+/** Is this exact vertex one of the junctions findJunctions() reported? */
+export function isJunction(junctions, x, z) {
+  return junctions.has(vertexKey(x, z));
+}
+
+export function junctionArcs(points, junctions) {
+  const arcs = [];
   let s = 0;
   for (let i = 0; i < points.length; i++) {
     if (i > 0) {
@@ -195,11 +203,19 @@ function junctionWindows(points, junctions) {
       const dz = points[i].z - points[i - 1].z;
       s += Math.hypot(dx, dz);
     }
-    if (junctions.has(vertexKey(points[i].x, points[i].z))) {
-      windows.push([s - JUNCTION_CLEARANCE, s + JUNCTION_CLEARANCE]);
-    }
+    if (junctions.has(vertexKey(points[i].x, points[i].z))) arcs.push(s);
   }
-  return windows;
+  return arcs;
+}
+
+/**
+ * A cheaper junction test for long polylines: precompute the arc-length
+ * positions of junction vertices along the line, then ask whether a given
+ * arc-length is inside any clearance window.
+ */
+function junctionWindows(points, junctions) {
+  return junctionArcs(points, junctions)
+    .map((s) => [s - JUNCTION_CLEARANCE, s + JUNCTION_CLEARANCE]);
 }
 
 function inWindows(windows, s) {
@@ -207,6 +223,40 @@ function inWindows(windows, s) {
     if (s >= windows[i][0] && s <= windows[i][1]) return true;
   }
   return false;
+}
+
+/**
+ * A unit normal per vertex, averaged across the bend, for offsetting a
+ * polyline sideways — the kerb ribbons and the painted wheel tracks both need
+ * a line that runs parallel to a street rather than along it.
+ *
+ * Averaging alone narrows the offset on a corner (the miter is shorter than the
+ * distance it should reach), so it is divided by the cosine of the half-angle —
+ * capped, because a hairpin would otherwise send the vertex to infinity.
+ */
+export function offsetNormals(points) {
+  const n = points.length;
+  const segs = new Array(n - 1);
+  for (let i = 0; i < n - 1; i++) {
+    const dx = points[i + 1].x - points[i].x;
+    const dz = points[i + 1].z - points[i].z;
+    const len = Math.hypot(dx, dz) || 1;
+    segs[i] = { x: -dz / len, z: dx / len };
+  }
+
+  const out = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const a = segs[Math.max(0, i - 1)];
+    const b = segs[Math.min(segs.length - 1, i)];
+    let x = a.x + b.x;
+    let z = a.z + b.z;
+    const len = Math.hypot(x, z);
+    if (len < 1e-4) { out[i] = { x: b.x, z: b.z }; continue; }
+    x /= len; z /= len;
+    const cos = Math.max(0.35, x * b.x + z * b.z);
+    out[i] = { x: x / cos, z: z / cos };
+  }
+  return out;
 }
 
 /** Total length of a polyline. */

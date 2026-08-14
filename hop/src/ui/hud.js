@@ -31,7 +31,9 @@ export class Hud {
     this.scoreChain = root.querySelector('#score-chain');
     this.scoreMult = root.querySelector('#score-mult');
     this.scoreLabel = root.querySelector('#score-label');
+    this.playersEl = root.querySelector('#players');
 
+    this._playerSig = '';
     this._toastTimer = 0;
     this._minimapTimer = 0;
     this._dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -64,6 +66,45 @@ export class Hud {
 
   setPlace(name) {
     this.placeEl.textContent = name || '';
+  }
+
+  /**
+   * Who else is in the room, top left, under the place name.
+   *
+   * Rebuilt only when something actually changed. Speeds are rounded to five
+   * km/h first, because the point of this list is "who is here and are they
+   * moving", and a needle twitching sixty times a second in the corner of the
+   * eye is a distraction with no information in it.
+   *
+   * @param {Array} rows from Multiplayer.roster(), or empty when offline
+   */
+  setPlayers(rows) {
+    if (!this.playersEl) return;
+    const list = rows && rows.length > 1 ? rows : [];
+    const sig = list.map((r) => `${r.name}|${r.colour}|${Math.round(r.speedKmh / 5)}`).join(';');
+    if (sig === this._playerSig) return;
+    this._playerSig = sig;
+
+    this.playersEl.textContent = '';
+    for (const r of list) {
+      const row = document.createElement('div');
+      row.className = `player-row${r.self ? ' self' : ''}`;
+
+      const chip = document.createElement('span');
+      chip.className = 'chip';
+      chip.style.background = `#${(r.colour >>> 0).toString(16).padStart(6, '0')}`;
+
+      const name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = r.name;
+
+      const kmh = document.createElement('span');
+      kmh.className = 'kmh';
+      kmh.textContent = `${Math.round(r.speedKmh)}`;
+
+      row.append(chip, name, kmh);
+      this.playersEl.appendChild(row);
+    }
   }
 
   /**
@@ -166,7 +207,7 @@ export class Hud {
    * @param {object} car    {x, z, yaw}
    * @param {object} trial  optional {start, finish}
    */
-  drawMinimap(roads, car, trial, dt, waypoint = null) {
+  drawMinimap(roads, car, trial, dt, waypoint = null, others = null) {
     this._minimapTimer -= dt;
     if (this._minimapTimer > 0) return;
     this._minimapTimer = 1 / 12;
@@ -224,6 +265,34 @@ export class Hud {
     }
     if (trial && trial.finish) {
       drawPin(ctx, trial.finish.x, trial.finish.z, '#e8503a', 5 / scale);
+    }
+
+    // The other players, in their own colours, still inside the map transform
+    // so they sit on the right street. Drawn as arrowheads rather than dots
+    // because which way somebody is pointing is half of what you want to know.
+    if (others) {
+      for (const o of others) {
+        if (Math.abs(o.x - car.x) > range || Math.abs(o.z - car.z) > range) continue;
+        ctx.save();
+        ctx.translate(o.x, o.z);
+        // Inside the map transform these are world coordinates, and the shape
+        // is drawn pointing at local −y. Sending that to world (sin θ, cos θ)
+        // needs π − θ; rotating by −θ, the obvious guess, mirrors it.
+        ctx.rotate(Math.PI - o.yaw);
+        ctx.fillStyle = `#${(o.colour >>> 0).toString(16).padStart(6, '0')}`;
+        const r = 6 / scale;
+        ctx.beginPath();
+        ctx.moveTo(0, -r);
+        ctx.lineTo(r * 0.72, r * 0.85);
+        ctx.lineTo(0, r * 0.42);
+        ctx.lineTo(-r * 0.72, r * 0.85);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(12,16,20,0.8)';
+        ctx.lineWidth = 1.4 / scale;
+        ctx.stroke();
+        ctx.restore();
+      }
     }
 
     ctx.restore();

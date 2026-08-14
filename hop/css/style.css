@@ -909,3 +909,137 @@ body.photo-mode #vignette { display: none !important; }
 }
 
 .keys-note { grid-column: 1 / -1; color: #6d7885; font-size: 11px; }
+
+/* ── Multiplayer ─────────────────────────────────────────────────────────── */
+
+#multiplayer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.mp-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mp-head h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+/* The one thing worth reading at a glance: are we connected or not. */
+.mp-badge {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.05);
+  font: 600 11px var(--mono);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
+.mp-badge.online { color: #06231c; background: var(--accent); border-color: transparent; }
+.mp-badge.joining { color: var(--accent-warm); border-color: rgba(255, 200, 87, 0.45); }
+.mp-badge.failed { color: var(--danger); border-color: rgba(232, 80, 58, 0.5); }
+
+.mp-fields { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.mp-fields input {
+  flex: 1 1 150px;
+  min-width: 0;
+  padding: 11px 14px;
+  font-size: 15px;
+  font-family: inherit;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  outline: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+/* Room codes are read aloud and typed back in, so they get the mono face and
+   the spacing that makes O and 0 impossible to confuse — even though the
+   alphabet in protocol.js already excludes both. */
+#mp-room {
+  font-family: var(--mono);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.mp-fields input::placeholder { color: #6d7885; letter-spacing: normal; }
+.mp-fields input:focus { border-color: var(--accent); background: rgba(255, 255, 255, 0.08); }
+
+.mp-actions button { padding: 11px 16px; font-size: 14px; }
+/* Only offer what makes sense: nothing to leave before joining, and nothing to
+   invite anyone to until there is a room code to invite them into. */
+#multiplayer.offline #mp-leave,
+#multiplayer:not(.online) #mp-invite { display: none; }
+#multiplayer:not(.offline) #mp-join { display: none; }
+
+#mp-players { display: flex; flex-direction: column; gap: 4px; }
+#mp-players:empty { display: none; }
+
+.mp-player {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 9px;
+  font-size: 13px;
+}
+
+.mp-player .chip {
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  flex: 0 0 auto;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35) inset;
+}
+
+.mp-player .who { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mp-player .you { color: var(--accent); font-size: 11px; }
+.mp-player .ms { font: 500 11px var(--mono); color: var(--ink-dim); }
+
+/* The in-game roster: same information, small, out of the way, and gone
+   entirely when you are driving alone. */
+#players {
+  position: absolute;
+  top: calc(max(18px, env(safe-area-inset-top)) + 62px);
+  left: max(20px, env(safe-area-inset-left));
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  pointer-events: none;
+}
+
+#players:empty { display: none; }
+
+.player-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 9px 4px 6px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  backdrop-filter: blur(10px);
+  font-size: 12px;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+}
+
+.player-row .chip { width: 9px; height: 9px; border-radius: 2px; flex: 0 0 auto; }
+.player-row .kmh { font: 500 11px var(--mono); color: var(--ink-dim); }
+.player-row.self .name { color: var(--accent); }

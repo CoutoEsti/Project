@@ -27,6 +27,9 @@ import { Music } from './game/music.js';
 import { Challenges, ChallengeState } from './game/challenges.js';
 import { Birds } from './world/birds.js';
 import { Pedestrians } from './world/pedestrians.js';
+import { Multiplayer, NetState } from './net/session.js';
+import { RemoteCars, collideWithRemote } from './net/remote.js';
+import { colourForName, normaliseName, normaliseRoom } from './net/protocol.js';
 import { Hud } from './ui/hud.js';
 import { Menu } from './ui/menu.js';
 import { buildMapImage, paintMap, marker, carMarker } from './ui/map.js';
@@ -97,8 +100,17 @@ class Game {
     // Worth having now rather than later — the whole point of a synthesised
     // engine is that you can hear the change immediately, and nobody will
     // believe that until they have heard it.
+    // Your name decides your paint. Deriving it rather than asking means two
+    // players who never spoke still turn up in different cars, and it is one
+    // less decision between opening the game and driving.
+    if (!this.settings.playerName) {
+      this.settings.playerName = `Pilote ${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
+      saveSettings(this.settings);
+    }
+    this.myColour = colourForName(this.settings.playerName, CAR_COLORS);
+
     this.vehicle = new Vehicle(this._engineFromParams());
-    this.car = createCar(THREE, { color: CAR_COLORS[0] });
+    this.car = createCar(THREE, { color: this.myColour });
     this.scene.add(this.car.group);
     this._tryLoadCarModel();
 
@@ -141,6 +153,22 @@ class Game {
       onShot: () => this._flash(),
     });
 
+    // Multiplayer. The session only ever speaks latitude and longitude, so it
+    // needs the projection — which does not exist until the first hop, hence
+    // the getter rather than the value.
+    this.net = new Multiplayer({
+      name: this.settings.playerName,
+      palette: CAR_COLORS,
+      broker: this.params.get('broker') || undefined,
+      iceServers: this._iceFromParams(),
+      getProjection: () => this.world.projection,
+      onEvent: (e) => this._onNetEvent(e),
+    });
+    this.remoteCars = new RemoteCars(THREE, this.scene, {
+      groundAt: (x, z) => this.world.groundHeight(x, z),
+      shadows: !!this.settings.shadows && this.settings.quality === 'high',
+    });
+
     this.menu = new Menu(root, {
       settings: this.settings,
       input: this.input,
@@ -181,7 +209,7 @@ class Game {
    */
   async _tryLoadCarModel() {
     const url = new URL('./models/car.glb', document.baseURI).href;
-    const model = await loadCarModel(url, { color: CAR_COLORS[0] });
+    const model = await loadCarModel(url, { color: this.myColour });
     if (!model) return;
     this.scene.remove(this.car.group);
     this.car.dispose();
@@ -211,6 +239,20 @@ class Game {
     const turbo = num('turbo', 0, 1);
     if (turbo !== null) out.induction = turbo;
     return out;
+  }
+
+  /**
+   * ICE servers from the address bar: `?ice=` for none (a LAN needs no help
+   * finding itself), or a comma-separated list to point at your own STUN and
+   * TURN. TURN is the answer for the players a plain STUN cannot connect —
+   * it is the one piece of multiplayer that genuinely costs money, so it is a
+   * setting rather than a default.
+   */
+  _iceFromParams() {
+    const raw = this.params.get('ice');
+    if (raw === null) return undefined;
+    const urls = raw.split(',').map((s) => s.trim()).filter(Boolean);
+    return urls.map((u) => ({ urls: u }));
   }
 
   _bootstrap() {
@@ -253,6 +295,14 @@ class Game {
       modelsReady.then(() => this.hop(lat, lon, this.params.get('place') || 'Position partagée', true));
     }
     this.modelsReady = modelsReady;
+
+    // An invitation link joins the room by itself. Signalling takes a couple of
+    // seconds and does not block anything — the world streams in meanwhile, and
+    // the first snapshot is only sent once there is a projection to measure
+    // against, so joining before hopping is safe.
+    const room = normaliseRoom(this.params.get('room'));
+    if (room) this.net.join(room);
+
     this.loop.start();
   }
 
@@ -283,6 +333,7 @@ class Game {
 
     this._bindStick();
     this._applyTouchMode();
+    this._bindMultiplayer();
 
     // Full-screen map
     this.mapEl = this.root.querySelector('#mapview');
@@ -361,6 +412,147 @@ class Game {
     };
     zone.addEventListener('pointerup', release);
     zone.addEventListener('pointercancel', release);
+  }
+
+  // -------------------------------------------------------------------------
+  // Multiplayer
+  // -------------------------------------------------------------------------
+
+  _bindMultiplayer() {
+    this.mpEl = this.root.querySelector('#multiplayer');
+    this.mpStatus = this.root.querySelector('#mp-status');
+    this.mpName = this.root.querySelector('#mp-name');
+    this.mpRoom = this.root.querySelector('#mp-room');
+    this.mpPlayers = this.root.querySelector('#mp-players');
+    if (!this.mpEl) return;
+
+    this.mpName.value = this.settings.playerName;
+    this.mpRoom.value = normaliseRoom(this.params.get('room')) || '';
+
+    this.mpName.addEventListener('change', () => {
+      const clean = normaliseName(this.mpName.value);
+      if (!clean) { this.mpName.value = this.settings.playerName; return; }
+      this.mpName.value = clean;
+      this.settings.playerName = clean;
+      saveSettings(this.settings);
+      this.net.setName(clean);
+      // The car repaints on the next load, not now: recolouring a glTF that may
+      // have half a dozen painted meshes is a garage feature, not a side effect
+      // of typing a name.
+      this.myColour = colourForName(clean, CAR_COLORS);
+      this._paintNetPanel();
+    });
+
+    this.root.querySelector('#mp-join').addEventListener('click', () => this._netJoin());
+    this.mpRoom.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); this._netJoin(); }
+    });
+    this.root.querySelector('#mp-leave').addEventListener('click', () => this.net.leave());
+    this.root.querySelector('#mp-invite').addEventListener('click', () => {
+      this._copy(this._inviteUrl(), 'Invitation copiée.');
+    });
+
+    this._paintNetPanel();
+  }
+
+  async _netJoin() {
+    if (this.net.state !== NetState.OFFLINE) return;
+    this.net.setName(normaliseName(this.mpName.value) || this.settings.playerName);
+    const room = await this.net.join(this.mpRoom.value);
+    if (room) this.mpRoom.value = room;
+  }
+
+  _onNetEvent(e) {
+    switch (e.type) {
+      case 'joining':
+        this.hud.toast(`Salon ${e.room} — connexion…`, 3000);
+        break;
+      case 'joined': {
+        this.hud.toast(`Salon ${e.room}. Partage le code, ou le lien avec « Copier l’invitation ».`, 6000);
+        // Put the room in the address bar, so a refresh — or a shared tab —
+        // comes back to the same room instead of dropping out of it.
+        const url = new URL(window.location.href);
+        url.searchParams.set('room', e.room);
+        window.history.replaceState(null, '', url.toString());
+        break;
+      }
+      case 'failed':
+        this.hud.toast('Impossible de rejoindre le salon. Réessaie, ou passe par ton propre broker (?broker=).', 7000);
+        break;
+      case 'left':
+        this.remoteCars.clear();
+        this.hud.toast('Salon quitté.', 2600);
+        break;
+      case 'peer-joined':
+        this.hud.toast(`${e.name} arrive.`, 3200);
+        break;
+      case 'peer-left':
+        this.hud.toast(`${e.name} est parti.`, 3200);
+        break;
+      case 'horn': {
+        // Only if they are close enough that you would actually hear it.
+        const them = this.net.cars().find((c) => c.id === e.id);
+        if (them && Math.hypot(them.x - this.vehicle.x, them.z - this.vehicle.z) < 150) {
+          this.audio.horn();
+        }
+        break;
+      }
+      case 'error':
+        this.hud.toast(e.detail, 6000);
+        console.warn('[réseau]', e.kind, e.detail);
+        break;
+      default: break;
+    }
+    this._paintNetPanel();
+  }
+
+  /** The panel in the menu: badge, buttons, and who is connected. */
+  _paintNetPanel() {
+    if (!this.mpEl) return;
+    const state = this.net.state;
+    this.mpEl.classList.toggle('offline', state === NetState.OFFLINE);
+    this.mpEl.classList.toggle('online', state === NetState.ONLINE);
+    this.mpStatus.className = 'mp-badge';
+
+    if (state === NetState.ONLINE) {
+      this.mpStatus.classList.add('online');
+      this.mpStatus.textContent = `${this.net.room} · ${this.net.count + 1}/8`;
+    } else if (state === NetState.JOINING) {
+      this.mpStatus.classList.add('joining');
+      this.mpStatus.textContent = 'connexion…';
+    } else {
+      this.mpStatus.textContent = 'hors ligne';
+    }
+
+    this.mpPlayers.textContent = '';
+    if (state !== NetState.ONLINE) return;
+    for (const p of this.net.roster()) {
+      const row = document.createElement('div');
+      row.className = 'mp-player';
+
+      const chip = document.createElement('span');
+      chip.className = 'chip';
+      chip.style.background = `#${(p.colour >>> 0).toString(16).padStart(6, '0')}`;
+
+      const who = document.createElement('span');
+      who.className = 'who';
+      who.textContent = p.name;
+
+      const tail = document.createElement('span');
+      tail.className = p.self ? 'you' : 'ms';
+      tail.textContent = p.self ? 'toi' : (p.ping == null ? '…' : `${p.ping} ms`);
+
+      row.append(chip, who, tail);
+      this.mpPlayers.appendChild(row);
+    }
+  }
+
+  /** Where you are, plus the room you are in — the whole invitation in a link. */
+  _inviteUrl() {
+    const url = this._positionUrl() || new URL(window.location.href).toString();
+    const out = new URL(url);
+    if (this.net.room) out.searchParams.set('room', this.net.room);
+    return out.toString();
   }
 
   _applyWeather() {
@@ -554,15 +746,27 @@ class Game {
   }
 
   _share() {
-    const url = this.trial && this.trial.start && this.trial.finish
+    let url = this.trial && this.trial.start && this.trial.finish
       ? this.trial.shareUrl()
       : this._positionUrl();
     if (!url) return;
-    const done = () => this.hud.toast('Lien copié.', 2600);
+    // A course shared from inside a room should bring people into the room, not
+    // just to the start line.
+    if (this.net.room) {
+      const withRoom = new URL(url);
+      withRoom.searchParams.set('room', this.net.room);
+      url = withRoom.toString();
+    }
+    this._copy(url, 'Lien copié.');
+  }
+
+  _copy(text, message) {
+    if (!text) return;
+    const done = () => this.hud.toast(message, 2600);
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(url).then(done, () => window.prompt('Lien', url));
+      navigator.clipboard.writeText(text).then(done, () => window.prompt('Lien', text));
     } else {
-      window.prompt('Lien', url);
+      window.prompt('Lien', text);
     }
   }
 
@@ -598,6 +802,16 @@ class Game {
         this.vehicle.u -= Math.sin(this.slope) * 9.81 * dt;
       }
 
+      // Other players are solid. Nobody is authoritative — each client pushes
+      // only itself out of the overlap — so there is no server to disagree with
+      // and no rubber-banding, and both cars still bounce the same way.
+      if (this.net.active) {
+        const hit = collideWithRemote(this.vehicle, this.net.cars());
+        // Rubbing paint down a narrow street should not cost a skill chain; a
+        // real thump should, exactly as a wall does.
+        if (hit > 3) this.vehicle.lastImpact = Math.max(this.vehicle.lastImpact, hit);
+      }
+
       if (this.vehicle.lastImpact > 1.2) this.audio.impact(this.vehicle.lastImpact);
       this.score.update(
         dt, this.vehicle,
@@ -625,6 +839,22 @@ class Game {
                         this.world.gridsNear(this.vehicle.x, this.vehicle.z));
     }
 
+    // Tell the room where we are. Rate-limited inside publish(); called every
+    // step so the cadence is independent of the frame rate.
+    if (this.net.active) {
+      const v = this.vehicle;
+      this.net.publish(dt, {
+        x: v.x, z: v.z, yaw: v.yaw, speed: v.speed,
+        steer: v.steerAngle, spin: v.wheelSpin,
+        braking: this.input.brake > 0.1 && v.u > 0.5,
+        lights: this.headlightsOn || this.sky.night > 0.35,
+        handbrake: !!this.input.handbrake,
+        skidding: v.skid > 0.25,
+        reversing: v.reversing,
+      });
+      this.net.prune();
+    }
+
     if (this.settings.autoTime) {
       this.settings.timeOfDay = (this.settings.timeOfDay + dt * 0.06) % 24;
       const slider = this.root.querySelector('#set-time');
@@ -648,7 +878,10 @@ class Game {
         && (this.input.justPressed('handbrake') || this.input.pressed.has('Enter'))) {
       this.photo.capture();
     }
-    if (this.input.justPressed('horn') && this.spawned) this.audio.horn();
+    if (this.input.justPressed('horn') && this.spawned) {
+      this.audio.horn();
+      this.net.horn();
+    }
     if (this.input.justPressed('challenge') && this.spawned && !this.menu.visible) {
       this._startChallenge();
     }
@@ -715,6 +948,11 @@ class Game {
     this.headlight.target.updateMatrixWorld();
     this.headlight.intensity = nightLights ? 240 * Math.max(0.25, this.sky.night) : 0;
 
+    // --- the other players --------------------------------------------------
+    if (this.net.active) {
+      this.remoteCars.update(this.net.cars(), this.camera.position, this.sky.night);
+    }
+
     this._updateCamera(dt);
 
     // --- audio -------------------------------------------------------------
@@ -735,9 +973,11 @@ class Game {
     }, dt);
 
     this.hud.setScore(this.score.snapshot());
+    this.hud.setPlayers(this.net.active ? this.net.roster(v.speedKmh) : []);
 
     if (!this.menu.visible) {
-      this.hud.drawMinimap(this.world.allRoads(), v, this.trial, dt, this.challenges.target);
+      this.hud.drawMinimap(this.world.allRoads(), v, this.trial, dt, this.challenges.target,
+                           this.net.active ? this.net.cars() : null);
       if (this.trial) {
         this.hud.setTrial({
           state: this.trial.state,
@@ -747,6 +987,13 @@ class Game {
           improved: this.trial.improved,
         });
       }
+    }
+
+    // Pings and the player list drift without any event to hang a redraw on,
+    // so the panel refreshes on a slow timer while it is actually on screen.
+    if (this.menu.visible && this.net.active) {
+      this._netPanelTimer = (this._netPanelTimer || 0) - dt;
+      if (this._netPanelTimer <= 0) { this._netPanelTimer = 1; this._paintNetPanel(); }
     }
 
     this.renderer.render(this.scene, this.camera);

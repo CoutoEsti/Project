@@ -12,6 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
 import { chromium } from 'playwright';
+import { startBroker } from './broker.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -61,6 +62,7 @@ async function main() {
   await fs.mkdir(SHOTS, { recursive: true });
   const { server, port } = await serve(ROOT);
   const base = `http://127.0.0.1:${port}/index.html`;
+  const broker = await startBroker({ port: 0, quiet: true });
 
   // Use whatever Chromium the machine already has rather than downloading one;
   // CI images commonly pin a build that does not match the npm package.
@@ -78,6 +80,17 @@ async function main() {
       '--no-sandbox',
       '--disable-gpu-sandbox',
       '--ignore-gpu-blocklist',
+      // Chromium hides local IPs behind mDNS names, which nothing resolves in
+      // a container: without this the two test pages gather candidates they can
+      // never use and the peer connection never comes up.
+      '--disable-features=WebRtcHideLocalIpsWithMdns',
+      // The multiplayer test needs two pages sending at once, and only one of
+      // them can be the focused tab. Left throttled, the background one stops
+      // stepping its loop, stops publishing, and gets pruned as a frozen tab —
+      // a failure invented entirely by the test harness.
+      '--disable-background-timer-throttling',
+      '--disable-backgrounding-occluded-windows',
+      '--disable-renderer-backgrounding',
     ],
   });
 
@@ -122,7 +135,12 @@ async function main() {
     problem(`request failed: ${url} — ${req.failure()?.errorText}`);
   });
 
-  const url = LIVE ? base : `${base}?offline=1`;
+  // Multiplayer is tested against a broker of our own rather than the public
+  // one: the test then verifies the real signalling, the real peer connections
+  // and the real interpolation, and it does so on a machine with no internet.
+  // `ice=` empty turns STUN off — two pages on one loopback need no help.
+  const net = `broker=ws://127.0.0.1:${broker.port}/peerjs&ice=`;
+  const url = LIVE ? `${base}?${net}` : `${base}?offline=1&${net}`;
   console.log(`\n▶ ${url}\n`);
   await page.goto(url, { waitUntil: 'load', timeout: 30000 });
 
@@ -131,7 +149,7 @@ async function main() {
     .then(() => true).catch(() => false);
   if (!booted) {
     problem('le jeu n’a pas démarré (window.__ruelle absent)');
-    await finish(browser, server, page);
+    await finish(browser, server, page, broker);
     return;
   }
   note('jeu démarré');
@@ -178,7 +196,7 @@ async function main() {
     }));
     problem(`la voiture n’a jamais été placée — ${JSON.stringify(diag)}`);
     await page.screenshot({ path: path.join(SHOTS, 'fail-spawn.png') });
-    await finish(browser, server, page);
+    await finish(browser, server, page, broker);
     return;
   }
   note('voiture placée sur une route');
@@ -202,6 +220,42 @@ async function main() {
   if (built.calls > 400) problem(`trop de draw calls (${built.calls})`);
 
   await page.screenshot({ path: path.join(SHOTS, '01-spawn.png') });
+
+  // --- kerbs: the road has an edge ------------------------------------------
+  // The point of the whole thing is relief, so the test is about heights: a
+  // ribbon that came out flat would be invisible on a screenshot and would look
+  // exactly like the bug it was written to fix.
+  const kerbs = await page.evaluate(() => {
+    const g = window.__ruelle;
+    let meshes = 0, verts = 0, lo = Infinity, hi = -Infinity;
+    let stray = 0;
+    for (const tile of g.world.tiles.values()) {
+      for (const obj of tile.objects) {
+        if (!obj.isMesh || obj.material !== g.world.materials.kerb) continue;
+        meshes++;
+        const pos = obj.geometry.attributes.position;
+        verts += pos.count;
+        for (let i = 0; i < pos.count; i++) {
+          const y = pos.getY(i) - g.world.groundHeight(pos.getX(i), pos.getZ(i));
+          if (y < lo) lo = y;
+          if (y > hi) hi = y;
+          // Anything a car could trip over does not belong in a kerb.
+          if (y > 0.25) stray++;
+        }
+      }
+    }
+    return { meshes, verts, lo, hi, stray, triangles: g.renderer.info.render.triangles };
+  });
+  note(`bordures : ${kerbs.meshes} maillages, ${kerbs.verts} sommets, `
+    + `relief ${(kerbs.lo * 100).toFixed(0)} à ${(kerbs.hi * 100).toFixed(0)} cm`);
+  if (kerbs.meshes === 0) problem('aucune bordure construite — la chaussée est toujours plate');
+  else {
+    if (kerbs.hi < 0.10) problem(`les bordures sont plates (${(kerbs.hi * 100).toFixed(0)} cm)`);
+    if (kerbs.hi > 0.22) problem(`bordure de ${(kerbs.hi * 100).toFixed(0)} cm — une voiture ne monterait pas dessus`);
+    if (kerbs.stray > 0) problem(`${kerbs.stray} sommets de bordure au-dessus de 25 cm`);
+    if (kerbs.lo < -0.05) problem('des bordures passent sous le sol');
+  }
+  if (kerbs.triangles > 6_000_000) problem(`les bordures coûtent trop cher (${kerbs.triangles} tris)`);
 
   // --- physics, measured in simulated time ---------------------------------
   // Headless software rendering runs at a few frames a second, so wall-clock
@@ -787,6 +841,170 @@ async function main() {
     if (glow.day) problem('les néons restent allumés en plein jour');
   }
 
+  // --- multiplayer, two real browsers -------------------------------------
+  // Nothing here is mocked. Two pages claim two seats in a room through the
+  // broker, negotiate a WebRTC connection, and send each other snapshots; the
+  // assertions are about what one page can see of the other's car.
+  const ROOM = 'SMOKE1';
+  let second = null;
+  try {
+    await page.evaluate((room) => window.__ruelle.net.join(room), ROOM);
+    const hosted = await page.waitForFunction(
+      () => window.__ruelle.net.state === 'online', null, { timeout: 20000 },
+    ).then(() => true).catch(() => false);
+    if (!hosted) problem('impossible de prendre une place dans un salon');
+    else note(`salon ${ROOM} : place prise`);
+
+    // The second player arrives by invitation link, which is the path a real
+    // player takes — so the link itself is under test too.
+    // Small on purpose: software rasterising costs per pixel, and this page
+    // exists to send position packets, not to be looked at.
+    second = await browser.newPage({ viewport: { width: 320, height: 240 } });
+    second.setDefaultTimeout(120000);
+    second.on('pageerror', (err) => problem(`pageerror (2e joueur) : ${err.message}`));
+    await second.route('**/elevation-tiles-prod/**', (route) => route.fulfill({ status: 404, body: '' }));
+
+    // Park the first page's loop while the second boots and the two negotiate.
+    // Under swiftshader a frame costs a quarter of a second of pure CPU, and two
+    // pages rendering at once means neither gets anywhere: the second cannot even
+    // reach DOMContentLoaded, because a module script builds the whole game
+    // before firing it. Signalling, the peer connection and the snapshot buffers
+    // are all event-driven and need no render loop, so nothing under test is lost
+    // — and it comes back on before anything on screen is asserted.
+    await page.evaluate(() => window.__ruelle.loop.stop());
+    await second.goto(
+      `${base}?offline=1&quality=low&${net}&room=${ROOM}`,
+      { waitUntil: 'domcontentloaded', timeout: 120000 },
+    );
+    await second.waitForFunction(() => !!window.__ruelle, null, { timeout: 60000 });
+    // It only needs a projection to publish against, not a finished city.
+    await second.evaluate(() => {
+      window.__ruelle.settings.playerName = 'Deuxième';
+      window.__ruelle.net.setName('Deuxième');
+      window.__ruelle.hop(45.5265, -73.5795, 'Test', true);
+    });
+
+    const met = await page.waitForFunction(
+      () => window.__ruelle.net.cars().length === 1, null, { timeout: 90000 },
+    ).then(() => true).catch(() => false);
+    await page.evaluate(() => window.__ruelle.loop.start());
+
+    if (!met) {
+      const why = await page.evaluate(() => ({
+        state: window.__ruelle.net.state,
+        players: window.__ruelle.net.players.size,
+        peers: window.__ruelle.net.mesh ? window.__ruelle.net.mesh.peers.size : -1,
+      }));
+      problem(`les deux joueurs ne se voient pas — ${JSON.stringify(why)}`);
+    } else {
+      // Drive the second car to a known spot and check where the first sees it.
+      const target = await second.evaluate(() => {
+        const v = window.__ruelle.vehicle;
+        v.x = 140; v.z = -60; v.yaw = 1.1; v.u = 12;
+        return { x: v.x, z: v.z, yaw: v.yaw };
+      });
+      const agreed = await page.waitForFunction((t) => {
+        const c = window.__ruelle.net.cars()[0];
+        return !!c && Math.hypot(c.x - t.x, c.z - t.z) < 12;
+      }, target, { timeout: 20000 }).then(() => true).catch(() => false);
+
+      // The car and its HUD row are built during render, so give the loop —
+      // restarted a moment ago, and running at about four frames a second —
+      // time to draw one.
+      await page.waitForFunction(
+        () => window.__ruelle.remoteCars.slots.size === 1
+          && document.querySelectorAll('#players .player-row').length === 2,
+        null, { timeout: 30000 },
+      ).catch(() => { /* asserted below with a real message */ });
+
+      const view = await page.evaluate(() => {
+        const g = window.__ruelle;
+        const c = g.net.cars()[0] || null;
+        return {
+          gone: !c,
+          name: c ? c.name : '—',
+          x: c ? c.x : NaN, z: c ? c.z : NaN,
+          colour: c ? c.colour : 0,
+          meshes: g.remoteCars.slots.size,
+          plate: g.remoteCars.group.children.length,
+          roster: g.net.roster().length,
+          rows: document.querySelectorAll('#players .player-row').length,
+        };
+      });
+      if (view.gone) problem('le 2e joueur disparaît après s’être connecté');
+      const off = Math.hypot(view.x - target.x, view.z - target.z);
+      note(`2e joueur : « ${view.name} », vu à ${off.toFixed(1)} m de sa vraie position, `
+        + `${view.meshes} voiture(s) instanciée(s), ${view.rows} lignes de HUD`);
+      if (!agreed) problem(`la position du 2e joueur est fausse de ${off.toFixed(0)} m`);
+      if (view.name !== 'Deuxième') problem(`le nom du 2e joueur n’arrive pas (« ${view.name} »)`);
+      if (view.meshes !== 1) problem('aucune voiture n’est instanciée pour le 2e joueur');
+      if (view.plate < 2) problem('la plaque de nom du 2e joueur manque');
+      if (view.roster !== 2) problem(`la liste des joueurs en compte ${view.roster}`);
+      if (view.rows !== 2) problem(`le HUD affiche ${view.rows} joueurs au lieu de 2`);
+
+      // Snapshots must keep coming, not arrive once and stop.
+      //
+      // Deliberately not a rate. The sender is paced by simulated time, and the
+      // fixed-step loop drops its backlog when a frame costs a quarter of a
+      // second — so under software rendering fifteen packets a second correctly
+      // becomes one or two. Asserting a rate here would measure swiftshader.
+      // What has to hold is that the stream continues.
+      // Park this page again while measuring. Receiving is event-driven, so the
+      // count is unaffected — but the sender is a whole second game engine on
+      // the same couple of cores, and starving it is measuring the harness.
+      await page.evaluate(() => window.__ruelle.loop.stop());
+      const flowing = await page.evaluate(async () => {
+        const p = [...window.__ruelle.net.players.values()][0];
+        if (!p) return { packets: 0, seconds: 0, lost: true };
+        const before = p.buffer.lastSeq;
+        const t0 = performance.now();
+        while (performance.now() - t0 < 25000) {
+          if (p.buffer.lastSeq - before >= 4) break;
+          await new Promise((r) => setTimeout(r, 200));
+        }
+        return { packets: p.buffer.lastSeq - before, seconds: (performance.now() - t0) / 1000 };
+      });
+      await page.evaluate(() => window.__ruelle.loop.start());
+      note(`flux : ${flowing.packets} paquets en ${flowing.seconds.toFixed(1)} s`
+        + ' (cadence bridée par le rendu logiciel)');
+      if (flowing.packets < 4) {
+        problem(`le flux de position s’arrête (${flowing.packets} paquets en ${flowing.seconds.toFixed(0)} s)`);
+      }
+
+      // Two cars cannot occupy the same metre of road.
+      const bumped = await page.evaluate(async () => {
+        const g = window.__ruelle;
+        const v = g.vehicle;
+        const c = g.net.cars()[0];
+        v.x = c.x; v.z = c.z; v.yaw = c.yaw; v.u = 0; v.v = 0;
+        const { collideWithRemote } = await import('/src/net/remote.js');
+        collideWithRemote(v, g.net.cars());
+        const after = g.net.cars()[0];
+        return Math.hypot(v.x - after.x, v.z - after.z);
+      });
+      note(`collision entre joueurs : séparés de ${bumped.toFixed(2)} m`);
+      if (bumped < 0.3) problem('les voitures des joueurs se traversent');
+
+      await page.screenshot({ path: path.join(SHOTS, '08-multijoueur.png') });
+    }
+
+    // Leaving has to be noticed, and has to take the car off the screen.
+    await second.close();
+    second = null;
+    const cleared = await page.waitForFunction(
+      () => window.__ruelle.net.count === 0 && window.__ruelle.remoteCars.slots.size === 0,
+      null, { timeout: 25000 },
+    ).then(() => true).catch(() => false);
+    if (!cleared) problem('la voiture d’un joueur parti reste sur la carte');
+    else note('départ d’un joueur : voiture retirée');
+
+    await page.evaluate(() => window.__ruelle.net.leave());
+  } catch (err) {
+    problem(`multijoueur : ${err.message}`);
+  } finally {
+    if (second) await second.close().catch(() => {});
+  }
+
   // --- frame rate ----------------------------------------------------------
   const fps = await page.evaluate(() => window.__ruelle.loop.fps);
   note(`fps (rendu logiciel headless) : ${fps.toFixed(1)}`);
@@ -848,12 +1066,13 @@ async function main() {
   await finish(browser, server, page);
 }
 
-async function finish(browser, server, page) {
+async function finish(browser, server, page, broker) {
   if (page) {
     await page.screenshot({ path: path.join(SHOTS, '99-final.png') }).catch(() => {});
   }
   await browser.close();
   server.close();
+  if (broker) broker.close();
 
   console.log('\n──────────────────────────────────────────');
   if (problems.length) {

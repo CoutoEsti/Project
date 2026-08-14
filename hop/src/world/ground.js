@@ -7,6 +7,17 @@
 // through the middle of an intersection. Roads are drawn with their *full*
 // geometry (not clipped to the tile) so the paint lines up across tile edges.
 
+import { offsetNormals } from './roads.js';
+
+/**
+ * How far the painted kerb band reaches past the edge of the carriageway.
+ *
+ * It has to cover the footprint of the kerb ribbons built in kerbs.js, or the
+ * geometry would sit on painted sidewalk and the colours would disagree along
+ * every street. Keep the two in step: cap + return, either side.
+ */
+const KERB_BAND = 0.64;
+
 // Stylised but plausible. Kept desaturated so the car, the markings and the
 // lit windows are the things that pop.
 const C = {
@@ -180,7 +191,7 @@ export function paintTile(ctx, size, bounds, roads, areas, footprints, rails) {
   });
 
   strokePass(ctx, byRank, px, py, mToPx, (spec) => (
-    { w: spec.width + 0.7, color: C.kerb }
+    { w: spec.width + 2 * KERB_BAND, color: C.kerb }
   ));
 
   strokePass(ctx, byRank, px, py, mToPx, (spec) => {
@@ -190,6 +201,14 @@ export function paintTile(ctx, size, bounds, roads, areas, footprints, rails) {
     if (spec.surface === 'unpaved' || spec.surface === 'gravel') color = '#7a7266';
     return { w: spec.width, color };
   });
+
+  // --- wheel tracks ---------------------------------------------------------
+  // The single cheapest thing that stops asphalt reading as a flat grey ribbon:
+  // the two darker bands a lane's traffic polishes into it. At this texture
+  // scale — a tile is 850 m across, so about 40 cm a pixel — the two individual
+  // ruts of one car are sub-pixel, so what gets painted is the polished middle
+  // of each lane, which is what you actually see from a windscreen anyway.
+  wheelTracks(ctx, byRank, px, py, mToPx, 'rgba(24,25,29,0.30)');
 
   // --- grain ----------------------------------------------------------------
   const noise = getNoise(ctx.canvas.ownerDocument || document);
@@ -263,7 +282,7 @@ export function paintRoughnessTile(ctx, size, bounds, roads, areas, footprints, 
     return { w: spec.width + 2 * spec.sidewalk, color: R.sidewalk };
   });
   strokePass(ctx, byRank, px, py, mToPx, (spec) => (
-    { w: spec.width + 0.7, color: R.kerb }
+    { w: spec.width + 2 * KERB_BAND, color: R.kerb }
   ));
   strokePass(ctx, byRank, px, py, mToPx, (spec) => {
     let color = R.asphaltMinor;
@@ -272,7 +291,52 @@ export function paintRoughnessTile(ctx, size, bounds, roads, areas, footprints, 
     return { w: spec.width, color };
   });
 
+  // Polished by tyres means darker here, which means glossier — and that is
+  // where the wheel tracks really earn their keep: in the rain the two bands
+  // catch the low sun and the headlights, and the road stops being uniform.
+  wheelTracks(ctx, byRank, px, py, mToPx, 'rgba(20,20,20,0.42)');
+
   ctx.restore();
+}
+
+/**
+ * Two darker bands per road, on the lines a lane's traffic actually runs.
+ *
+ * Roads are drawn from their centreline, so this offsets the polyline sideways
+ * by a quarter of the width — the middle of each direction of travel — and
+ * strokes a band about as wide as a car's track.
+ */
+function wheelTracks(ctx, roads, px, py, mToPx, colour) {
+  ctx.save();
+  ctx.strokeStyle = colour;
+  for (const road of roads) {
+    const spec = road.spec;
+    if (road.points.length < 2) continue;
+    if (spec.kind === 'alley' || spec.width < 5) continue;
+    if (spec.surface === 'unpaved' || spec.surface === 'gravel' || spec.surface === 'dirt') continue;
+
+    // One band per direction on an ordinary street; on a wide one-way, per lane.
+    const bands = spec.oneway && spec.lanes >= 2 ? spec.lanes : 2;
+    const spacing = spec.width / bands;
+    ctx.lineWidth = Math.max(1, Math.min(1.75, spacing * 0.55) * mToPx);
+    const normals = offsetNormals(road.points);
+    for (let b = 0; b < bands; b++) {
+      const offset = (b + 0.5 - bands / 2) * spacing;
+      traceOffsetPath(ctx, road.points, normals, offset, px, py);
+      ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+function traceOffsetPath(ctx, points, normals, offset, px, py) {
+  ctx.beginPath();
+  for (let i = 0; i < points.length; i++) {
+    const x = points[i].x + normals[i].x * offset;
+    const z = points[i].z + normals[i].z * offset;
+    if (i === 0) ctx.moveTo(px(x), py(z));
+    else ctx.lineTo(px(x), py(z));
+  }
 }
 
 function strokePass(ctx, roads, px, py, mToPx, styleFor) {

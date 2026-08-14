@@ -61,6 +61,7 @@ const DEFAULT_SETTINGS = {
   underglowColor: 'cyan',
   units: 'kmh',         // 'kmh' | 'mph'
   showFps: false,
+  playerName: '',       // multiplayer; blank until one is picked or generated
 };
 
 export function loadSettings() {
