@@ -361,6 +361,89 @@ const SHRUB_COLORS = [
   [0.26, 0.40, 0.26], [0.33, 0.45, 0.24],
 ];
 
+/**
+ * Where the buildings are, so nothing gets planted inside one.
+ *
+ * A street tree is placed by measuring out from the road centreline — half the
+ * carriageway, the sidewalk, part of the verge — and that is a guess about a
+ * street the data does not describe. On a block where the triplexes come right
+ * up to the sidewalk the guess lands inside somebody's front room, and a tree
+ * growing through a wall is the kind of thing you cannot stop seeing.
+ *
+ * Testing every candidate against every footprint would be seven thousand trees
+ * against a thousand buildings, which the per-frame budget will not pay for. So
+ * footprints are bucketed by their bounding box first and only the few in the
+ * same cell are tested properly.
+ */
+const FOOTPRINT_CELL = 32;      // metres
+
+function buildingIndex(buildings, bounds) {
+  const cells = new Map();
+  if (!buildings || !buildings.length) return { cells, empty: true };
+  const key = (cx, cz) => `${cx}|${cz}`;
+
+  for (const b of buildings) {
+    const pts = b.points;
+    if (!pts || pts.length < 3) continue;
+    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+    for (const p of pts) {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.z < minZ) minZ = p.z;
+      if (p.z > maxZ) maxZ = p.z;
+    }
+    const rec = { pts, minX, maxX, minZ, maxZ };
+    const x0 = Math.floor(minX / FOOTPRINT_CELL), x1 = Math.floor(maxX / FOOTPRINT_CELL);
+    const z0 = Math.floor(minZ / FOOTPRINT_CELL), z1 = Math.floor(maxZ / FOOTPRINT_CELL);
+    for (let cx = x0; cx <= x1; cx++) {
+      for (let cz = z0; cz <= z1; cz++) {
+        const k = key(cx, cz);
+        let list = cells.get(k);
+        if (!list) { list = []; cells.set(k, list); }
+        list.push(rec);
+      }
+    }
+  }
+  void bounds;
+  return { cells, empty: cells.size === 0 };
+}
+
+/**
+ * Is this spot inside a building, or within `margin` metres of one?
+ *
+ * The margin matters as much as the test: a trunk exactly on a wall is still
+ * wrong, and so is a canopy pushing through a second-storey window.
+ */
+function insideBuilding(index, x, z, margin = 1.2) {
+  if (index.empty) return false;
+  const cx = Math.floor(x / FOOTPRINT_CELL), cz = Math.floor(z / FOOTPRINT_CELL);
+  const list = index.cells.get(`${cx}|${cz}`);
+  if (!list) return false;
+  for (const b of list) {
+    if (x < b.minX - margin || x > b.maxX + margin
+        || z < b.minZ - margin || z > b.maxZ + margin) continue;
+    if (pointInPolygon(b.pts, x, z)) return true;
+    // Just outside the outline but within the margin: check the ring itself.
+    if (margin > 0 && nearPolygonEdge(b.pts, x, z, margin)) return true;
+  }
+  return false;
+}
+
+/** Distance from a point to the closest edge of a ring, tested against `limit`. */
+function nearPolygonEdge(pts, x, z, limit) {
+  const l2 = limit * limit;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const ax = pts[j].x, az = pts[j].z;
+    const dx = pts[i].x - ax, dz = pts[i].z - az;
+    const len = dx * dx + dz * dz;
+    let t = len > 1e-9 ? ((x - ax) * dx + (z - az) * dz) / len : 0;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const px = ax + dx * t - x, pz = az + dz * t - z;
+    if (px * px + pz * pz < l2) return true;
+  }
+  return false;
+}
+
 /** Winding number, so a bush lands inside a park and not in the pond next to it. */
 function pointInPolygon(pts, x, z) {
   let inside = false;
@@ -391,6 +474,7 @@ export function buildProps(THREE, args) {
   const { nodes, roads, junctions, bounds } = args;
   const opts = args.opts || {};
   const P = getPrototypes(THREE);
+  const built = buildingIndex(args.buildings, bounds);
 
   const species = speciesCount();
   const lamps = [];        // {x, z, yaw}
@@ -422,6 +506,7 @@ export function buildProps(THREE, args) {
         // by a hash of the position keeps it deterministic, so the same trees
         // survive on every visit and across a tile seam.
         if (hash01(Math.round(n.x * 31 + n.z * 17) ^ 0x5bd1) > TREE_KEEP) break;
+        if (insideBuilding(built, n.x, n.z)) break;
         trees.push(makeTree(n.x, n.z,
           0.75 + hash01(Math.round(n.x * 13 + n.z * 7)) * 0.6, species));
         mappedTrees++;
@@ -488,6 +573,9 @@ export function buildProps(THREE, args) {
         const z = s.z + s.tx * side * off;
         if (!insideBounds(bounds, x, z)) continue;
         if (nearJunction(junctions, x, z, 8)) continue;
+        // The verge offset is a guess about a street the data never describes.
+        // Where the buildings meet the sidewalk, that guess is inside a wall.
+        if (insideBuilding(built, x, z)) continue;
         trees.push(makeTree(x, z,
           0.7 + hash01(seedBase + Math.round(d * 11)) * 0.7, species));
       }
@@ -573,6 +661,7 @@ export function buildProps(THREE, args) {
           const z = gz + (hash01(r * 419 + 5) - 0.5) * step * 0.8;
           if (!insideBounds(bounds, x, z)) continue;
           if (!pointInPolygon(pts, x, z)) continue;
+          if (insideBuilding(built, x, z, 0.6)) continue;
           shrubs.push({
             x, z,
             scale: 0.8 + r * 0.75,

@@ -504,7 +504,12 @@ export class World {
 
     const built = buildBuildings(THREE, buildings, clipped, {
       groundAt: groundSample,
-      staircases: tile.detailed && this.settings.quality === 'high',
+      // Off until there is a model worth showing. The generated staircase is
+      // the right *idea* — it is what makes a Plateau street read as a Plateau
+      // street — but a lofted approximation of one reads as a bug on the front
+      // of every triplex, and thousands of them read as thousands of bugs.
+      // buildings.js still builds them on request; nothing here asks.
+      staircases: false,
       rooftops: tile.detailed && this.settings.quality !== 'low',
     });
     if (built.walls) {
@@ -538,6 +543,9 @@ export class World {
     }
     const props = buildProps(THREE, {
       nodes, roads: clipped, junctions, barriers, areas, bounds: tile.bounds,
+      // Footprints, so nothing is planted through a wall. Still available at
+      // this step — _props releases them at the end, not the beginning.
+      buildings: tile.parsed.buildings,
       groundAt: this.terrain.enabled ? (x, z) => this.groundHeight(x, z) : null,
       materials: this.materials.props,
       shadows: !!this.settings.shadows && this.settings.quality === 'high',
