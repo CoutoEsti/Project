@@ -74,7 +74,7 @@ export const JUNCTION_CLEARANCE = 9.5;   // metres of paint trimmed either side 
  * car driving on it. Putting it in roadway.js would make roads.js import its own
  * importer.
  */
-export const ROAD_LIFT = 0.14;
+export const ROAD_LIFT = 0.17;
 
 function num(v) {
   if (v == null) return NaN;

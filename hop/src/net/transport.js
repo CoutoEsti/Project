@@ -43,6 +43,9 @@ const DIAL_TIMEOUT_MS = 30000;
 const DIAL_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 1500;
 
+/** How long to leave a seat alone after the broker says nobody is in it. */
+const EMPTY_SEAT_MS = 20000;
+
 // Discovery repeats. This is the difference between multiplayer that works and
 // multiplayer that works *usually*: announcing once on arrival means a single
 // dropped message — a hiccup at the broker, two tabs racing, a seat freed a
@@ -265,7 +268,13 @@ export class Mesh {
       case 'ANSWER': this._onAnswer(src, payload.sdp); break;
       case 'CANDIDATE': this._onCandidate(src, payload.candidate); break;
       case 'EXPIRE':
-        // Nobody in that seat. Perfectly normal in a room of two.
+        // Nobody in that seat. Perfectly normal in a room of two — but the
+        // broker *queues* messages for absent peers rather than dropping them,
+        // so announcing to seven empty seats every few seconds would leave a
+        // free public service holding a hundred stale messages a minute for a
+        // player sitting alone. Back off that seat until somebody might
+        // plausibly have taken it.
+        if (src) this.cooldown.set(src, Date.now() + EMPTY_SEAT_MS);
         break;
       case 'LEAVE': this._drop(src); break;
       default: break;

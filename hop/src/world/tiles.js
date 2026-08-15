@@ -494,7 +494,12 @@ export class World {
       }
     }
 
-    if (tile.detailed) {
+    // Kerbs are off while the carriageway is the thing being worked on. They
+    // stand *on* the slab, which puts them exactly on its outer edge — so the
+    // fourteen centimetres of asphalt thickness end up hidden behind a band of
+    // concrete, and the road reads as flat as it did when it was paint. The
+    // road has to show its own edge first; the sidewalk comes after.
+    if (false && tile.detailed) {
       const kerbs = new KerbBuilder(groundSample);
       buildKerbs(clipped, junctions, kerbs);
       if (kerbs.count) {

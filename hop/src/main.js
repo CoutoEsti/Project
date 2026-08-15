@@ -598,7 +598,13 @@ class Game {
 
     if (state === NetState.ONLINE) {
       this.mpStatus.classList.add('online');
-      this.mpStatus.textContent = `${this.net.room} · ${this.net.count + 1}/8`;
+      // The seat number is in here on purpose. When two players are both online
+      // and cannot see each other, the one thing that separates "the broker put
+      // us on the same seat" from "the connection failed" is whether they hold
+      // different seats — and that is impossible to know from the outside.
+      const mesh = this.net.mesh;
+      const seat = mesh && mesh.slot >= 0 ? `·${mesh.slot}` : '';
+      this.mpStatus.textContent = `${this.net.room}${seat} · ${this.net.count + 1}/8`;
     } else if (state === NetState.JOINING) {
       this.mpStatus.classList.add('joining');
       this.mpStatus.textContent = 'connexion…';
