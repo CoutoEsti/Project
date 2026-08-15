@@ -16,7 +16,9 @@ import {
   colourForName, PROTOCOL, DEFAULT_ROOM,
 } from '../src/net/protocol.js';
 import { KerbBuilder, buildKerbs, KERB_HEIGHT } from '../src/world/kerbs.js';
-import { classifyRoad, findJunctions, offsetNormals, JUNCTION_CLEARANCE } from '../src/world/roads.js';
+import {
+  classifyRoad, findJunctions, offsetNormals, JUNCTION_CLEARANCE, ROAD_LIFT,
+} from '../src/world/roads.js';
 import { Projection } from '../src/core/geo.js';
 
 let passed = 0;
@@ -218,8 +220,9 @@ test('la bordure fait 15 cm et jamais plus', () => {
   buildKerbs(roads, findJunctions(roads), out);
   let highest = 0;
   for (let i = 1; i < out.positions.length; i += 3) highest = Math.max(highest, out.positions[i]);
-  assert.ok(Math.abs(highest - KERB_HEIGHT) < 1e-6, `sommet le plus haut à ${highest} m`);
-  assert.ok(highest < 0.2, 'une bordure de plus de 20 cm arrêterait la voiture');
+  const above = highest - ROAD_LIFT;
+  assert.ok(Math.abs(above - KERB_HEIGHT) < 1e-6, `sommet le plus haut à ${above} m au-dessus de la chaussée`);
+  assert.ok(above < 0.2, 'une bordure de plus de 20 cm arrêterait la voiture');
 });
 
 /**
@@ -250,8 +253,11 @@ function kerbProfile(spacing) {
   for (let i = 0; i < out.positions.length; i += 3) {
     const y = out.positions[i + 1], z = out.positions[i + 2];
     const along = Math.abs(z);
-    if (along < 2) atJunction = Math.max(atJunction, y);
-    if (along > JUNCTION_CLEARANCE * 1.5 && along < 40) wellAway = Math.max(wellAway, y);
+    // What matters is how far the kerb stands above the *road*, which is a slab
+    // sitting ROAD_LIFT above the painted ground — see roadway.js.
+    const above = y - ROAD_LIFT;
+    if (along < 2) atJunction = Math.max(atJunction, above);
+    if (along > JUNCTION_CLEARANCE * 1.5 && along < 40) wellAway = Math.max(wellAway, above);
   }
   return { atJunction, wellAway };
 }
@@ -327,8 +333,13 @@ test('la bordure colle au sol même en dévers', () => {
   for (let i = 0; i < out.positions.length; i += 3) {
     const x = out.positions[i], y = out.positions[i + 1];
     const above = y - slope(x);
-    // Every vertex is either at grade or at kerb height above its own ground.
-    worst = Math.max(worst, Math.min(Math.abs(above - KERB_HEIGHT), Math.abs(above - 0.012)));
+    // Every vertex sits at one of three known heights over its own ground: the
+    // outer edge back at grade, and the face and cap on the carriageway slab.
+    worst = Math.max(worst, Math.min(
+      Math.abs(above - (ROAD_LIFT + KERB_HEIGHT)),
+      Math.abs(above - (ROAD_LIFT + 0.012)),
+      Math.abs(above - 0.012),
+    ));
   }
   assert.ok(worst < 0.01, `un sommet flotte à ${(worst * 100).toFixed(0)} cm du sol en dévers`);
 });
