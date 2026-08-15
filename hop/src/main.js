@@ -14,7 +14,7 @@ import { World } from './world/tiles.js';
 import { preloadPropModels, propTriangles } from './world/models.js';
 import { Sky } from './world/sky.js';
 import { Weather, WEATHER } from './world/weather.js';
-import { nearestRoadPoint } from './world/roads.js';
+import { nearestRoadPoint, ROAD_LIFT } from './world/roads.js';
 import { Vehicle } from './vehicle/physics.js';
 import { rayClearance, nearestObstacle } from './vehicle/collision.js';
 import { createCar, CAR_COLORS } from './vehicle/model.js';
@@ -165,7 +165,8 @@ class Game {
       onEvent: (e) => this._onNetEvent(e),
     });
     this.remoteCars = new RemoteCars(THREE, this.scene, {
-      groundAt: (x, z) => this.world.groundHeight(x, z),
+      // Other players ride the same slab we do, or they drive half-buried.
+      groundAt: (x, z) => this.world.groundHeight(x, z) + ROAD_LIFT,
       shadows: !!this.settings.shadows && this.settings.quality === 'high',
     });
 
@@ -1025,10 +1026,15 @@ class Game {
     const hNose = this.world.groundHeight(v.x + gx * 2.1, v.z + gz * 2.1);
     const hTail = this.world.groundHeight(v.x - gx * 2.1, v.z - gz * 2.1);
     const slope = Math.atan2(hNose - hTail, 4.2);
-    this.groundY = hMid;
+    // The carriageway is a slab standing above the painted ground, so the car
+    // rides on top of it. Applied everywhere rather than only over asphalt:
+    // knowing whether a given metre is road would cost a spatial query every
+    // frame, and being fourteen centimetres high on a lawn is invisible where
+    // being fourteen centimetres *sunk* into the street is not.
+    this.groundY = hMid + ROAD_LIFT;
     this.slope = slope;
 
-    this.car.group.position.set(v.x, hMid, v.z);
+    this.car.group.position.set(v.x, this.groundY, v.z);
     this.car.group.rotation.set(v.bodyPitch - slope, v.yaw, -v.bodyRoll, 'YXZ');
     this.car.setSteer(v.steerAngle);
     this.car.setSpin(v.wheelSpin);
@@ -1039,7 +1045,7 @@ class Game {
         ?? UNDERGLOW.cyan, this.sky.night);
     }
     const fx2 = Math.sin(v.yaw), fz2 = Math.cos(v.yaw);
-    this.headlight.position.set(v.x + fx2 * 2.0, hMid + 0.9, v.z + fz2 * 2.0);
+    this.headlight.position.set(v.x + fx2 * 2.0, this.groundY + 0.9, v.z + fz2 * 2.0);
     this.headlight.target.position.set(
       v.x + fx2 * 26, this.world.groundHeight(v.x + fx2 * 26, v.z + fz2 * 26) + 0.1,
       v.z + fz2 * 26,

@@ -28,7 +28,9 @@
 // approached, so the rim sinks into the road exactly where a real corner has its
 // kerb ramp anyway. Nothing overlaps because by then there is nothing there.
 
-import { junctionArcs, isJunction, offsetNormals, JUNCTION_CLEARANCE } from './roads.js';
+import {
+  junctionArcs, isJunction, offsetNormals, JUNCTION_CLEARANCE, ROAD_LIFT,
+} from './roads.js';
 
 export const KERB_HEIGHT = 0.15;    // metres — a Montréal kerb, measured
 const CAP_WIDTH = 0.30;             // flat top
@@ -91,9 +93,13 @@ export class KerbBuilder {
     const cx = x + nx * capOut, cz = z + nz * capOut;
     const ox = x + nx * outer, oz = z + nz * outer;
 
+    // The kerb stands on the carriageway, not on the painted ground: the road
+    // is a slab now, and a kerb measured from underneath it would be swallowed
+    // by the asphalt it is supposed to hold back. The outer edge still returns
+    // to real ground level, because that is where the sidewalk still is.
     const at = this.groundAt;
-    const baseInner = at ? at(ix, iz) : 0;
-    const baseCap = at ? at(cx, cz) : 0;
+    const baseInner = (at ? at(ix, iz) : 0) + ROAD_LIFT;
+    const baseCap = (at ? at(cx, cz) : 0) + ROAD_LIFT;
     const baseOuter = at ? at(ox, oz) : 0;
 
     const i = this.count;

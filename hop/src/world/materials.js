@@ -343,6 +343,225 @@ export function makeLightPoolMaterial(THREE) {
 }
 
 // ---------------------------------------------------------------------------
+// The road surface
+// ---------------------------------------------------------------------------
+
+/**
+ * Asphalt, generated: colour, roughness and normal, all tiling seamlessly.
+ *
+ * Photographed asphalt was the obvious answer and turns out to be the wrong one
+ * here. A photo is lit — it carries the shadows of the day it was taken, baked
+ * in, and they fight the game's own sun and never move. It also arrives with a
+ * licence, a download, and a resolution decided by somebody else. Generating it
+ * gives an unlit albedo, exact control of the feature sizes in *metres*, and a
+ * seam-free tile for nothing.
+ *
+ * What makes a road read as a road, in the order it matters (and none of it is
+ * the base colour, which is the part people reach for first):
+ *
+ *   1. aggregate — chips of 8 to 14 mm, light against dark binder, the thing
+ *      the eye actually resolves from a windscreen;
+ *   2. tar seams — the black snakes poured over cracks, which is the single
+ *      most recognisable feature of a Montréal street and costs four lines;
+ *   3. patches — rectangles of newer, darker asphalt where a trench was
+ *      reopened, at a slightly different roughness so they catch the light
+ *      differently;
+ *   4. mottling — broad slow variation, so a long straight never looks flat.
+ *
+ * @param {number} metres how much ground one tile of this texture covers
+ */
+const ASPHALT_TILE_M = 6;
+let asphaltMaps = null;
+
+export function asphaltTextures(THREE) {
+  if (asphaltMaps) return asphaltMaps;
+  const n = 512;                       // ~12 mm a pixel over six metres
+
+  // Deterministic, and wrapping: every lookup is taken modulo the lattice, so
+  // the left edge and the right edge are computed from the same numbers.
+  const hash = (x, y, seed = 0) => {
+    let h = Math.imul(((x & 1023) + Math.imul(y & 1023, 311) + seed) | 0, 0x27d4eb2d);
+    h ^= h >>> 15;
+    h = Math.imul(h, 0x85ebca6b);
+    h ^= h >>> 13;
+    return (h >>> 0) / 4294967296;
+  };
+
+  const value = (x, y, period, seed) => {
+    const fx = (x / n) * period, fy = (y / n) * period;
+    const ix = Math.floor(fx), iy = Math.floor(fy);
+    const tx = fx - ix, ty = fy - iy;
+    const sx = tx * tx * (3 - 2 * tx), sy = ty * ty * (3 - 2 * ty);
+    const w = (a, b) => hash(((a % period) + period) % period, ((b % period) + period) % period, seed);
+    const a = w(ix, iy), b = w(ix + 1, iy), c = w(ix, iy + 1), d = w(ix + 1, iy + 1);
+    const top = a + (b - a) * sx;
+    return top + ((c + (d - c) * sx) - top) * sy;
+  };
+
+  // --- aggregate ------------------------------------------------------------
+  // Worley-ish: distance to the nearest of one scattered point per cell. That
+  // gives closed cells with visible boundaries, which is what crushed stone in
+  // binder looks like — unlike value noise, which gives clouds.
+  const CHIPS = 48;                    // cells across → ~12 cm cells… see below
+  const chip = (x, y) => {
+    const fx = (x / n) * CHIPS, fy = (y / n) * CHIPS;
+    const ix = Math.floor(fx), iy = Math.floor(fy);
+    let best = 9, second = 9;
+    for (let dy = -1; dy <= 1; dy++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        const cx = ((ix + dx) % CHIPS + CHIPS) % CHIPS;
+        const cy = ((iy + dy) % CHIPS + CHIPS) % CHIPS;
+        const px = ix + dx + hash(cx, cy, 11);
+        const py = iy + dy + hash(cx, cy, 29);
+        const d = Math.hypot(px - fx, py - fy);
+        if (d < best) { second = best; best = d; } else if (d < second) second = d;
+      }
+    }
+    return { edge: Math.min(1, second - best), grain: best };
+  };
+
+  const height = new Float32Array(n * n);
+  const albedo = new Float32Array(n * n);
+  const rough = new Float32Array(n * n);
+
+  for (let y = 0; y < n; y++) {
+    for (let x = 0; x < n; x++) {
+      const i = y * n + x;
+      const c = chip(x, y);
+      // A stone is light in the middle and dark at its boundary, where the
+      // binder shows through.
+      const stone = Math.min(1, c.edge * 2.4);
+      const fine = value(x, y, 128, 3) * 0.5 + value(x, y, 256, 5) * 0.5;
+      const mottle = value(x, y, 4, 7) * 0.6 + value(x, y, 9, 13) * 0.4;
+
+      let a = 0.30 + stone * 0.15 + (fine - 0.5) * 0.10 + (mottle - 0.5) * 0.09;
+      let r = 0.74 + (1 - stone) * 0.14 + (fine - 0.5) * 0.10;
+      let h = stone * 0.7 + fine * 0.3;
+
+      // --- tar seams --------------------------------------------------------
+      // A wandering line, black and slightly proud of the surface, and glossy
+      // because sealant stays shiny for years.
+      const seam = (phase, amp, freq, seed) => {
+        const wob = (value(x, y, freq, seed) - 0.5) * amp;
+        return Math.abs(((y / n) + wob) - phase);
+      };
+      for (const [phase, seed] of [[0.23, 21], [0.71, 41]]) {
+        const d = seam(phase, 0.16, 6, seed);
+        if (d < 0.012) {
+          const t = 1 - d / 0.012;
+          a -= 0.16 * t;
+          r -= 0.30 * t;
+          h += 0.25 * t;
+        }
+      }
+      // One running the other way, so the seams do not read as stripes.
+      {
+        const wob = (value(x, y, 5, 61) - 0.5) * 0.14;
+        const d = Math.abs((x / n) + wob - 0.44);
+        if (d < 0.010) {
+          const t = 1 - d / 0.010;
+          a -= 0.15 * t;
+          r -= 0.28 * t;
+          h += 0.22 * t;
+        }
+      }
+
+      // --- patches ----------------------------------------------------------
+      // Reopened trenches: newer asphalt, darker and smoother, with a hard edge.
+      const px = Math.floor((x / n) * 3), py = Math.floor((y / n) * 3);
+      if (hash(px, py, 97) > 0.72) {
+        const inX = Math.abs(((x / n) * 3 - px) - 0.5) < 0.34;
+        const inY = Math.abs(((y / n) * 3 - py) - 0.5) < 0.30;
+        if (inX && inY) {
+          a -= 0.045;
+          r -= 0.10;
+        }
+      }
+
+      albedo[i] = Math.max(0.10, Math.min(0.62, a));
+      rough[i] = Math.max(0.35, Math.min(1, r));
+      height[i] = h;
+    }
+  }
+
+  const make = (fill, srgb) => {
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = n;
+    const ctx = cv.getContext('2d');
+    const img = ctx.createImageData(n, n);
+    fill(img.data);
+    ctx.putImageData(img, 0, 0);
+    const tex = new THREE.CanvasTexture(cv);
+    if (srgb) tex.colorSpace = THREE.SRGBColorSpace;
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.RepeatWrapping;
+    tex.anisotropy = 16;               // the road is always seen at a grazing angle
+    return tex;
+  };
+
+  const map = make((d) => {
+    for (let i = 0; i < n * n; i++) {
+      // A touch of blue in the shadow of the binder: fresh asphalt is neutral,
+      // weathered asphalt goes grey-blue, never brown.
+      const v = albedo[i];
+      d[i * 4] = Math.round(v * 255);
+      d[i * 4 + 1] = Math.round(v * 254);
+      d[i * 4 + 2] = Math.round(Math.min(1, v * 1.04) * 255);
+      d[i * 4 + 3] = 255;
+    }
+  }, true);
+
+  const roughnessMap = make((d) => {
+    for (let i = 0; i < n * n; i++) {
+      const v = Math.round(rough[i] * 255);
+      d[i * 4] = v; d[i * 4 + 1] = v; d[i * 4 + 2] = v; d[i * 4 + 3] = 255;
+    }
+  }, false);
+
+  const at = (x, y) => height[(((y % n) + n) % n) * n + (((x % n) + n) % n)];
+  const normalMap = make((d) => {
+    const strength = 2.6;
+    for (let y = 0; y < n; y++) {
+      for (let x = 0; x < n; x++) {
+        const dx = (at(x + 1, y) - at(x - 1, y)) * strength;
+        const dy = (at(x, y + 1) - at(x, y - 1)) * strength;
+        const len = Math.hypot(dx, dy, 1);
+        const i = (y * n + x) * 4;
+        d[i] = Math.round(((-dx / len) * 0.5 + 0.5) * 255);
+        d[i + 1] = Math.round(((dy / len) * 0.5 + 0.5) * 255);
+        d[i + 2] = Math.round(((1 / len) * 0.5 + 0.5) * 255);
+        d[i + 3] = 255;
+      }
+    }
+  }, false);
+
+  asphaltMaps = { map, roughnessMap, normalMap, metres: ASPHALT_TILE_M };
+  return asphaltMaps;
+}
+
+/**
+ * The carriageway slab.
+ *
+ * UVs are world coordinates in metres divided by the tile size, which is what
+ * lets two overlapping ribbons at a junction sample the very same texel — so
+ * even where they fight over the depth buffer, the pixels they produce are
+ * identical and the fight is invisible. That is the whole trick that makes a
+ * road mesh possible over a painted ground at all.
+ */
+export function makeRoadMaterial(THREE) {
+  const t = asphaltTextures(THREE);
+  return new THREE.MeshStandardMaterial({
+    map: t.map,
+    roughnessMap: t.roughnessMap,
+    normalMap: t.normalMap,
+    normalScale: new THREE.Vector2(1.0, 1.0),
+    vertexColors: true,
+    roughness: 1,
+    metalness: 0,
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Ground detail
 // ---------------------------------------------------------------------------
 

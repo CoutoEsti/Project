@@ -12,12 +12,14 @@ import {
 } from '../core/geo.js';
 import { classifyRoad, findJunctions, buildMarkings, StripBuilder } from './roads.js';
 import { buildKerbs, KerbBuilder } from './kerbs.js';
+import { buildRoadway, RoadwayBuilder } from './roadway.js';
 import { paintTile, paintRoughnessTile, areaKindFromTags, GROUND_COLORS } from './ground.js';
 import { buildBuildings } from './buildings.js';
 import { buildProps, makePropMaterials } from './props.js';
 import {
   makeWallMaterial, makeCapMaterial, makeGroundMaterial,
   makeMarkingMaterial, makeKerbMaterial, makeLightPoolMaterial,
+  makeRoadMaterial, asphaltTextures,
 } from './materials.js';
 import { CollisionGrid } from '../vehicle/collision.js';
 import { Terrain } from './terrain.js';
@@ -92,6 +94,7 @@ export class World {
       cap: makeCapMaterial(THREE),
       marking: makeMarkingMaterial(THREE),
       kerb: makeKerbMaterial(THREE),
+      road: makeRoadMaterial(THREE),
       lightPool: makeLightPoolMaterial(THREE),
       props: makePropMaterials(THREE),
     };
@@ -469,6 +472,28 @@ export class World {
     // driving on rather than a texture painted on a field. Near tiles only:
     // fifteen centimetres of relief is worth nothing two kilometres away, and
     // it is by some distance the cheapest triangle to skip.
+    // The carriageway itself, before anything that stands on it. Near tiles
+    // only: fourteen centimetres of edge is worth nothing two kilometres out,
+    // and the painted ground underneath still carries the road at that range.
+    if (tile.detailed) {
+      const road = new RoadwayBuilder(groundSample, asphaltTextures(THREE).metres);
+      buildRoadway(clipped, junctions, road);
+      if (road.count) {
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.Float32BufferAttribute(road.positions, 3));
+        geo.setAttribute('uv', new THREE.Float32BufferAttribute(road.uvs, 2));
+        geo.setAttribute('color', new THREE.Float32BufferAttribute(road.colors, 3));
+        geo.setIndex(road.indices);
+        geo.computeVertexNormals();
+        geo.computeBoundingSphere();
+        const mesh = new THREE.Mesh(geo, this.materials.road);
+        mesh.receiveShadow = !!this.settings.shadows;
+        this.group.add(mesh);
+        tile.objects.push(mesh);
+        tile.roadCount = road.count;
+      }
+    }
+
     if (tile.detailed) {
       const kerbs = new KerbBuilder(groundSample);
       buildKerbs(clipped, junctions, kerbs);

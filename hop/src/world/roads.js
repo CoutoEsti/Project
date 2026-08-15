@@ -66,6 +66,16 @@ const MAJOR = new Set(['motorway', 'trunk', 'primary', 'secondary', 'tertiary',
 
 export const JUNCTION_CLEARANCE = 9.5;   // metres of paint trimmed either side of a junction
 
+/**
+ * How far the built carriageway sits above the painted ground — see roadway.js.
+ *
+ * It lives here, in the module nothing else imports, because everything that
+ * has to stand on the road needs it: the markings, the kerbs beside it, and the
+ * car driving on it. Putting it in roadway.js would make roads.js import its own
+ * importer.
+ */
+export const ROAD_LIFT = 0.14;
+
 function num(v) {
   if (v == null) return NaN;
   const m = String(v).match(/-?\d+(\.\d+)?/);
@@ -343,7 +353,10 @@ export class StripBuilder {
   }
 }
 
-const PAINT_Y = 0.018;
+// Paint sits on the slab now, not on the painted ground, so it carries the
+// carriageway's own height. Without this every marking in the city would be
+// buried fourteen centimetres under the asphalt it belongs to.
+const PAINT_Y = ROAD_LIFT + 0.02;
 const YELLOW = [0.86, 0.68, 0.16];
 const WHITE = [0.90, 0.90, 0.87];
 
