@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import {
   encodeState, decodeState, packFlags, unpackFlags, StateBuffer,
   shortestAngle, lerpAngle, normaliseRoom, normaliseName, makeRoomCode,
-  colourForName, PROTOCOL,
+  colourForName, PROTOCOL, DEFAULT_ROOM,
 } from '../src/net/protocol.js';
 import { KerbBuilder, buildKerbs, KERB_HEIGHT } from '../src/world/kerbs.js';
 import { classifyRoad, findJunctions, offsetNormals, JUNCTION_CLEARANCE } from '../src/world/roads.js';
@@ -105,6 +105,13 @@ test('deux noms différents donnent deux voitures différentes', () => {
 });
 
 test('le protocole a un numéro', () => assert.equal(typeof PROTOCOL, 'number'));
+
+test('le salon par défaut est un salon légal', () => {
+  // Everyone lands here without typing anything, so it has to survive the same
+  // normalisation as a code somebody typed — it ends up inside a peer id.
+  assert.equal(normaliseRoom(DEFAULT_ROOM), DEFAULT_ROOM);
+  assert.match(DEFAULT_ROOM, /^[A-Z0-9]{3,12}$/);
+});
 
 // ---------------------------------------------------------------------------
 console.log('\n▶ interpolation\n');

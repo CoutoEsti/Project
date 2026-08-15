@@ -117,23 +117,21 @@
       <div class="mp-fields">
         <input id="mp-name" type="text" maxlength="16" autocomplete="off" spellcheck="false"
                placeholder="Ton nom" aria-label="Ton nom">
-        <input id="mp-room" type="text" maxlength="12" autocomplete="off" spellcheck="false"
-               placeholder="Code du salon" aria-label="Code du salon">
       </div>
-
-      <div class="menu-actions mp-actions">
-        <button id="mp-join" class="primary">Créer ou rejoindre</button>
-        <button id="mp-invite" class="ghost">Copier l’invitation</button>
-        <button id="mp-leave" class="ghost">Quitter</button>
-      </div>
-
-      <p id="mp-hint" class="hint">
-        Aucun serveur de jeu : les voitures se parlent directement, de navigateur
-        à navigateur. Laisse le code vide pour en créer un, ou colle celui qu’on
-        t’a donné. Huit voitures par salon.
-      </p>
 
       <div id="mp-players"></div>
+
+      <p id="mp-hint" class="hint">
+        Tout le monde est dans la même partie — rien à taper, rien à envoyer.
+        Clique sur un joueur pour aller le rejoindre.
+      </p>
+
+      <p id="mp-error" class="hint mp-error"></p>
+
+      <div class="menu-actions mp-actions">
+        <button id="mp-join" class="ghost">Se reconnecter</button>
+        <button id="mp-leave" class="ghost">Jouer seul</button>
+      </div>
     </div>
 
     <div class="keys">

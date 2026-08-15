@@ -295,6 +295,21 @@ export class Multiplayer {
     return out;
   }
 
+  /**
+   * Where a player is, in latitude and longitude.
+   *
+   * Unlike cars(), this needs no projection — so the menu can offer to take you
+   * to somebody before you have hopped anywhere yourself.
+   */
+  locate(id) {
+    const player = this.players.get(id);
+    const last = player && player.buffer.last;
+    return last ? { lat: last.lat, lon: last.lon, name: player.name || 'Quelqu’un' } : null;
+  }
+
+  /** Whatever went wrong most recently, for the panel to show rather than guess. */
+  get lastError() { return this.mesh ? this.mesh.lastError : ''; }
+
   /** Drop anyone whose tab froze; the transport only notices a real disconnect. */
   prune() {
     if (!this.active) return;

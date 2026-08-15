@@ -982,24 +982,46 @@ body.photo-mode #vignette { display: none !important; }
 .mp-fields input:focus { border-color: var(--accent); background: rgba(255, 255, 255, 0.08); }
 
 .mp-actions button { padding: 11px 16px; font-size: 14px; }
-/* Only offer what makes sense: nothing to leave before joining, and nothing to
-   invite anyone to until there is a room code to invite them into. */
-#multiplayer.offline #mp-leave,
-#multiplayer:not(.online) #mp-invite { display: none; }
+/* Nothing to leave before joining, and nothing to reconnect while connected. */
+#multiplayer.offline #mp-leave { display: none; }
 #multiplayer:not(.offline) #mp-join { display: none; }
+
+.mp-error {
+  display: none;
+  color: var(--danger);
+  line-height: 1.45;
+}
+.mp-error.visible { display: block; }
 
 #mp-players { display: flex; flex-direction: column; gap: 4px; }
 #mp-players:empty { display: none; }
 
+/* Other players are buttons — clicking one drives you to them, which is what
+   replaces the invitation link. Yours is a plain div: you are already there. */
 .mp-player {
   display: flex;
   align-items: center;
   gap: 9px;
-  padding: 7px 10px;
+  width: 100%;
+  padding: 8px 10px;
   background: rgba(255, 255, 255, 0.04);
+  border: 1px solid transparent;
   border-radius: 9px;
+  color: var(--ink);
+  font: inherit;
   font-size: 13px;
+  text-align: left;
 }
+
+button.mp-player {
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+button.mp-player:hover {
+  background: rgba(95, 208, 168, 0.12);
+  border-color: rgba(95, 208, 168, 0.4);
+}
+button.mp-player:active { transform: scale(0.99); }
 
 .mp-player .chip {
   width: 11px;

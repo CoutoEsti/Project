@@ -43,6 +43,21 @@ const DIAL_TIMEOUT_MS = 30000;
 const DIAL_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 1500;
 
+// Discovery repeats. This is the difference between multiplayer that works and
+// multiplayer that works *usually*: announcing once on arrival means a single
+// dropped message — a hiccup at the broker, two tabs racing, a seat freed a
+// second later — leaves two players sitting in the same room, both reporting
+// themselves online, permanently invisible to each other with nothing retrying.
+// Seven small messages every few seconds costs nothing and makes the room
+// self-healing: late arrivals, departures and lost announces all resolve on
+// their own.
+const ANNOUNCE_EVERY_MS = 4000;
+
+// After several failed handshakes a peer is left alone for a while, so the
+// repeat above cannot turn into a permanent retry storm against somebody whose
+// network genuinely cannot reach us.
+const COOLDOWN_MS = 60000;
+
 /** Ids the broker will accept: letters, digits, single separators. */
 function slotId(room, slot) {
   return `ruelle-${room}-${slot}`;
@@ -66,7 +81,8 @@ export class Mesh {
     this.onPeer = opts.onPeer || (() => {});
     this.onPeerGone = opts.onPeerGone || (() => {});
     this.onMessage = opts.onMessage || (() => {});
-    this.onError = opts.onError || (() => {});
+    const report = opts.onError || (() => {});
+    this.onError = (kind, detail) => { this.lastError = detail; report(kind, detail); };
 
     this.room = '';
     this.slot = -1;
@@ -74,8 +90,11 @@ export class Mesh {
     this.socket = null;
     this.peers = new Map();     // remote id -> {pc, state, meta, ready}
     this.attempts = new Map();  // remote id -> handshakes tried, reset on success
+    this.cooldown = new Map();  // remote id -> don't try again before this time
     this.closed = false;
     this._heartbeat = 0;
+    this._discovery = 0;
+    this.lastError = '';        // shown in the menu, so a failure is not a guess
   }
 
   get connected() { return !!this.socket && this.socket.readyState === 1; }
@@ -104,12 +123,8 @@ export class Mesh {
         this.id = slotId(room, slot);
         this._startHeartbeat();
         this.onOpen(slot);
-        // Everyone else in the room, whether they arrived before or after us.
-        // Dialling a seat nobody is sitting in costs one message and comes back
-        // as EXPIRE, which is cheaper than any scheme for knowing in advance.
-        for (let other = 0; other < MAX_PLAYERS; other++) {
-          if (other !== slot) this._signal(slotId(room, other), 'OFFER', { kind: 'hi' });
-        }
+        this._announce();
+        this._startDiscovery();
         return true;
       }
       // 'failed' — the broker itself is unreachable; trying seat 1 will not help.
@@ -141,6 +156,12 @@ export class Mesh {
       }
 
       let settled = false;
+      // Only the broker actually saying ID-TAKEN means the seat is occupied. A
+      // socket that dies without answering is a broken connection, and calling
+      // that 'taken' walks all eight seats and then reports a full room — the
+      // single most misleading thing this code could tell a player who is in
+      // fact completely alone and offline.
+      let refused = false;
       const done = (result) => {
         if (settled) return;
         settled = true;
@@ -164,7 +185,7 @@ export class Mesh {
             done('open');
             return;
           }
-          if (msg.type === 'ID-TAKEN') { done('taken'); return; }
+          if (msg.type === 'ID-TAKEN') { refused = true; done('taken'); return; }
           if (msg.type === 'ERROR') {
             this.onError('broker', String((msg.payload && msg.payload.msg) || 'signalisation refusée'));
             done('failed');
@@ -179,7 +200,13 @@ export class Mesh {
           'Signalisation injoignable. Vérifie ta connexion, ou passe ?broker= sur un serveur PeerJS à toi.');
         done('failed');
       });
-      socket.addEventListener('close', () => done(settled ? 'open' : 'taken'));
+      socket.addEventListener('close', () => {
+        if (settled) return;
+        if (!refused) {
+          this.onError('broker', 'La signalisation a coupé la connexion sans répondre.');
+        }
+        done(refused ? 'taken' : 'failed');
+      });
     });
   }
 
@@ -188,6 +215,32 @@ export class Mesh {
     this._heartbeat = setInterval(() => {
       if (this.connected) this.socket.send(JSON.stringify({ type: 'HEARTBEAT' }));
     }, HEARTBEAT_MS);
+  }
+
+  _startDiscovery() {
+    clearInterval(this._discovery);
+    this._discovery = setInterval(() => this._announce(), ANNOUNCE_EVERY_MS);
+  }
+
+  /**
+   * Say hello to every seat we are not already talking to.
+   *
+   * Dialling a seat nobody is sitting in costs one message and comes back as
+   * EXPIRE, which is cheaper than any scheme for knowing in advance who is
+   * there — and repeating it is what makes the room heal itself.
+   */
+  _announce() {
+    if (!this.connected || !this.room) return;
+    const now = Date.now();
+    for (let other = 0; other < MAX_PLAYERS; other++) {
+      if (other === this.slot) continue;
+      const id = slotId(this.room, other);
+      if (this.peers.has(id)) continue;                  // connected or mid-handshake
+      const until = this.cooldown.get(id);
+      if (until && now < until) continue;                // given up on, for now
+      if (until) { this.cooldown.delete(id); this.attempts.delete(id); }
+      this._signal(id, 'OFFER', { kind: 'hi' });
+    }
   }
 
   _onSocketClosed(socket) {
@@ -345,9 +398,12 @@ export class Mesh {
     this._drop(id);
 
     if (tries >= DIAL_ATTEMPTS) {
+      // Stand down for a minute rather than for ever: networks recover, and the
+      // periodic announce will pick this seat back up once the window passes.
+      this.cooldown.set(id, Date.now() + COOLDOWN_MS);
       this.onError('rtc',
         'Connexion directe impossible avec un joueur (NAT strict). '
-        + 'Un serveur TURN réglerait ça : ?ice=turn:…');
+        + 'Nouvel essai dans une minute. Un serveur TURN réglerait ça : ?ice=turn:…');
       return;
     }
     setTimeout(() => {
@@ -411,7 +467,9 @@ export class Mesh {
   close() {
     this.closed = true;
     clearInterval(this._heartbeat);
+    clearInterval(this._discovery);
     this.attempts.clear();
+    this.cooldown.clear();
     for (const id of [...this.peers.keys()]) this._drop(id);
     if (this.socket) {
       try { this.socket.close(); } catch { /* already closed */ }

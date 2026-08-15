@@ -29,7 +29,7 @@ import { Birds } from './world/birds.js';
 import { Pedestrians } from './world/pedestrians.js';
 import { Multiplayer, NetState } from './net/session.js';
 import { RemoteCars, collideWithRemote } from './net/remote.js';
-import { colourForName, normaliseName, normaliseRoom } from './net/protocol.js';
+import { colourForName, normaliseName, normaliseRoom, DEFAULT_ROOM } from './net/protocol.js';
 import { Hud } from './ui/hud.js';
 import { Menu } from './ui/menu.js';
 import { buildMapImage, paintMap, marker, carMarker } from './ui/map.js';
@@ -296,12 +296,11 @@ class Game {
     }
     this.modelsReady = modelsReady;
 
-    // An invitation link joins the room by itself. Signalling takes a couple of
-    // seconds and does not block anything — the world streams in meanwhile, and
-    // the first snapshot is only sent once there is a projection to measure
-    // against, so joining before hopping is safe.
-    const room = normaliseRoom(this.params.get('room'));
-    if (room) this.net.join(room);
+    // Everyone joins the same room, without being asked. Signalling takes a
+    // couple of seconds and blocks nothing — the world streams in meanwhile,
+    // and the first snapshot only goes out once there is a projection to
+    // measure against, so joining before hopping is safe.
+    this.net.join(this._room);
 
     this.loop.start();
   }
@@ -422,12 +421,11 @@ class Game {
     this.mpEl = this.root.querySelector('#multiplayer');
     this.mpStatus = this.root.querySelector('#mp-status');
     this.mpName = this.root.querySelector('#mp-name');
-    this.mpRoom = this.root.querySelector('#mp-room');
     this.mpPlayers = this.root.querySelector('#mp-players');
+    this.mpError = this.root.querySelector('#mp-error');
     if (!this.mpEl) return;
 
     this.mpName.value = this.settings.playerName;
-    this.mpRoom.value = normaliseRoom(this.params.get('room')) || '';
 
     this.mpName.addEventListener('change', () => {
       const clean = normaliseName(this.mpName.value);
@@ -444,40 +442,55 @@ class Game {
     });
 
     this.root.querySelector('#mp-join').addEventListener('click', () => this._netJoin());
-    this.mpRoom.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); this._netJoin(); }
-    });
     this.root.querySelector('#mp-leave').addEventListener('click', () => this.net.leave());
-    this.root.querySelector('#mp-invite').addEventListener('click', () => {
-      this._copy(this._inviteUrl(), 'Invitation copiée.');
-    });
 
     this._paintNetPanel();
+  }
+
+  /** The room everyone shares, unless `?room=` asked for a private one. */
+  get _room() {
+    return normaliseRoom(this.params.get('room')) || DEFAULT_ROOM;
   }
 
   async _netJoin() {
     if (this.net.state !== NetState.OFFLINE) return;
     this.net.setName(normaliseName(this.mpName.value) || this.settings.playerName);
-    const room = await this.net.join(this.mpRoom.value);
-    if (room) this.mpRoom.value = room;
+    await this.net.join(this._room);
+  }
+
+  /**
+   * Go and find somebody.
+   *
+   * The piece that makes a session with no codes and no links actually work:
+   * two players in the same room but three kilometres apart see nothing, and
+   * "nothing" is indistinguishable from broken. Their position is known in
+   * latitude and longitude, which is exactly what hop() takes — so this works
+   * even before you have started driving yourself.
+   */
+  _goToPlayer(id) {
+    const where = this.net.locate(id);
+    if (!where) { this.hud.toast('Ce joueur n’a pas encore envoyé sa position.'); return; }
+    const go = () => {
+      this.hop(where.lat, where.lon, this.placeLabel || 'Montréal', true);
+      this.hud.toast(`En route vers ${where.name}.`, 3200);
+    };
+    if (this.modelsReady) this.modelsReady.then(go, go); else go();
   }
 
   _onNetEvent(e) {
     switch (e.type) {
       case 'joining':
-        this.hud.toast(`Salon ${e.room} — connexion…`, 3000);
+        break;      // silent: nobody asked to connect, so nobody needs telling
+      case 'joined':
+        // Only worth a word when there is somebody to meet; arriving alone in
+        // the shared room is the normal state and not an event.
+        if (this.net.count > 0) {
+          this.hud.toast(`En ligne — ${this.net.count} autre${this.net.count > 1 ? 's' : ''} en ville.`, 4000);
+        }
         break;
-      case 'joined': {
-        this.hud.toast(`Salon ${e.room}. Partage le code, ou le lien avec « Copier l’invitation ».`, 6000);
-        // Put the room in the address bar, so a refresh — or a shared tab —
-        // comes back to the same room instead of dropping out of it.
-        const url = new URL(window.location.href);
-        url.searchParams.set('room', e.room);
-        window.history.replaceState(null, '', url.toString());
-        break;
-      }
       case 'failed':
-        this.hud.toast('Impossible de rejoindre le salon. Réessaie, ou passe par ton propre broker (?broker=).', 7000);
+        this.hud.toast('Multijoueur indisponible — tu peux rouler seul. '
+          + 'Le détail est dans ⚙ Réglages, sous « Rouler ensemble ».', 7000);
         break;
       case 'left':
         this.remoteCars.clear();
@@ -524,10 +537,19 @@ class Game {
       this.mpStatus.textContent = 'hors ligne';
     }
 
+    // Whatever went wrong, in words, and not in a toast that already vanished.
+    if (this.mpError) {
+      const why = state === NetState.ONLINE ? '' : this.net.lastError;
+      this.mpError.textContent = why || '';
+      this.mpError.classList.toggle('visible', !!why);
+    }
+
     this.mpPlayers.textContent = '';
     if (state !== NetState.ONLINE) return;
+
+    const proj = this.world.projection;
     for (const p of this.net.roster()) {
-      const row = document.createElement('div');
+      const row = document.createElement(p.self ? 'div' : 'button');
       row.className = 'mp-player';
 
       const chip = document.createElement('span');
@@ -540,19 +562,33 @@ class Game {
 
       const tail = document.createElement('span');
       tail.className = p.self ? 'you' : 'ms';
-      tail.textContent = p.self ? 'toi' : (p.ping == null ? '…' : `${p.ping} ms`);
+      if (p.self) {
+        tail.textContent = 'toi';
+      } else {
+        // How far away matters more than the ping: a player you cannot see is
+        // usually in another neighbourhood, not disconnected.
+        const where = this.net.locate(p.id);
+        let far = '';
+        if (where && proj) {
+          const w = proj.toWorld(where.lat, where.lon);
+          const d = Math.hypot(w.x - this.vehicle.x, w.z - this.vehicle.z);
+          far = d > 1200 ? `${(d / 1000).toFixed(1)} km` : `${Math.round(d)} m`;
+        }
+        tail.textContent = far || (p.ping == null ? '…' : `${p.ping} ms`);
+        row.title = 'Aller le rejoindre';
+        row.addEventListener('click', () => this._goToPlayer(p.id));
+      }
 
       row.append(chip, who, tail);
       this.mpPlayers.appendChild(row);
     }
-  }
 
-  /** Where you are, plus the room you are in — the whole invitation in a link. */
-  _inviteUrl() {
-    const url = this._positionUrl() || new URL(window.location.href).toString();
-    const out = new URL(url);
-    if (this.net.room) out.searchParams.set('room', this.net.room);
-    return out.toString();
+    if (this.net.count === 0) {
+      const empty = document.createElement('p');
+      empty.className = 'hint';
+      empty.textContent = 'Personne d’autre en ligne pour l’instant.';
+      this.mpPlayers.appendChild(empty);
+    }
   }
 
   _applyWeather() {
@@ -750,9 +786,9 @@ class Game {
       ? this.trial.shareUrl()
       : this._positionUrl();
     if (!url) return;
-    // A course shared from inside a room should bring people into the room, not
-    // just to the start line.
-    if (this.net.room) {
+    // Everybody lands in the same room anyway, so a link only needs to carry
+    // one when this session is a private one.
+    if (this.net.room && this.net.room !== DEFAULT_ROOM) {
       const withRoom = new URL(url);
       withRoom.searchParams.set('room', this.net.room);
       url = withRoom.toString();

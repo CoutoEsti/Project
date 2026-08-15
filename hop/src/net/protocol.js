@@ -40,7 +40,22 @@ export const FLAG = {
 };
 
 /**
- * A room code a human can read aloud over the phone.
+ * The room everyone lands in.
+ *
+ * There is deliberately no code to type and no link to send: open the game and
+ * you are already with everybody else. Typing a matching code into two browsers
+ * is a step where things go wrong and, worse, where a failure is indistinguishable
+ * from a bug — which is exactly what happened. One room removes the step.
+ *
+ * The cost is the ceiling: a full mesh holds eight cars, so the ninth player
+ * finds it full. Lifting that means a relay, which means a server — see
+ * README.md, « Passer à trente ou soixante joueurs ».
+ */
+export const DEFAULT_ROOM = 'MONTREAL';
+
+/**
+ * A room code a human can read aloud over the phone. Still here for `?room=`,
+ * which is how you get a private session away from the public one.
  *
  * No vowels (so it cannot spell anything unfortunate), no 0/O/1/I/L (so nobody
  * mistypes it), six characters — about a billion rooms, which is more than

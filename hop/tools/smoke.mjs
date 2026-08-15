@@ -971,19 +971,58 @@ async function main() {
         problem(`le flux de position s’arrête (${flowing.packets} paquets en ${flowing.seconds.toFixed(0)} s)`);
       }
 
+      // The room has to heal itself.
+      //
+      // This is the bug that shipped: discovery was announced once, on arrival.
+      // A single lost message — a hiccup at the broker, two tabs racing — left
+      // both players reporting themselves online, in the same room, permanently
+      // invisible to each other, with nothing ever retrying. Tearing the link
+      // down behind the game's back reproduces that state exactly; it has to
+      // come back without anybody rejoining anything.
+      const healed = await page.evaluate(async () => {
+        const mesh = window.__ruelle.net.mesh;
+        const id = [...mesh.peers.keys()][0];
+        if (!id) return { skipped: true };
+        mesh._drop(id);
+        const t0 = performance.now();
+        while (performance.now() - t0 < 40000) {
+          if (mesh.peerIds.length > 0) return { seconds: (performance.now() - t0) / 1000 };
+          await new Promise((r) => setTimeout(r, 250));
+        }
+        return { seconds: Infinity };
+      });
+      if (healed.skipped) problem('aucun lien à couper pour tester la reprise');
+      else if (!Number.isFinite(healed.seconds)) {
+        problem('un lien coupé ne se rétablit jamais — la découverte ne se répète pas');
+      } else {
+        note(`reprise après coupure : reconnecté en ${healed.seconds.toFixed(1)} s`);
+      }
+
       // Two cars cannot occupy the same metre of road.
+      //
+      // Wait for a fresh snapshot first: the reconnection above rebuilt the
+      // player from scratch, so its history is empty until the next packet and
+      // there is genuinely no position to collide with yet.
+      await page.waitForFunction(
+        () => window.__ruelle.net.cars().length === 1, null, { timeout: 40000 },
+      ).catch(() => problem('aucune position reçue après la reconnexion'));
+
       const bumped = await page.evaluate(async () => {
         const g = window.__ruelle;
         const v = g.vehicle;
         const c = g.net.cars()[0];
+        if (!c) return -1;
         v.x = c.x; v.z = c.z; v.yaw = c.yaw; v.u = 0; v.v = 0;
         const { collideWithRemote } = await import('/src/net/remote.js');
         collideWithRemote(v, g.net.cars());
         const after = g.net.cars()[0];
         return Math.hypot(v.x - after.x, v.z - after.z);
       });
-      note(`collision entre joueurs : séparés de ${bumped.toFixed(2)} m`);
-      if (bumped < 0.3) problem('les voitures des joueurs se traversent');
+      if (bumped < 0) problem('pas de position à tester pour la collision entre joueurs');
+      else {
+        note(`collision entre joueurs : séparés de ${bumped.toFixed(2)} m`);
+        if (bumped < 0.3) problem('les voitures des joueurs se traversent');
+      }
 
       await page.screenshot({ path: path.join(SHOTS, '08-multijoueur.png') });
     }

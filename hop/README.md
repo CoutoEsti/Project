@@ -28,16 +28,16 @@ Anneau de 5 × 5 tuiles, soit 4,3 km de portée, avec deux niveaux de détail :
 les tuiles lointaines gardent sol et bâtiments, perdent le mobilier urbain et
 un quart de leur texture. Recyclage vérifié après 3,6 km de route.
 
-**Multijoueur.** Jusqu'à huit voitures dans un salon, sans serveur de jeu et
-sans compte : les navigateurs se parlent directement en WebRTC. Un code à six
-lettres, partageable en lien comme les fantômes le sont déjà — l'invitation
-porte le salon *et* la position, donc on arrive à côté des autres. Les positions
-voyagent en latitude et longitude, jamais en mètres locaux, ce qui fait que deux
-joueurs partis de quartiers différents se voient quand même au bon endroit.
-Voitures interpolées avec 130 ms de retard assumé, plaque au nom du joueur,
-couleur dérivée du nom, et des collisions entre joueurs que personne n'arbitre —
-chaque client se pousse lui-même hors du chevauchement, donc il n'y a rien à
-désynchroniser. Voir « Le multijoueur » plus bas.
+**Multijoueur.** Tout le monde ouvre le jeu et se retrouve dans la même partie :
+aucun code à taper, aucun lien à envoyer. Jusqu'à huit voitures, sans serveur de
+jeu et sans compte — les navigateurs se parlent directement en WebRTC. La liste
+des joueurs est cliquable : on va rejoindre quelqu'un d'un clic, ce qui remplace
+l'invitation. Les positions voyagent en latitude et longitude, jamais en mètres
+locaux, ce qui fait que deux joueurs partis de quartiers différents se voient
+quand même au bon endroit. Voitures interpolées avec 130 ms de retard assumé,
+plaque au nom du joueur, couleur dérivée du nom, et des collisions entre joueurs
+que personne n'arbitre — chaque client se pousse lui-même hors du chevauchement,
+donc il n'y a rien à désynchroniser. Voir « Le multijoueur » plus bas.
 
 **La chaussée a une épaisseur.** Le sol reste peint dans un seul canvas — c'est
 ce qui donne des carrefours sans couture — mais la bordure de trottoir est
@@ -223,6 +223,17 @@ l'importer : ils restent testables sans importmap.
 voyagent de navigateur à navigateur en WebRTC. Le site reste ce qu'il est :
 des fichiers statiques, zéro dollar par mois.
 
+**Et il n'y a rien à faire pour jouer ensemble.** Pas de code, pas de lien : on
+ouvre le jeu et on est déjà dans la partie de tout le monde. Un code à taper des
+deux côtés est une étape où ça rate — et où un ratage ressemble exactement à un
+bug. La liste des joueurs, dans ⚙ Réglages sous « Rouler ensemble », montre qui
+est là et à quelle distance ; un clic sur un nom t'emmène à côté de lui. C'est
+ça qui remplace l'invitation, parce que deux joueurs à trois kilomètres l'un de
+l'autre ne se voient pas, et « je ne vois personne » ne se distingue pas d'une
+panne.
+
+`?room=UNCODE` reste possible pour une partie privée, à l'écart de la publique.
+
 Une seule chose ne peut pas être pair-à-pair : la poignée de main du début.
 Deux navigateurs qui ne se connaissent pas ont besoin d'un intermédiaire pour
 échanger leurs adresses — quelques centaines d'octets, une fois. Après ça il est
@@ -243,16 +254,22 @@ node hop/tools/broker.mjs --port 9000
 
 | Paramètre | Effet |
 |---|---|
-| `?room=K7M2QP` | rejoint ce salon au chargement — c'est le lien d'invitation |
+| `?room=K7M2QP` | une partie privée plutôt que la partie publique |
 | `?broker=wss://…` | une autre signalisation que la publique |
 | `?ice=` | aucun STUN (un LAN n'en a pas besoin) |
 | `?ice=stun:…,turn:…` | ton propre STUN et ton propre TURN |
 
 **Les limites, honnêtement :**
 
-- **Huit voitures par salon.** Le maillage est complet : chaque navigateur parle
-  à tous les autres. Au-delà d'une dizaine ça s'effondre, et la sortie est un
-  relais plutôt qu'un maillage — voir plus bas.
+- **Huit voitures.** Le maillage est complet : chaque navigateur parle à tous
+  les autres. Au-delà d'une dizaine ça s'effondre, donc le neuvième joueur
+  trouve la partie pleine. La sortie est un relais plutôt qu'un maillage — voir
+  plus bas.
+- **La découverte se répète toutes les quatre secondes**, et c'est délibéré :
+  annoncée une seule fois, un message perdu laissait deux joueurs dans la même
+  partie, tous deux « en ligne », invisibles l'un pour l'autre à jamais. C'est
+  exactement le bug qui a été livré la première fois. Un lien coupé se rétablit
+  maintenant tout seul, ce que le banc d'essai vérifie en coupant le lien.
 - **Pas de TURN par défaut.** Deux joueurs derrière un NAT symétrique (rare à la
   maison, courant sur un wifi d'entreprise) ne se connecteront pas. Le jeu le
   dit au lieu de laisser la rue vide. `?ice=` accepte un TURN, c'est le seul
