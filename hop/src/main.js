@@ -179,11 +179,14 @@ class Game {
       onSettings: (s, key) => this._applySettings(s, key),
     });
 
-    this.cameraModes = ['chase', 'hood', 'orbit'];
-    this.cameraMode = this.settings.camera;
+    // One camera, and a way to look around with it. Cycling through a hood cam
+    // and an auto-orbit was three half-cameras: you drive from behind the car,
+    // and what you actually want is to glance at the corner you are turning
+    // into — which is a mouse, not another mode.
+    this.cameraMode = 'chase';
+    this.look = { active: false, yaw: 0, pitch: 0 };
     this._camPos = new THREE.Vector3(0, 8, -14);
     this._camLook = new THREE.Vector3();
-    this._orbitAngle = 0;
     this.headlightsOn = false;
     this.groundY = 0;
     this.slope = 0;
@@ -331,6 +334,7 @@ class Game {
     bindPad('#pad-handbrake', (v) => this.input.setTouch({ handbrake: v }));
 
     this._bindStick();
+    this._bindLook();
     this._applyTouchMode();
     this._bindMultiplayer();
 
@@ -411,6 +415,70 @@ class Game {
     };
     zone.addEventListener('pointerup', release);
     zone.addEventListener('pointercancel', release);
+  }
+
+  /**
+   * Hold the right button to swing the camera round the car.
+   *
+   * Held rather than toggled, and it recentres itself on release: looking away
+   * is something you do *while* something is happening — checking the mirror
+   * before a lane change, watching the car beside you — not a mode you enter
+   * and forget you are in, pointing backwards at seventy.
+   *
+   * Pointer lock would be smoother but it hides the cursor and swallows Escape,
+   * which is the menu key. Dragging with the button down is the safer trade.
+   */
+  _bindLook() {
+    const view = this.canvas;
+    if (!view) return;
+
+    // Without this the browser's own menu opens on the first drag.
+    view.addEventListener('contextmenu', (e) => e.preventDefault());
+
+    let pointerId = null;
+    let lastX = 0;
+    let lastY = 0;
+
+    view.addEventListener('pointerdown', (e) => {
+      if (e.button !== 2 || pointerId !== null) return;
+      if (this.photo.active || this.menu.visible || this.mapOpen) return;
+      pointerId = e.pointerId;
+      view.setPointerCapture(pointerId);
+      lastX = e.clientX;
+      lastY = e.clientY;
+      this.look.active = true;
+      e.preventDefault();
+    });
+
+    view.addEventListener('pointermove', (e) => {
+      if (e.pointerId !== pointerId) return;
+      // Scaled by field of view so the sensitivity does not change when the
+      // camera opens up at speed.
+      const k = (this.camera.fov / 60) * 0.0042;
+      this.look.yaw -= (e.clientX - lastX) * k;
+      // Down on the mouse looks down, and the range stops short of the poles
+      // where the up vector flips and the view rolls over.
+      this.look.pitch = Math.max(-0.5, Math.min(0.95,
+        this.look.pitch + (e.clientY - lastY) * k * 0.7));
+      lastX = e.clientX;
+      lastY = e.clientY;
+      e.preventDefault();
+    });
+
+    const release = (e) => {
+      if (e.pointerId !== pointerId) return;
+      pointerId = null;
+      this.look.active = false;
+    };
+    view.addEventListener('pointerup', release);
+    view.addEventListener('pointercancel', release);
+    view.addEventListener('lostpointercapture', release);
+  }
+
+  /** Snap the view back behind the car. */
+  _recentreLook() {
+    this.look.yaw = 0;
+    this.look.pitch = 0;
   }
 
   // -------------------------------------------------------------------------
@@ -704,7 +772,7 @@ class Game {
     this.score.reset();
     this.spawned = true;
     this.hud.setStatus('');
-    this.hud.toast('G : poser une porte · R : replacer sur la route · C : caméra', 5200);
+    this.hud.toast('G : poser une porte · R : replacer sur la route · clic droit : regarder autour', 5600);
   }
 
   _onScoreEvent(e) {
@@ -926,12 +994,7 @@ class Game {
       this.hud.toast('Parcours effacé.');
     }
     if (this.input.justPressed('reset') && this.spawned) this._respawn();
-    if (this.input.justPressed('camera')) {
-      const i = (this.cameraModes.indexOf(this.cameraMode) + 1) % this.cameraModes.length;
-      this.cameraMode = this.cameraModes[i];
-      this.settings.camera = this.cameraMode;
-      saveSettings(this.settings);
-    }
+    if (this.input.justPressed('camera')) this._recentreLook();
     if (this.input.justPressed('lights')) {
       this.headlightsOn = !this.headlightsOn;
     }
@@ -1129,28 +1192,13 @@ class Game {
       return;
     }
 
-    if (this.cameraMode === 'hood') {
-      const gy = this.groundY || 0;
-      this.camera.position.set(v.x + fx * 0.35, gy + 1.32, v.z + fz * 0.35);
-      this._camLook.set(v.x + fx * 40, gy + 1.1 + Math.sin(this.slope || 0) * 20,
-                        v.z + fz * 40);
-      this.camera.lookAt(this._camLook);
-      this.camera.fov = 68 + speedT * 8;
-      this.camera.updateProjectionMatrix();
-      return;
-    }
-
-    if (this.cameraMode === 'orbit') {
-      this._orbitAngle += dt * 0.25;
-      const r = 13;
-      const gy = this.groundY || 0;
-      this.camera.position.set(
-        v.x + Math.cos(this._orbitAngle) * r, gy + 5.5, v.z + Math.sin(this._orbitAngle) * r,
-      );
-      this.camera.lookAt(v.x, gy + 1.0, v.z);
-      this.camera.fov = 55;
-      this.camera.updateProjectionMatrix();
-      return;
+    // The camera eases back to centre once the button is let go, at a rate that
+    // reads as the driver turning back to the road rather than as a slider
+    // returning to zero.
+    if (!this.look.active) {
+      const ease = 1 - Math.pow(0.02, dt);
+      this.look.yaw += (0 - this.look.yaw) * ease;
+      this.look.pitch += (0 - this.look.pitch) * ease;
     }
 
     // Chase: a spring behind the car, pulled back and lowered with speed, and
@@ -1160,14 +1208,21 @@ class Game {
     const slide = Math.max(-1, Math.min(1, v.v / 9));
     const rx = Math.cos(v.yaw), rz = -Math.sin(v.yaw);
 
-    const targetX = v.x - fx * back + rx * slide * 1.9;
-    const targetZ = v.z - fz * back + rz * slide * 1.9;
+    // Where the camera sits is the car's heading plus wherever you are looking.
+    // Rotating the *anchor* rather than just the aim is what makes it a camera
+    // you can see round the car with, instead of one that pans off into the sky.
+    const eye = v.yaw + this.look.yaw;
+    const ex = Math.sin(eye), ez = Math.cos(eye);
+    const lift = 1 + this.look.pitch * 1.1;
+
+    const targetX = v.x - ex * back + rx * slide * 1.9;
+    const targetZ = v.z - ez * back + rz * slide * 1.9;
 
     const k = 1 - Math.pow(0.0016, dt);
     this._camPos.x += (targetX - this._camPos.x) * k;
     this._camPos.z += (targetZ - this._camPos.z) * k;
     const gy = this.groundY || 0;
-    this._camPos.y += ((gy + height) - this._camPos.y) * (1 - Math.pow(0.004, dt));
+    this._camPos.y += ((gy + height * lift) - this._camPos.y) * (1 - Math.pow(0.004, dt));
 
     // Never let the camera sink into the road, and never let it end up inside
     // the building behind you — pull it in to the last clear point instead.
@@ -1183,7 +1238,9 @@ class Game {
     // Never let the camera sink below the ground it is flying over.
     const camGround = this.world.groundHeight(cx, cz);
     this.camera.position.set(cx, Math.max(camGround + 1.4, this._camPos.y), cz);
-    this._camLook.set(v.x + fx * 7, gy + 1.35, v.z + fz * 7);
+    // Aim past the car along the eye direction, so looking left shows what is
+    // to your left rather than swinging the car across the frame.
+    this._camLook.set(v.x + ex * 7, gy + 1.35 - this.look.pitch * 2.2, v.z + ez * 7);
     this.camera.lookAt(this._camLook);
     this.camera.fov = 60 + speedT * 12;
     this.camera.updateProjectionMatrix();

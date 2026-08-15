@@ -11,6 +11,25 @@ absent ou illisible n'est pas une erreur — le procédural reprend la main.
 | `lamp.glb` | tous les lampadaires | 6,2 m |
 | `bench.glb` | les bancs | 0,9 m |
 
+## Un pack d'arbres en un seul fichier
+
+C'est comme ça que les packs se vendent : trente objets posés côte à côte dans
+un seul glTF, avec un jeu de textures partagé. Dépose-le sous **`tree-pack.glb`**
+et le jeu le découpe tout seul — une essence par objet du pack.
+
+Il ne lit aucun nom. Un pack d'un autre auteur appellerait ses arbres autrement,
+et de toute façon `Tree_Branches_01.002` ne dit pas à quel tronc il appartient.
+Ce qui est fiable, c'est la disposition : **les morceaux d'un même objet se
+superposent vus de haut, deux objets distincts sont espacés.** Un tronc et son
+feuillage sont à 30 cm l'un de l'autre, deux arbres voisins à dix mètres — le
+regroupement se fait dans cet écart.
+
+Ce qui dépasse six mètres devient un arbre ; le reste (buissons, rochers) est
+ignoré pour l'instant. Un `tree-pack.glb` présent l'emporte sur les fichiers
+individuels ci-dessous.
+
+Le pack actuel donne douze essences pour 2 957 triangles au total.
+
 ## Plusieurs essences d'arbres
 
 Dépose `tree.glb`, puis `tree2.glb`, `tree3.glb`… jusqu'à `tree6.glb`. Le jeu

@@ -303,6 +303,15 @@ export function speciesAt(x, z, count) {
   return Math.floor(hash01(seed ^ 0x2545f491) * count) % count;
 }
 
+// How much of the forest to actually plant.
+//
+// The two knobs that decide how heavy a neighbourhood is. A dense canopy is
+// pretty in a screenshot and, from inside a car, mostly a wall between you and
+// the city you came to drive through — so this is a look decision as much as a
+// budget one. Both are deterministic: the same trees survive on every visit.
+const TREE_KEEP = 0.45;              // share of mapped OSM trees kept
+const STREET_TREE_SPACING = 17;      // metres between generated street trees
+
 /**
  * Per-species look for the procedural tree — used when no model was shipped,
  * and as the shape jitter on top of an authored one. Loosely: maple, ash,
@@ -404,11 +413,20 @@ export function buildProps(THREE, args) {
         mappedLamps++;
         break;
       }
-      case 'tree':
+      case 'tree': {
+        // OpenStreetMap has the real trees of Montréal, and there are sixteen
+        // thousand of them in the extract. That was affordable while a tree was
+        // a handful of procedural quads; an authored one costs a couple of
+        // hundred triangles, which is four million for the trees alone — most
+        // of the whole frame budget, spent on foliage nobody looks at. Thinning
+        // by a hash of the position keeps it deterministic, so the same trees
+        // survive on every visit and across a tile seam.
+        if (hash01(Math.round(n.x * 31 + n.z * 17) ^ 0x5bd1) > TREE_KEEP) break;
         trees.push(makeTree(n.x, n.z,
           0.75 + hash01(Math.round(n.x * 13 + n.z * 7)) * 0.6, species));
         mappedTrees++;
         break;
+      }
       case 'traffic_signals': {
         const dir = roadDirectionNear(roads, n.x, n.z);
         (hash01(Math.round(n.x + n.z * 3)) > 0.5 ? signalsRed : signalsGreen)
@@ -459,10 +477,10 @@ export function buildProps(THREE, args) {
     // Street trees on the residential verge.
     if (wantTrees && (spec.highway === 'residential' || spec.highway === 'unclassified'
                       || spec.highway === 'living_street' || spec.highway === 'tertiary')) {
-      const spacing = 11;
+      const spacing = STREET_TREE_SPACING;
       for (let d = 6; d < len - 4; d += spacing) {
         const r = hash01(seedBase + Math.round(d * 3));
-        if (r < 0.28) continue;
+        if (r < 0.42) continue;
         const side = r > 0.64 ? 1 : -1;
         sampleAt(road.points, d, s);
         const off = spec.width / 2 + spec.sidewalk + spec.verge * 0.45;
