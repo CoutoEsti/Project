@@ -23,7 +23,12 @@ Vérifié par `node hop/tools/smoke.mjs` (le jeu complet dans Chromium) et
 `node hop/tools/units.mjs` (la logique pure), à chaque commit.
 
 **Monde.** Streamé depuis les vraies données Montréal — 19 618 bâtiments,
-7 672 tronçons, 28 150 arbres, 1 219 feux, 549 lampadaires, sur 11 × 9 km.
+7 672 tronçons, 28 150 arbres, 1 219 feux, 549 lampadaires, dans la boîte du
+Plateau : 3,9 × 3,1 km. Les bornes de 11 × 9 km inscrites dans le fichier sont
+un mirage — Overpass rend une ligne entière dès qu'elle touche la boîte, et les
+tunnels de métro étirent le rectangle bien au-delà des données. Ce qui sort de
+l'extrait arrive d'Overpass en direct, et les raccourcis du menu concernés —
+centre-ville, Saint-Léonard, la tranchée Décarie — portent l'étiquette.
 Anneau de 5 × 5 tuiles, soit 4,3 km de portée, avec deux niveaux de détail :
 les tuiles lointaines gardent sol et bâtiments, perdent le mobilier urbain et
 un quart de leur texture. Recyclage vérifié après 3,6 km de route.

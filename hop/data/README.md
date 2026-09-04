@@ -42,11 +42,19 @@ d'être versionné une fois la conversion faite.
 ## Découper, pour aller plus grand que le quartier
 
 Le fichier unique tient jusqu'à quelques centaines d'éléments au kilomètre
-carré, puis décroche. L'extrait actuel fait **107 km² pour 10,6 Mo**, soit
-0,10 Mo/km² — l'île entière donnerait une cinquantaine de mégaoctets dans un
-seul fichier : un demi-million d'éléments à analyser avant même d'afficher le
-menu, et un balayage linéaire de toute la liste pour chacune des trente-cinq
-tuiles présentes autour de la voiture.
+carré, puis décroche. L'extrait actuel fait **12,2 km² pour 10,6 Mo**, soit
+**0,87 Mo/km²** — la boîte du Plateau, 3,9 × 3,1 km, et rien d'autre. (Les
+bornes annoncées dans `meta` sont beaucoup plus larges : Overpass rend une
+ligne entière dès qu'elle touche la boîte, et les tunnels de métro tirent le
+rectangle jusqu'à 11 × 9 km. Le rectangle n'est pas la couverture.)
+
+À ce prix-là, doubler la zone double le poids. Rejoindre la tranchée Décarie
+depuis le Plateau demande ~55 km², soit plusieurs dizaines de mégaoctets dans
+un seul fichier : un demi-million d'éléments à analyser avant même d'afficher
+le menu, et un balayage linéaire de toute la liste pour chacune des
+trente-cinq tuiles présentes autour de la voiture. C'est le paquet ci-dessous
+qu'il faut, pas une plus grosse boîte — en attendant, les quartiers hors
+extrait sont marqués « en direct » dans le menu et passent par Overpass.
 
 ```bash
 node hop/tools/pack-data.mjs hop/data/montreal.json hop/data/mtl

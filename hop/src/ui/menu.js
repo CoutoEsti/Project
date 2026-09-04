@@ -7,18 +7,25 @@
 import { paintMap, marker } from './map.js';
 import { BINDABLE, keyLabel } from '../core/input.js';
 
-// Only places the bundled Montréal extract actually covers. Anywhere else
-// would depend on a live Overpass round-trip, which is not something to put
-// behind a one-click button that looks like it will just work.
+// L'extrait embarqué s'arrête à la boîte du Plateau : 45,510/-73,595 →
+// 45,545/-73,555, soit 3,9 × 3,1 km. Tout ce qui sort de là dépend d'un
+// aller-retour Overpass au clic — c'est jouable, c'est ce que fait déjà la
+// recherche, mais ça ne doit pas se cacher derrière un bouton qui a l'air
+// instantané. D'où `live` : le bouton le dit, et `covers` dans source.js
+// laisse passer la requête au lieu de servir des tuiles vides.
 const PRESETS = [
   { name: 'Plateau-Mont-Royal', sub: 'Parc La Fontaine', lat: 45.5265, lon: -73.5795 },
   { name: 'Mile End', sub: 'Saint-Viateur', lat: 45.5230, lon: -73.5990 },
   { name: 'Vieux-Montréal', sub: 'Place Jacques-Cartier', lat: 45.5065, lon: -73.5540 },
-  { name: 'Centre-ville', sub: 'Sainte-Catherine', lat: 45.5015, lon: -73.5700 },
+  { name: 'Centre-ville', sub: 'Sainte-Catherine', lat: 45.5015, lon: -73.5700, live: true },
   { name: 'Mont-Royal', sub: 'Voie Camillien-Houde', lat: 45.5100, lon: -73.5880 },
   { name: 'Rosemont', sub: 'Beaubien', lat: 45.5400, lon: -73.5830 },
-  { name: 'Saint-Léonard', sub: 'Grandes-Prairies', lat: 45.5880, lon: -73.5940 },
+  { name: 'Saint-Léonard', sub: 'Grandes-Prairies', lat: 45.5880, lon: -73.5940, live: true },
+  { name: 'Décarie', sub: 'La tranchée, vers l’échangeur', lat: 45.5050, lon: -73.6470, live: true },
 ];
+
+const LIVE_TITLE = 'Hors de l’extrait embarqué : les rues arrivent d’OpenStreetMap '
+  + 'au moment du clic. Hors ligne, tu auras une ville générée.';
 
 const NOMINATIM = 'https://nominatim.openstreetmap.org/search';
 
@@ -71,7 +78,13 @@ export class Menu {
     for (const p of PRESETS) {
       const btn = document.createElement('button');
       btn.className = 'preset';
-      btn.innerHTML = `<strong>${escapeHtml(p.name)}</strong><span>${escapeHtml(p.sub)}</span>`;
+      btn.dataset.lat = String(p.lat);
+      btn.dataset.lon = String(p.lon);
+      const tag = p.live
+        ? `<em class="preset-live" title="${escapeHtml(LIVE_TITLE)}">en direct</em>`
+        : '';
+      if (p.live) btn.dataset.live = '1';
+      btn.innerHTML = `<strong>${escapeHtml(p.name)}${tag}</strong><span>${escapeHtml(p.sub)}</span>`;
       btn.addEventListener('click', () => this.onHop(p.lat, p.lon, `${p.name}, ${p.sub}`));
       this.presetsEl.appendChild(btn);
     }

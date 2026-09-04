@@ -256,9 +256,19 @@ export class TileSource {
     const b = tileBounds(z, x, y);
     const key = tileKey(z, x, y);
 
+    // Being inside the bundled dataset's bounding box is not the same as being
+    // inside its data. Overpass returns a way whole as soon as it touches the
+    // query box, so the métro tunnels stretch that box kilometres past the
+    // extract — a tile out there is "covered" and comes back empty. The source
+    // chain stops at the first source that answers, so an empty answer here is
+    // a void the network would have filled. Only claim the tile when the
+    // dataset actually holds something for it.
     if (this.dataset && this.dataset.covers(b)) {
-      this.stats.dataset++;
-      return { elements: this.dataset.query(b), source: 'dataset' };
+      const elements = this.dataset.query(b);
+      if (elements.length) {
+        this.stats.dataset++;
+        return { elements, source: 'dataset' };
+      }
     }
 
     if (!this.offline) {

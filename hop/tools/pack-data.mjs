@@ -4,11 +4,14 @@
 //
 // Why this exists: the single-file dataset works beautifully up to a few
 // hundred elements per square kilometre and then falls off a cliff. The
-// Plateau extract is 107 km² for 10,6 Mo — about 0,10 Mo/km². The whole island
-// is roughly five times that area, so a single file would be ~50 Mo, half a
-// million elements parsed before the menu can even be drawn, and a linear scan
-// of all of them for every one of the thirty-five tiles resident around the
-// car. A pack turns that into one small fetch per tile actually visited.
+// Plateau extract is 12,2 km² for 10,6 Mo — about 0,87 Mo/km², and the wider
+// bounds in its `meta` are an illusion: Overpass returns a way whole as soon
+// as it touches the box, so the métro tunnels stretch the rectangle far past
+// the data. At that density even a few extra square kilometres cost tens of
+// megabytes, half a million elements parsed before the menu can even be
+// drawn, and a linear scan of all of them for every one of the thirty-five
+// tiles resident around the car. A pack turns that into one small fetch per
+// tile actually visited.
 //
 // Four kinds of output land in the target directory:
 //   index.json      the manifest: zoom, bounds, and which tiles exist

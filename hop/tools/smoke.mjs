@@ -180,6 +180,42 @@ async function main() {
     problem('des raccourcis pointent hors du jeu de données embarqué');
   }
 
+  // Un raccourci sans l'étiquette « en direct » promet un départ instantané :
+  // il doit donc avoir de la rue dans l'extrait embarqué, à portée de
+  // placement. Le nom ne prouve rien — la boîte englobante de l'extrait
+  // déborde de plusieurs kilomètres sur les tunnels de métro, si bien qu'un
+  // quartier hors données peut se dire « couvert » et n'être que du vide.
+  const presetCoverage = await page.evaluate(() => {
+    const ds = window.__ruelle && window.__ruelle.source.dataset;
+    if (!ds) return null;
+    return [...document.querySelectorAll('#presets .preset')].map((btn) => {
+      const lat = Number(btn.dataset.lat), lon = Number(btn.dataset.lon);
+      const dLat = 500 / 111320;
+      const dLon = dLat / Math.cos(lat * Math.PI / 180);
+      const els = ds.query({
+        south: lat - dLat, north: lat + dLat, west: lon - dLon, east: lon + dLon,
+      });
+      return {
+        // firstChild : le nom seul, sans l'étiquette « en direct » qui le suit.
+        name: btn.querySelector('strong').firstChild.textContent.trim(),
+        live: btn.dataset.live === '1',
+        roads: els.filter((e) => e.tags && e.tags.highway).length,
+      };
+    });
+  });
+  if (!presetCoverage) {
+    note('jeu de données embarqué absent — couverture des raccourcis non vérifiée');
+  } else {
+    const live = presetCoverage.filter((p) => p.live);
+    const blind = presetCoverage.filter((p) => !p.live && p.roads === 0);
+    note(`raccourcis : ${presetCoverage.length - live.length} dans l’extrait, `
+      + `${live.length} en direct (${live.map((p) => p.name).join(', ') || '—'})`);
+    for (const p of blind) {
+      problem(`raccourci « ${p.name} » : aucune rue embarquée à 500 m, `
+        + 'et rien ne prévient que ça passe par le réseau');
+    }
+  }
+
   // --- hop into the fixture -------------------------------------------------
   await page.click('#hop-default');
 

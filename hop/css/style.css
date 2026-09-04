@@ -518,6 +518,22 @@ html, body {
 .preset strong { font-size: 13px; font-weight: 600; }
 .preset span { font-size: 11px; color: var(--ink-dim); }
 
+/* Ce quartier n'est pas dans l'extrait embarqué : il arrive par le réseau. */
+.preset-live {
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 5px;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--accent-warm);
+  background: rgba(255, 200, 87, 0.13);
+  border: 1px solid rgba(255, 200, 87, 0.3);
+}
+
 .menu-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 
 .menu-actions button {
