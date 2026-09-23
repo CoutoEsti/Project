@@ -1,0 +1,108 @@
+:root {
+  --bg: #05070b;
+  --panel: rgba(8, 12, 20, 0.72);
+  --ink: #eef2f7;
+  --dim: #9aa6b8;
+  --accent: #ffb347;
+  --neon: #37e0ff;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: none;
+}
+
+#view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+
+#loading {
+  position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: radial-gradient(ellipse at 50% 70%, #1a1206 0%, #05070b 60%);
+  z-index: 10; transition: opacity 0.5s;
+}
+#loading.done { opacity: 0; pointer-events: none; }
+#loading .title { font-size: 64px; font-weight: 800; letter-spacing: 0.3em; color: var(--accent); text-shadow: 0 0 24px rgba(255, 150, 40, 0.6); }
+#loading .step { margin-top: 12px; color: var(--dim); font-size: 14px; }
+
+#hud { position: fixed; inset: 0; pointer-events: none; }
+#zone {
+  position: absolute; top: 18%; left: 0; right: 0; text-align: center;
+  font-size: clamp(28px, 6vw, 64px); font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase;
+  color: #fff; text-shadow: 0 0 18px rgba(55, 224, 255, 0.8), 0 2px 0 #000;
+  opacity: 0; transition: opacity 0.6s;
+}
+#zone.show { opacity: 1; }
+#road {
+  position: absolute; left: 16px; bottom: 16px; padding: 6px 10px; border-radius: 6px;
+  background: var(--panel); font-size: 14px; color: var(--ink);
+}
+#road .shield {
+  display: inline-block; min-width: 26px; padding: 1px 5px; margin-right: 8px; border-radius: 4px;
+  background: #1b5e20; border: 2px solid #fff; color: #fff; font-weight: 800; text-align: center;
+}
+#speed {
+  position: absolute; right: 20px; bottom: 18px; font-size: 54px; font-weight: 800; color: #fff;
+  text-shadow: 0 0 14px rgba(255, 179, 71, 0.7);
+}
+#speed small { font-size: 14px; margin-left: 6px; color: var(--dim); font-weight: 600; }
+#minimap {
+  position: absolute; right: 16px; top: 16px; width: 180px; height: 180px; border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55); border: 2px solid rgba(255, 255, 255, 0.25);
+}
+#help {
+  position: absolute; left: 16px; top: 14px; max-width: min(560px, 60vw); padding: 6px 10px; border-radius: 6px;
+  background: var(--panel); font-size: 12px; color: var(--dim); line-height: 1.5;
+}
+#help b { color: var(--ink); font-weight: 600; }
+#help[hidden], #road[hidden] { display: none; }
+#toast {
+  position: absolute; left: 0; right: 0; top: 30%; margin: auto; width: max-content; max-width: 90vw;
+  padding: 8px 14px; border-radius: 8px; background: var(--panel); color: var(--ink); font-size: 15px;
+  opacity: 0; transition: opacity 0.3s;
+}
+#toast.show { opacity: 1; }
+
+#bigmap {
+  position: fixed; inset: 0; background: rgba(3, 5, 9, 0.92); z-index: 5;
+  display: flex; align-items: center; justify-content: center;
+}
+#bigmap[hidden] { display: none; }
+#bigmap-canvas { max-width: 96vw; max-height: 88vh; cursor: crosshair; border-radius: 8px; }
+.bigmap-caption { position: absolute; bottom: 14px; left: 0; right: 0; text-align: center; color: var(--dim); font-size: 13px; }
+
+#touch { position: fixed; inset: 0; pointer-events: none; }
+#touch-top { position: absolute; left: 12px; top: 12px; display: flex; gap: 8px; pointer-events: auto; }
+#touch-top button {
+  padding: 8px 12px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.25);
+  background: var(--panel); color: var(--ink); font-size: 13px;
+}
+#touch[hidden] { display: none; }
+#stick {
+  position: absolute; left: 24px; bottom: 28px; width: 130px; height: 130px; border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08); border: 2px solid rgba(255, 255, 255, 0.2); pointer-events: auto;
+}
+#knob {
+  position: absolute; left: 40px; top: 40px; width: 50px; height: 50px; border-radius: 50%;
+  background: rgba(255, 255, 255, 0.35); pointer-events: none;
+}
+#handbrake { width: 58px !important; height: 58px !important; align-self: flex-end; font-weight: 800; }
+#pedals { position: absolute; right: 20px; bottom: 120px; display: flex; gap: 14px; pointer-events: auto; }
+#pedals button {
+  width: 76px; height: 76px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.1); color: #fff; font-size: 26px;
+}
+#pedals button.on { background: rgba(255, 179, 71, 0.45); }
+
+@media (max-width: 700px) {
+  #help { display: none; }
+  #minimap { width: 120px; height: 120px; }
+  #speed { font-size: 40px; bottom: 220px; }
+}

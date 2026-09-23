@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>MTL — la carte</title>
+<meta name="description" content="Une Montréal compacte pour un jeu de course en monde ouvert : la tranchée Décarie, la Métropolitaine, le tunnel Ville-Marie, le mont Royal et les îles.">
+<link rel="stylesheet" href="css/style.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three.module.min.js",
+    "three/addons/": "./vendor/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<canvas id="view"></canvas>
+
+<div id="loading">
+  <div class="title">MTL</div>
+  <div class="step" id="loading-step">Préparation…</div>
+</div>
+
+<div id="hud" hidden>
+  <div id="zone"></div>
+  <div id="road" hidden></div>
+  <div id="speed"><span id="kmh">0</span><small>km/h</small></div>
+  <canvas id="minimap" width="220" height="220"></canvas>
+  <div id="toast"></div>
+  <div id="help">
+    <b>WASD / flèches</b> conduire · <b>Espace</b> frein à main · <b>R</b> replacer ·
+    <b>C</b> caméra · <b>M</b> carte · <b>N</b> nuit / jour · <b>F</b> vol libre ·
+    <b>E</b> exporter pour Unity · <b>H</b> masquer l’aide
+  </div>
+</div>
+
+<div id="bigmap" hidden>
+  <canvas id="bigmap-canvas"></canvas>
+  <div class="bigmap-caption">Clique pour t’y rendre · <b>M</b> pour fermer</div>
+</div>
+
+<div id="touch" hidden>
+  <div id="touch-top">
+    <button data-action="map">Carte</button>
+    <button data-action="reset">Replacer</button>
+    <button data-action="camera">Caméra</button>
+  </div>
+  <div id="stick"><div id="knob"></div></div>
+  <div id="pedals">
+    <button id="handbrake" aria-label="Frein à main">P</button>
+    <button id="brake" aria-label="Freiner">▼</button>
+    <button id="gas" aria-label="Accélérer">▲</button>
+  </div>
+</div>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
