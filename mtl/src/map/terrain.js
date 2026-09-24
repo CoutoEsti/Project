@@ -1,106 +1,99 @@
-// Mont Royal as a height function.
+// The ground as a height function: Montréal's real relief (mtl/data/relief.bin,
+// 10 m samples), resampled on a 20 m grid and read as the two triangles of
+// each cell — exactly the surface the ground mesh draws. The streets, the
+// buildings, the trees and the car all read this one function, so what you
+// see and what you drive on can never disagree.
 //
-// Four soft summits combined with a smooth maximum (a p-norm), so overlapping
-// hills merge into one massif instead of stacking into a spike, then faded to
-// street level at the footprint's edge. The same function drives the terrain
-// mesh, the mountain roads' profiles and the car's ground contact, so the three
-// can never disagree.
-//
-// Roads then *carve* it: once their profiles are known, the ground within a
-// road's width is pinned just under the asphalt and blended back to the natural
-// slope a few metres further out — cut and fill, like a real mountain road.
+// Coordinates and heights come out scaled: at 85 % the map is 85 % as wide
+// and the mountain 85 % as tall, so every slope keeps its real grade.
 
-import { distToRing, pointInRing, smoothstep, noise2, Grid, segDist2, ringBBox } from './geom.js';
+export const MESH = 20;          // real metres between mesh vertices
 
-const P = 4;   // smooth-max exponent: higher is closer to a hard max
+/**
+ * @param relief { x0, n0, dx, dn, cols, rows, data } real metres
+ * @param opts   { scale, base } base: real height that becomes y = 0
+ */
+export function createTerrain(relief, { scale = 1, base = 0 } = {}) {
+  const step = Math.round(MESH / relief.dx);
+  const cols = Math.floor((relief.cols - 1) / step) + 1;
+  const rows = Math.floor((relief.rows - 1) / step) + 1;
+  const cell = MESH * scale;
+  const x0 = relief.x0 * scale, n0 = relief.n0 * scale;
+  const h = new Float32Array(cols * rows);
+  for (let j = 0; j < rows; j++) {
+    for (let i = 0; i < cols; i++) {
+      h[j * cols + i] = (relief.data[j * step * relief.cols + i * step] - base) * scale;
+    }
+  }
+  const x1 = x0 + (cols - 1) * cell, n1 = n0 + (rows - 1) * cell;
+  const pads = [];
 
-export function createTerrain(mountain) {
-  const ring = mountain.ring;
-  const bbox = ringBBox(ring);
-  const fade = mountain.fade || 80;
-  const summits = mountain.summits;
-  const carve = new Grid(24);
-  const cuts = [];      // { ax, an, ay, bx, bn, by, half, blend }
-  const flats = [];     // { x, n, r, h, blend }
+  function at(i, j) {
+    i = i < 0 ? 0 : i >= cols ? cols - 1 : i;
+    j = j < 0 ? 0 : j >= rows ? rows - 1 : j;
+    return h[j * cols + i];
+  }
+
+  /**
+   * Height at (x, n). Each cell is split along the diagonal from its
+   * (i, j) corner to (i + 1, j + 1); the mesh builder uses the same split.
+   */
+  function height(x, n) {
+    let u = (x - x0) / cell, v = (n - n0) / cell;
+    let i = Math.floor(u), j = Math.floor(v);
+    if (i < 0) { i = 0; u = 0; } else if (i >= cols - 1) { i = cols - 2; u = cols - 1; }
+    if (j < 0) { j = 0; v = 0; } else if (j >= rows - 1) { j = rows - 2; v = rows - 1; }
+    const fu = u - i, fv = v - j;
+    const h00 = h[j * cols + i], h11 = h[(j + 1) * cols + i + 1];
+    if (fu >= fv) {
+      const h10 = h[j * cols + i + 1];
+      return h00 + (h10 - h00) * fu + (h11 - h10) * fv;
+    }
+    const h01 = h[(j + 1) * cols + i];
+    return h00 + (h01 - h00) * fv + (h11 - h01) * fu;
+  }
 
   function inside(x, n) {
-    if (x < bbox.x0 || x > bbox.x1 || n < bbox.n0 || n > bbox.n1) return false;
-    return pointInRing(x, n, ring);
+    return x >= x0 && x <= x1 && n >= n0 && n <= n1;
   }
 
-  /** Natural relief, before any road or terrace is cut into it. */
-  function base(x, n) {
-    if (!inside(x, n)) return 0;
-    let acc = 0;
-    for (const s of summits) {
-      const dx = x - s.x, dn = n - s.n;
-      const g = Math.exp(-(dx * dx + dn * dn) / (2 * s.r * s.r));
-      acc += Math.pow(s.h * g, P);
-    }
-    let h = Math.pow(acc, 1 / P);
-    // Rock and hollows: two octaves, a few metres, never enough to trap a car.
-    h += noise2(x / 130, n / 130) * 3.2 + noise2(x / 45 + 17, n / 45 - 9) * 1.1;
-    const edge = distToRing(x, n, ring);
-    return Math.max(0, h) * smoothstep(0, fade, edge);
-  }
-
-  /** Relief with roads and terraces cut in. */
-  function height(x, n) {
-    let h = base(x, n);
-    if (!cuts.length && !flats.length) return h;
-    if (!inside(x, n)) return 0;
-    // Terraces (the chalet's lookout, the Oratory's forecourt) first.
-    for (const f of flats) {
-      const d = Math.hypot(x - f.x, n - f.n);
-      if (d < f.r + f.blend) {
-        const w = 1 - smoothstep(f.r, f.r + f.blend, d);
-        h = h + (f.h - h) * w;
-      }
-    }
-    // Then the nearest road, pinned 12 cm under its surface.
-    const near = carve.query(x, n, 0);
-    let bestW = 0, bestH = 0, bestD = Infinity;
-    for (let i = 0; i < near.length; i++) {
-      const c = near[i];
-      const { d2, t } = segDist2(x, n, c.ax, c.an, c.bx, c.bn);
-      const d = Math.sqrt(d2);
-      if (d > c.half + c.blend) continue;
-      const w = 1 - smoothstep(c.half + 0.6, c.half + c.blend, d);
-      // Equal weights (several segments within the road's width): the
-      // nearest one, or a neighbour's clamped end sets the height.
-      if (w > bestW || (w === bestW && d < bestD)) {
-        bestW = w;
-        bestD = d;
-        bestH = c.ay + (c.by - c.ay) * t - 0.12;
-      }
-    }
-    if (bestW > 0) h = h + (bestH - h) * bestW;
-    return h;
-  }
-
-  /** Register a road's profile so the ground is cut to fit it. */
-  function carveRoad(samples, half, blend = 16) {
-    for (let i = 0; i + 1 < samples.length; i++) {
-      const a = samples[i], b = samples[i + 1];
-      if (!inside(a.x, a.n) && !inside(b.x, b.n)) continue;
-      const c = { ax: a.x, an: a.n, ay: a.y, bx: b.x, bn: b.n, by: b.y, half, blend };
-      const r = half + blend;
-      carve.insert(c, Math.min(a.x, b.x) - r, Math.min(a.n, b.n) - r, Math.max(a.x, b.x) + r, Math.max(a.n, b.n) + r);
-      cuts.push(c);
-    }
-  }
-
-  function flatten(x, n, r, h = base(x, n), blend = 25) {
-    flats.push({ x, n, r, h, blend });
-    return h;
-  }
-
-  /** Surface slope in the direction (dx, dn), for sanity checks. */
-  function grade(x, n, dx, dn, step = 2) {
+  /** Slope along (dx, dn), central difference over a metre. */
+  function grade(x, n, dx, dn) {
     const l = Math.hypot(dx, dn) || 1;
-    const ux = (dx / l) * step, un = (dn / l) * step;
-    return (height(x + ux, n + un) - height(x - ux, n - un)) / (2 * step);
+    const ux = dx / l, un = dn / l;
+    return (height(x + ux * 0.5, n + un * 0.5) - height(x - ux * 0.5, n - un * 0.5));
   }
 
-  return { ring, bbox, inside, base, height, carveRoad, flatten, grade };
+  /**
+   * Level a round terrace for something that needs flat ground (a stadium, a
+   * chalet), blended back to the natural slope over `blend` metres. Returns
+   * its height. Must run before the ground mesh is built.
+   */
+  function flatten(x, n, r, blend = 25) {
+    let acc = 0, k = 0;
+    for (let a = 0; a < 8; a++) {
+      acc += height(x + Math.cos(a * 0.785) * r * 0.6, n + Math.sin(a * 0.785) * r * 0.6);
+      k++;
+    }
+    const target = (acc / k + height(x, n)) / 2;
+    const i0 = Math.floor((x - r - blend - x0) / cell), i1 = Math.ceil((x + r + blend - x0) / cell);
+    const j0 = Math.floor((n - r - blend - n0) / cell), j1 = Math.ceil((n + r + blend - n0) / cell);
+    for (let j = Math.max(0, j0); j <= Math.min(rows - 1, j1); j++) {
+      for (let i = Math.max(0, i0); i <= Math.min(cols - 1, i1); i++) {
+        const d = Math.hypot(x0 + i * cell - x, n0 + j * cell - n);
+        const w = d <= r ? 1 : d >= r + blend ? 0 : 1 - (d - r) / blend;
+        const k2 = j * cols + i;
+        h[k2] = h[k2] * (1 - w) + target * w;
+      }
+    }
+    pads.push({ x, n, r, h: target });
+    return target;
+  }
+
+  return {
+    height, inside, grade, flatten, at, pads,
+    grid: { x0, n0, cell, cols, rows, h },
+    bbox: { x0, n0, x1, n1 },
+    scale,
+  };
 }

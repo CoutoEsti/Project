@@ -28,14 +28,15 @@ export function buildBuildings(THREE, buildings, M) {
   };
 
   buildings.forEach((bld, k) => {
-    const Z = zone(bld.district || 'autres');
+    const Z = zone(bld.tile || bld.district || 'autres');
     let ring = bld.ring.map((p) => [p[0], p[1]]);
     if (area(ring) < 0) ring = ring.reverse();
-    const base = bld.base || 0;
-    const top = base + bld.h;
+    const base = (bld.base || 0) + (bld.minH || 0);
+    const top = (bld.base || 0) + bld.h;
+    if (top - base < 0.5) return;
     const floorH = bld.floorH || 3.3;
     const fIndex = Math.max(0, FACADES.indexOf(bld.facade));
-    const bay = BAY[bld.facade] || 3;
+    const bay = (BAY[bld.facade] || 3) * (bld.scale || 1);
     const seed = hash01(k, 71, 3) * 100;
 
     // Walls.
@@ -65,6 +66,8 @@ export function buildBuildings(THREE, buildings, M) {
       const m = meshOf(THREE, b, mat, `${name}_${id}`);
       if (!m) return;
       m.userData.zone = id;
+      m.userData.tile = id;
+      m.userData.layer = 'batiments';
       Object.assign(m.userData, extra || {});
       m.castShadow = false;
       m.receiveShadow = true;

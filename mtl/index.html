@@ -44,6 +44,26 @@
 <div id="modes" role="group" aria-label="Mode">
   <button data-mode="drive" class="on">Conduire</button>
   <button data-mode="fly">Vol libre</button>
+  <button id="settings-open" aria-label="Réglages de la carte">Carte…</button>
+</div>
+
+<div id="settings" hidden>
+  <form id="settings-form">
+    <h2>La carte</h2>
+    <label>Zone
+      <select id="set-zone"></select>
+    </label>
+    <p class="hint" id="set-zone-desc"></p>
+    <label>Échelle
+      <select id="set-echelle"></select>
+    </label>
+    <p class="hint">100 % : la vraie ville. En dessous, tout rapetisse d’autant — rues, bâtiments, relief — sauf la voiture.</p>
+    <div class="row">
+      <button type="submit">Reconstruire</button>
+      <button type="button" id="settings-close">Fermer</button>
+    </div>
+    <p class="hint">Pour changer la valeur de départ : <code>mtl/carte.json</code>.</p>
+  </form>
 </div>
 
 <div id="bigmap" hidden>

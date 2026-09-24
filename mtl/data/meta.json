@@ -1,0 +1,19 @@
+{
+ "nom": "Montréal",
+ "source": "Overture Maps 2026-09-23.0 (OpenStreetMap) et tuiles terrarium (AWS Open Data)",
+ "licence": "ODbL — © les contributeurs d’OpenStreetMap ; relief : Mapzen/Tilezen, données publiques",
+ "genere": "2026-09-24",
+ "repere": {
+  "lat": 45.5009,
+  "lon": -73.5733,
+  "est": 30.4,
+  "kx": 78023.97209502965,
+  "ky": 110574
+ },
+ "region": {
+  "x0": -5000.0,
+  "x1": 7200.0,
+  "n0": -4200.0,
+  "n1": 7200.0
+ }
+}

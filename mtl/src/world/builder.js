@@ -5,55 +5,85 @@
 // its direction a → b.
 
 export class GeoBuilder {
-  /** @param extra { name: itemSize } custom per-vertex attributes */
+  /** @param extra { name: itemSize } custom per-vertex attributes, 3 components at most in all */
   constructor(extra = {}) {
-    this.pos = [];
-    this.nor = [];
-    this.uv = [];
-    this.idx = [];
-    this.extra = {};
-    for (const [k, size] of Object.entries(extra)) this.extra[k] = { size, data: [] };
+    this.cap = 256;
+    this.pos = new Float32Array(this.cap * 3);
+    this.nor = new Float32Array(this.cap * 3);
+    this.uv = new Float32Array(this.cap * 2);
+    this.idx = new Uint32Array(this.cap * 3);
+    this.nIdx = 0;
+    this.extraSpec = Object.entries(extra).map(([name, size]) => ({ name, size }));
+    this.exSize = this.extraSpec.reduce((a, e) => a + e.size, 0);
+    this.ex = new Float32Array(this.cap * Math.max(1, this.exSize));
     this.count = 0;
   }
 
-  /** Add a vertex; normal given in the map frame. Returns its index. */
-  v(x, n, y, nx, nn, ny, u, w, ...ex) {
-    this.pos.push(x, y, -n);
-    this.nor.push(nx, ny, -nn);
-    this.uv.push(u, w);
-    let k = 0;
-    for (const a of Object.values(this.extra)) {
-      for (let c = 0; c < a.size; c++) a.data.push(ex[k++] ?? 0);
+  _grow() {
+    this.cap *= 2;
+    const g = (a, k) => { const b = new Float32Array(this.cap * k); b.set(a); return b; };
+    this.pos = g(this.pos, 3);
+    this.nor = g(this.nor, 3);
+    this.uv = g(this.uv, 2);
+    this.ex = g(this.ex, Math.max(1, this.exSize));
+  }
+
+  /**
+   * Add a vertex; normal given in the map frame; up to three extra
+   * components (the custom attributes, in declaration order). Returns its index.
+   */
+  v(x, n, y, nx, nn, ny, u, w, e0 = 0, e1 = 0, e2 = 0) {
+    if (this.count >= this.cap) this._grow();
+    const i = this.count;
+    const p = i * 3, q = i * 2;
+    this.pos[p] = x; this.pos[p + 1] = y; this.pos[p + 2] = -n;
+    this.nor[p] = nx; this.nor[p + 1] = ny; this.nor[p + 2] = -nn;
+    this.uv[q] = u; this.uv[q + 1] = w;
+    const k = this.exSize;
+    if (k) {
+      const o = i * k;
+      this.ex[o] = e0;
+      if (k > 1) this.ex[o + 1] = e1;
+      if (k > 2) this.ex[o + 2] = e2;
     }
     return this.count++;
   }
 
-  tri(a, b, c) { this.idx.push(a, b, c); }
-  quad(a, b, c, d) { this.idx.push(a, b, c, a, c, d); }
+  _idx(a, b, c) {
+    if (this.nIdx + 3 > this.idx.length) {
+      const bigger = new Uint32Array(this.idx.length * 2);
+      bigger.set(this.idx);
+      this.idx = bigger;
+    }
+    this.idx[this.nIdx++] = a; this.idx[this.nIdx++] = b; this.idx[this.nIdx++] = c;
+  }
+
+  tri(a, b, c) { this._idx(a, b, c); }
+  quad(a, b, c, d) { this._idx(a, b, c); this._idx(a, c, d); }
 
   /**
    * A vertical quad from a to b, y0..y1 at a and b (they may differ), facing
    * the right of a → b. UVs in metres along and up unless `uvFn` is given.
    */
-  wall(ax, an, bx, bn, a0, a1, b0, b1, u0 = 0, ex = [], flip = false) {
+  wall(ax, an, bx, bn, a0, a1, b0, b1, u0 = 0, ex = NONE, flip = false) {
     let dx = bx - ax, dn = bn - an;
     const len = Math.hypot(dx, dn) || 1;
     dx /= len; dn /= len;
     let nx = dn, nn = -dx;                 // right of the direction
     if (flip) { nx = -nx; nn = -nn; }
-    const i0 = this.v(ax, an, a0, nx, nn, 0, u0, a0, ...ex);
-    const i1 = this.v(bx, bn, b0, nx, nn, 0, u0 + len, b0, ...ex);
-    const i2 = this.v(bx, bn, b1, nx, nn, 0, u0 + len, b1, ...ex);
-    const i3 = this.v(ax, an, a1, nx, nn, 0, u0, a1, ...ex);
+    const i0 = this.v(ax, an, a0, nx, nn, 0, u0, a0, ex[0], ex[1], ex[2]);
+    const i1 = this.v(bx, bn, b0, nx, nn, 0, u0 + len, b0, ex[0], ex[1], ex[2]);
+    const i2 = this.v(bx, bn, b1, nx, nn, 0, u0 + len, b1, ex[0], ex[1], ex[2]);
+    const i3 = this.v(ax, an, a1, nx, nn, 0, u0, a1, ex[0], ex[1], ex[2]);
     if (flip) this.quad(i1, i0, i3, i2); else this.quad(i0, i1, i2, i3);
     return len;
   }
 
   /** Horizontal polygon (triangulated elsewhere) — faces up unless `down`. */
-  flat(points, tris, y, down = false, uvScale = 1, ex = []) {
+  flat(points, tris, y, down = false, uvScale = 1, ex = NONE) {
     const base = this.count;
     const ny = down ? -1 : 1;
-    for (const [x, n, yy] of points) this.v(x, n, yy ?? y, 0, 0, ny, x * uvScale, n * uvScale, ...ex);
+    for (const [x, n, yy] of points) this.v(x, n, yy ?? y, 0, 0, ny, x * uvScale, n * uvScale, ex[0], ex[1], ex[2]);
     for (let i = 0; i < tris.length; i += 3) {
       if (down) this.tri(base + tris[i], base + tris[i + 2], base + tris[i + 1]);
       else this.tri(base + tris[i], base + tris[i + 1], base + tris[i + 2]);
@@ -61,7 +91,7 @@ export class GeoBuilder {
   }
 
   /** An axis-free box: centre, half extents along (ux,un), (vx,vn) and y. */
-  box(cx, cn, y0, y1, ux, un, hu, hv, ex = []) {
+  box(cx, cn, y0, y1, ux, un, hu, hv, ex = NONE) {
     const vx = -un, vn = ux;
     const c = [
       [cx - ux * hu - vx * hv, cn - un * hu - vn * hv],
@@ -81,21 +111,30 @@ export class GeoBuilder {
     this.flat(bot, [0, 1, 2, 0, 2, 3], y0, true, 1, ex);
   }
 
-  get empty() { return this.idx.length === 0; }
+  get empty() { return this.nIdx === 0; }
 
   toGeometry(THREE) {
     const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
-    g.setAttribute('normal', new THREE.Float32BufferAttribute(this.nor, 3));
-    g.setAttribute('uv', new THREE.Float32BufferAttribute(this.uv, 2));
-    for (const [k, a] of Object.entries(this.extra)) g.setAttribute(k, new THREE.Float32BufferAttribute(a.data, a.size));
-    const Index = this.count > 65535 ? Uint32Array : Uint16Array;
-    g.setIndex(new THREE.BufferAttribute(new Index(this.idx), 1));
+    const n = this.count;
+    g.setAttribute('position', new THREE.BufferAttribute(this.pos.slice(0, n * 3), 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(this.nor.slice(0, n * 3), 3));
+    g.setAttribute('uv', new THREE.BufferAttribute(this.uv.slice(0, n * 2), 2));
+    let off = 0;
+    for (const { name, size } of this.extraSpec) {
+      const a = new Float32Array(n * size);
+      for (let i = 0; i < n; i++) for (let c = 0; c < size; c++) a[i * size + c] = this.ex[i * this.exSize + off + c];
+      g.setAttribute(name, new THREE.BufferAttribute(a, size));
+      off += size;
+    }
+    const Index = n > 65535 ? Uint32Array : Uint16Array;
+    g.setIndex(new THREE.BufferAttribute(Index.from(this.idx.subarray(0, this.nIdx)), 1));
     g.computeBoundingSphere();
     g.computeBoundingBox();
     return g;
   }
 }
+
+const NONE = [0, 0, 0];
 
 /**
  * Triangulate a polygon with holes in the map frame. Returns flat points and

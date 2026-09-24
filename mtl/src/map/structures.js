@@ -44,7 +44,6 @@ export function buildStructures(layout) {
   for (const r of roads) annotate(r, ground);
   for (const r of roads) roadStructures(r, index, ground, layout, out);
   covers(roads, out);
-  streetBridges(layout, out);
   quays(layout, index, out);
   out.index = index;
   out.ground = ground;
@@ -86,7 +85,7 @@ function classify(r, p, side, index, ground) {
       return { kind: 'over', to: lower.y };
     }
     if (higher) return { kind: 'under' };
-    return { kind: 'void', to: DEEP };
+    return { kind: 'void', to: p.y + DEEP };
   }
   const g = ground.heightAt(qx, qn, gk);
   const rel = p.y - g;
@@ -99,11 +98,6 @@ function classify(r, p, side, index, ground) {
   if (rel < -0.3) {
     if (higher && higher.y - p.y < 3) return { kind: 'under' };
     return { kind: 'sunken', g };
-  }
-  // At grade. Mountain roads watch for a drop just past the shoulder.
-  if (r.follow === 'terrain' && gk === 'terrain') {
-    const fx = p.x + side * p.lx * (r.half + 5), fn = p.n + side * p.ln * (r.half + 5);
-    if (ground.heightAt(fx, fn) < p.y - 2.2) return { kind: 'drop', g };
   }
   return { kind: 'grade', g };
 }
@@ -182,7 +176,7 @@ function roadStructures(r, index, ground, layout, out) {
       if (p.carry !== 'deck') continue;
       if (custom && p.gk === 'water') continue;   // the truss spans the river
       next = p.s + rules.pillar;
-      const y0 = p.gk === 'water' ? map.levels.water - 4 : p.g - 0.5;
+      const y0 = p.gk === 'water' ? p.g - 4 : p.g - 0.5;
       const w = rules.column;
       const wide = r.width >= 16;
       const pillar = {
@@ -204,10 +198,14 @@ function roadStructures(r, index, ground, layout, out) {
   // Lighting.
   lampsFor(r, out);
 
-  // Closed ends.
+  // Where the zone cuts a road, a barrier says so.
   if (r.closedEnd) {
     const p = S[Math.max(0, S.length - 5)];
-    out.closures.push({ x: p.x, n: p.n, y: p.y, tx: p.tx, tn: p.tn, lx: p.lx, ln: p.ln, width: r.width, text: r.closure || 'Fermé' });
+    out.closures.push({ x: p.x, n: p.n, y: p.y, tx: p.tx, tn: p.tn, lx: p.lx, ln: p.ln, width: r.width, text: r.closure || 'Fin de la zone' });
+  }
+  if (r.closedStart) {
+    const p = S[Math.min(S.length - 1, 4)];
+    out.closures.push({ x: p.x, n: p.n, y: p.y, tx: -p.tx, tn: -p.tn, lx: -p.lx, ln: -p.ln, width: r.width, text: r.closure || 'Fin de la zone' });
   }
 }
 
@@ -219,14 +217,14 @@ export function pillarColumns(p) {
 }
 
 function ceilingY(p) {
-  return Math.min(-1.2, p.y + 6.4);
+  return Math.min((p.gs ?? 0) - 1.2, p.y + 6.4);
 }
 
 /** Lamp posts: masts in the median, poles on ramps, lanterns on bridges. */
 function lampsFor(r, out) {
   const S = r.samples;
   const add = (p, kind, side = 0, off = 0) => {
-    out.lamps.push({ x: p.x + side * p.lx * off, n: p.n + side * p.ln * off, y: p.y, kind,
+    out.lamps.push({ x: p.x + side * p.lx * off, n: p.n + side * p.ln * off, y: p.y, gs: p.gs, kind,
       tx: p.tx, tn: p.tn, lx: p.lx * (side || 1), ln: p.ln * (side || 1), road: r.id });
   };
   const every = (step, fn) => {
@@ -266,79 +264,55 @@ function covers(roads, out) {
       for (const [ic, io] of [[i0, i0 - 1], [i1, i1 + 1]]) {
         if (io < 0 || io >= S.length) continue;
         const p = S[ic], o = S[io];
-        if (o.y > -0.3) continue;              // the road came up to street level
+        if (o.y - o.gs > -0.3) continue;       // the road came up to street level
         const w = r.half + WALL_OFFSET + 0.6;
         const a = [p.x + p.lx * w, p.n + p.ln * w], b = [p.x - p.lx * w, p.n - p.ln * w];
-        out.fascias.push({ a, b, y0: ceilingY(p), y1: 0.05, face: io > ic ? 1 : -1, tx: p.tx, tn: p.tn });
-        out.fences.push({ height: 1.3, pts: [[a[0], a[1], 0.05], [b[0], b[1], 0.05]] });
+        out.fascias.push({ a, b, y0: ceilingY(p), y1: p.gs + 0.05, face: io > ic ? 1 : -1, tx: p.tx, tn: p.tn });
+        out.fences.push({ height: 1.3, pts: [[a[0], a[1], p.gs + 0.05], [b[0], b[1], p.gs + 0.05]] });
       }
     });
   }
 }
 
-/** Streets that cross the canal get a deck and parapets over the water. */
-function streetBridges(layout, out) {
-  for (const st of layout.streets) {
-    if (st.cls === 'apron') continue;
-    const wet = G.pc.intersection(st.corridor, layout.water);
-    if (!wet.length) continue;
-    for (const poly of wet) {
-      if (G.polygonArea(poly) < 20) continue;
-      out.decks.push({ poly: poly.map(G.openRing), y: 0, depth: 1.4, street: st.name });
-    }
-    for (const side of [1, -1]) {
-      for (let i = 0; i + 1 < st.path.length; i++) {
-        const a = st.path[i], b = st.path[i + 1];
-        const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
-        const lx = -(b[1] - a[1]) / len, ln = (b[0] - a[0]) / len;
-        const pts = [];
-        const flush = () => { if (pts.length >= 2) out.barriers.push({ kind: 'parapet', pts: pts.splice(0) }); else pts.length = 0; };
-        for (let d = 0; d <= len; d += 2) {
-          const x = a[0] + ((b[0] - a[0]) * d) / len + side * lx * (st.half - 0.3);
-          const n = a[1] + ((b[1] - a[1]) * d) / len + side * ln * (st.half - 0.3);
-          if (G.pointInMulti(x, n, layout.water) || G.pointInMulti(x + (b[0] - a[0]) / len * 2, n + (b[1] - a[1]) / len * 2, layout.water)) pts.push([x, n, 0]);
-          else flush();
-        }
-        flush();
-      }
-    }
-  }
-}
-
 /**
- * Quays: a wall down to the water along every shore, and a railing on top —
- * except where a bridge or a street leaves the land.
+ * Shores: a wall from the ground down under the water along every body of
+ * water, and a railing on top where the drop is worth one — except where a
+ * bridge or a street leaves the land, and along the zone's own edge.
  */
 function quays(layout, index, out) {
-  const W = layout.map.world;
+  const W = layout.map.world, T = layout.terrain;
   const onEdge = (x, n) => Math.abs(x - W.x0) < 1 || Math.abs(x - W.x1) < 1 || Math.abs(n - W.n0) < 1 || Math.abs(n - W.n1) < 1;
   const tmp = [];
-  for (const poly of layout.land) {
-    for (const ring of poly) {
-      const R = G.openRing(ring);
-      let wall = [], rail = [];
-      const flushWall = () => { if (wall.length >= 2) out.walls.push({ kind: 'quay', thickness: 1.0, pts: wall }); wall = []; };
-      const flushRail = () => { if (rail.length >= 2) out.fences.push({ height: 1.1, kind: 'rail', pts: rail }); rail = []; };
-      for (let i = 0; i < R.length; i++) {
-        const a = R[i], b = R[(i + 1) % R.length];
-        if (onEdge(a[0], a[1]) && onEdge(b[0], b[1])) { flushWall(); flushRail(); continue; }
-        const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
-        const steps = Math.max(1, Math.ceil(len / 3));
-        // Outward normal: the side that is water.
-        let nx = (b[1] - a[1]) / len, nn = -(b[0] - a[0]) / len;
-        const mx = (a[0] + b[0]) / 2, mn = (a[1] + b[1]) / 2;
-        if (!G.pointInMulti(mx + nx * 2, mn + nn * 2, layout.water)) { nx = -nx; nn = -nn; }
-        for (let k = 0; k <= steps; k++) {
-          if (k === steps && i + 1 < R.length) continue;
-          const x = a[0] + ((b[0] - a[0]) * k) / steps, n = a[1] + ((b[1] - a[1]) * k) / steps;
-          wall.push([x - nx * 0.5, n - nn * 0.5, layout.map.levels.water - 2.5, 0.05]);
-          const bridged = index.surfacesAt(x - nx * 1.2, n - nn * 1.2, 1.5).length > 0
-            || layout.streetsAt(x - nx * 1.2, n - nn * 1.2, 0.5, tmp).length > 0;
-          if (bridged) flushRail(); else rail.push([x - nx * 0.9, n - nn * 0.9, 0.05]);
+  for (const body of layout.waterBodies) {
+    for (const poly of body.poly) {
+      for (const ring of poly) {
+        const R = G.openRing(ring);
+        let wall = [], rail = [];
+        const flushWall = () => { if (wall.length >= 2) out.walls.push({ kind: 'quay', thickness: 1.0, pts: wall }); wall = []; };
+        const flushRail = () => { if (rail.length >= 2) out.fences.push({ height: 1.1, kind: 'rail', pts: rail }); rail = []; };
+        for (let i = 0; i < R.length; i++) {
+          const a = R[i], b = R[(i + 1) % R.length];
+          if (onEdge(a[0], a[1]) && onEdge(b[0], b[1])) { flushWall(); flushRail(); continue; }
+          const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+          if (len < 0.01) continue;
+          const steps = Math.max(1, Math.ceil(len / 4));
+          // Outward normal of the water: the side that is land.
+          let nx = (b[1] - a[1]) / len, nn = -(b[0] - a[0]) / len;
+          const mx = (a[0] + b[0]) / 2, mn = (a[1] + b[1]) / 2;
+          if (layout.waterAt(mx + nx * 1.5, mn + nn * 1.5)) { nx = -nx; nn = -nn; }
+          for (let k = 0; k <= steps; k++) {
+            if (k === steps && i + 1 < R.length) continue;
+            const x = a[0] + ((b[0] - a[0]) * k) / steps, n = a[1] + ((b[1] - a[1]) * k) / steps;
+            const top = T.height(x + nx * 0.6, n + nn * 0.6);
+            wall.push([x + nx * 0.5, n + nn * 0.5, body.level - 2.5, top + 0.05]);
+            const bridged = index.surfacesAt(x + nx * 1.2, n + nn * 1.2, 1.5).length > 0
+              || layout.streetsAt(x + nx * 1.2, n + nn * 1.2, 0.5, tmp).length > 0;
+            if (bridged || top - body.level < 1.2) flushRail(); else rail.push([x + nx * 0.9, n + nn * 0.9, top + 0.05]);
+          }
         }
+        flushWall();
+        flushRail();
       }
-      flushWall();
-      flushRail();
     }
   }
 }

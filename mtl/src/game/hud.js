@@ -27,6 +27,7 @@ export class Hud {
     this.el = el;
     this.W = layout.map.world;
     this.picture = renderMap(layout, SCALE);
+    this.scale = this.picture.scale;
     this.zone = null;
     this.zoneTimer = 0;
     this.roadKey = '';
@@ -104,8 +105,8 @@ export class Hud {
     c.fillRect(0, 0, S, S);
     c.translate(r, r);
     c.rotate(-info.heading);
-    c.scale(k / SCALE, k / SCALE);
-    c.drawImage(this.picture, -(info.x - this.W.x0) * SCALE, -(this.W.n1 - info.n) * SCALE);
+    c.scale(k / this.scale, k / this.scale);
+    c.drawImage(this.picture, -(info.x - this.W.x0) * this.scale, -(this.W.n1 - info.n) * this.scale);
     c.restore();
     // The car, always pointing up.
     c.save();
@@ -154,20 +155,21 @@ export class Hud {
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.drawImage(this.picture, 0, 0, cv.width, cv.height);
     c.scale(k, k);
-    const P = (x, n) => [(x - this.W.x0) * SCALE, (this.W.n1 - n) * SCALE];
+    const P = (x, n) => [(x - this.W.x0) * this.scale, (this.W.n1 - n) * this.scale];
     const L = this.layout;
-    // District names.
+    // District names, one per name.
     c.textAlign = 'center';
     c.textBaseline = 'middle';
     c.font = `600 ${11 / k}px system-ui, sans-serif`;
-    for (const d of L.districts) {
-      if (!d.ring) continue;
-      const [cx, cn] = centroid(d.ring);
-      const [px, py] = P(cx, cn);
+    const said = new Set();
+    for (const d of L.quartiers || []) {
+      if (said.has(d.nom) || d.type === 'macrohood') continue;
+      said.add(d.nom);
+      const [px, py] = P(d.x, d.n);
       c.fillStyle = 'rgba(0,0,0,0.55)';
-      c.fillText(d.name.toUpperCase(), px + 1 / k, py + 1 / k);
+      c.fillText(d.nom.toUpperCase(), px + 1 / k, py + 1 / k);
       c.fillStyle = 'rgba(214,222,235,0.78)';
-      c.fillText(d.name.toUpperCase(), px, py);
+      c.fillText(d.nom.toUpperCase(), px, py);
     }
     // Spawn points: where a click lands you is the nearest road, but these
     // are the places worth knowing.
@@ -213,14 +215,18 @@ export class Hud {
 }
 
 /**
- * The whole map as one picture, north up, SCALE pixels a metre. Drawn once;
- * the minimap and the big map only ever copy from it.
+ * The whole map as one picture, north up, `scale` pixels a metre. Drawn once;
+ * the minimap and the big map only ever copy from it. The scale shrinks for a
+ * big zone so the picture stays a few million pixels.
  */
 export function renderMap(layout, scale = SCALE) {
   const W = layout.map.world;
+  const maxPx = 4200;
+  scale = Math.min(scale, maxPx / Math.max(W.x1 - W.x0, W.n1 - W.n0));
   const cv = document.createElement('canvas');
   cv.width = Math.ceil((W.x1 - W.x0) * scale);
   cv.height = Math.ceil((W.n1 - W.n0) * scale);
+  cv.scale = scale;
   const c = cv.getContext('2d');
   const P = (x, n) => [(x - W.x0) * scale, (W.n1 - n) * scale];
   const polyPath = (poly) => {
@@ -239,20 +245,31 @@ export function renderMap(layout, scale = SCALE) {
     c.fill('evenodd');
   };
 
-  c.fillStyle = COLORS.water;
+  c.fillStyle = COLORS.block;
   c.fillRect(0, 0, cv.width, cv.height);
-  fillMulti(layout.land, COLORS.land);
-  fillMulti(layout.mountain, COLORS.mountain);
+  const green = { parc: COLORS.park, gazon: COLORS.park, terrain: COLORS.park, golf: COLORS.park, cimetiere: COLORS.park, foret: COLORS.mountain };
+  for (const g of layout.greens) fillMulti(g.poly, green[g.kind] || COLORS.park);
+  for (const g of layout.grounds) if (g.kind === 'place') fillMulti(g.poly, COLORS.plaza);
+  fillMulti(layout.water, COLORS.water);
   if (layout.holes.length) fillMulti(layout.holes, COLORS.hole);
-  for (const b of layout.blocks) {
-    const color = b.style === 'park' || b.park ? COLORS.park : b.style === 'plaza' ? COLORS.plaza : COLORS.block;
-    c.fillStyle = color;
+
+  // Streets, widest last so boulevards read over the grid.
+  c.lineCap = 'round';
+  c.lineJoin = 'round';
+  const order = { alley: 0, narrow: 1, plaza: 1, street: 2, avenue: 3, boulevard: 4 };
+  const streets = layout.streets.slice().sort((a, b) => (order[a.cls] ?? 2) - (order[b.cls] ?? 2));
+  for (const st of streets) {
+    c.strokeStyle = st.cls === 'alley' ? '#3a3f47' : COLORS.land;
+    c.lineWidth = Math.max(st.cls === 'alley' ? 0.6 : 1, st.width * scale);
     c.beginPath();
-    polyPath(b.poly);
-    c.fill('evenodd');
+    st.path.forEach(([x, n], i) => {
+      const [px, py] = P(x, n);
+      if (i) c.lineTo(px, py); else c.moveTo(px, py);
+    });
+    c.stroke();
   }
 
-  // Roads, lowest first, so the viaduct draws over the service roads and the
+  // Roads, lowest first, so a viaduct draws over what it crosses and a
   // tunnel under the streets.
   const runs = [];
   for (const r of layout.roads) {
@@ -265,12 +282,11 @@ export function renderMap(layout, scale = SCALE) {
         runs.push(cur);
       }
       cur.pts.push(p);
-      cur.y += p.y;
+      cur.y += p.y - p.gs;
     }
   }
   for (const run of runs) run.y /= run.pts.length || 1;
   runs.sort((a, b) => (b.key === 'tunnel') - (a.key === 'tunnel') || a.y - b.y);
-  c.lineJoin = 'round';
   c.lineCap = 'butt';
   for (const run of runs) {
     const r = run.road;
@@ -289,7 +305,6 @@ export function renderMap(layout, scale = SCALE) {
       continue;
     }
     if (run.y > 2) {
-      // Elevated: a dark casing so it reads as passing over.
       c.strokeStyle = 'rgba(0,0,0,0.65)';
       c.lineWidth = width + 3;
       c.stroke();
@@ -304,7 +319,7 @@ export function renderMap(layout, scale = SCALE) {
   for (const l of layout.map.landmarks) {
     const [px, py] = P(l.x, l.n);
     c.beginPath();
-    c.arc(px, py, 2.4, 0, Math.PI * 2);
+    c.arc(px, py, 3, 0, Math.PI * 2);
     c.fill();
   }
   return cv;

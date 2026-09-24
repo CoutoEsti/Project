@@ -15,7 +15,7 @@
 import { Vehicle } from './vehicle.js';
 import { resolveCollisions } from '../map/collide.js';
 import { stretchAt, projectOnRoad } from '../map/layout.js';
-import { pointInRing, segDist2 } from '../map/geom.js';
+import { segDist2 } from '../map/geom.js';
 
 const G = 9.81;
 const CLIMB = 0.6;          // highest step the wheels can climb onto
@@ -23,7 +23,7 @@ const KERB = 0.25;          // a step down the suspension swallows without a hop
 const GRIP_DELAY = 0.08;    // seconds in the air before the tyres let go
 const PROBE = 1.6;          // slope probes, metres ahead of and behind the centre
 const LIFT = 1.05;          // a crest lifts the car past this many g
-const FLOOR = -30;          // below this the car is lost
+const FLOOR = -80;          // below this the car is lost (the river is at 0)
 
 export class Driver {
   /**
@@ -253,13 +253,18 @@ export class Driver {
   zone() { return zoneAt(this.layout, this.x, this.n); }
 }
 
-/** The district's name at a point, or the mountain's. */
+/**
+ * The neighbourhood's name at a point: the nearest named place, a
+ * neighbourhood winning over the borough around it when both are close.
+ */
 export function zoneAt(L, x, n) {
-  if (L.terrain.inside(x, n)) return L.map.mountain.name;
-  for (const d of L.districts) {
-    if (d.ring && pointInRing(x, n, d.ring)) return d.name;
+  let best = null, bd = Infinity;
+  for (const q of L.quartiers || []) {
+    const w = q.type === 'macrohood' || q.type === 'locality' ? 1.6 : 1;
+    const d = Math.hypot(q.x - x, q.n - n) * w;
+    if (d < bd) { bd = d; best = q; }
   }
-  return null;
+  return best ? best.nom : null;
 }
 
 /**

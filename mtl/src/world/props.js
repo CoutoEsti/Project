@@ -22,7 +22,7 @@ const LIGHT = {
   tunnel: { material: 'Lamp_Tunnel', pool: 0x9a7f58 },
 };
 
-export function buildLamps(THREE, lamps, M) {
+export function buildLamps(THREE, lamps, M, tile = null) {
   const out = [];
   const poles = { arm: [], post: [], mast: [] };
   const heads = { sodium: [], warm: [], white: [], tunnel: [] };
@@ -38,7 +38,7 @@ export function buildLamps(THREE, lamps, M) {
     if (K.pole !== 'none') poles[K.pole].push({ x: l.x, n: l.n, y: l.y, yaw, s: 1 });
     for (const side of heads2) {
       let hx = l.x + ax * K.arm * side, hn = l.n + an * K.arm * side, hy = l.y + K.h;
-      if (l.kind === 'tunnel') { hx = l.x; hn = l.n; hy = ceilingY({ y: l.y }) - 0.12; }
+      if (l.kind === 'tunnel') { hx = l.x; hn = l.n; hy = ceilingY({ y: l.y, gs: l.gs }) - 0.12; }
       heads[K.light].push({ x: hx, n: hn, y: hy, yaw });
       const reach = l.kind === 'mast' ? 8 : l.kind === 'tunnel' ? 0 : K.arm * 1.4;
       pools.push({ x: l.x + ax * reach * side, n: l.n + an * reach * side, y: l.y + 0.05, r: K.pool, c: LIGHT[K.light].pool });
@@ -82,9 +82,10 @@ export function buildLamps(THREE, lamps, M) {
     mesh.userData.zone = 'mobilier';
     mesh.userData.exportSkip = true;     // a lighting trick, not geometry
     mesh.renderOrder = 2;
-    mesh.frustumCulled = false;
+    mesh.computeBoundingSphere();
     out.push(mesh);
   }
+  for (const m of out) { m.userData.tile = tile; m.userData.layer = 'mobilier'; m.userData.detail = true; }
   return out;
 }
 
@@ -153,7 +154,7 @@ function merge(THREE, parts) {
 }
 
 /** Trees: a trunk and a crown, round or conical, each tinted a little. */
-export function buildTrees(THREE, trees, M) {
+export function buildTrees(THREE, trees, M, tile = null) {
   const out = [];
   const leafy = trees.filter((t) => t.kind !== 'conifer');
   const conifer = trees.filter((t) => t.kind === 'conifer');
@@ -187,5 +188,6 @@ export function buildTrees(THREE, trees, M) {
   place(trees, trunk, M.Bark, 'Arbres_troncs');
   place(leafy, crown, M.Leaves, 'Arbres_feuillus', (c, h) => c.setHSL(0.24 + h * 0.08, 0.35 + h * 0.2, 0.78 + h * 0.3));
   place(conifer, cone, M.Leaves_Dark, 'Arbres_coniferes', (c, h) => c.setHSL(0.3, 0.3, 0.8 + h * 0.25));
+  for (const m of out) { m.userData.tile = tile; m.userData.layer = 'arbres'; m.userData.detail = true; }
   return out;
 }

@@ -1,8 +1,10 @@
-// MTL — the map, driven. Builds the city, puts a car in it, and lets you
-// drive it or fly over it.
+// MTL — the map, driven. Loads real Montréal, builds the chosen zone at the
+// chosen scale, puts a car in it, and lets you drive it or fly over it.
 //
-// URL parameters:
-//   ?spawn=<id>           start driving at a spawn point (see montreal.js)
+// Settings come from carte.json, then the address overrides them:
+//   ?zone=centre|anneau  &echelle=100|85|70   (or #centre-85 in the preview)
+// Other parameters:
+//   ?spawn=<id>           start driving at a spawn point (see map/montreal.js)
 //   ?fly=1  or  #vol      start in free flight, over the whole map
 //   ?cam=x,n,h,tx,tn,th   start in free flight, camera and target (map frame)
 //   ?day=1                start by day
@@ -15,7 +17,9 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { buildWorld } from './world/build.js';
 import { createSky } from './world/sky.js';
-import { landmarkFootprints } from './world/landmarks.js';
+import { loadSource, fetchReader } from './map/source.js';
+import { ZONES, ECHELLES, resolveSettings } from './map/zones.js';
+import { resolveSpawn } from './game/spawn.js';
 import { createSurface } from './map/surface.js';
 import { buildSolids } from './map/collide.js';
 import { Driver, zoneAt } from './game/drive.js';
@@ -27,6 +31,14 @@ import { createCar } from './game/car.js';
 import { EngineAudio } from './game/audio.js';
 
 const params = new URLSearchParams(location.search);
+// The preview only passes a bare #anchor: tokens like #centre-85-vol.
+const hashTokens = location.hash.replace(/^#/, '').split(/[-_.~]/).filter(Boolean);
+for (const t of hashTokens) {
+  if (ZONES[t]) params.set('zone', t);
+  else if (/^\d+$/.test(t)) params.set('echelle', t);
+  else if (t === 'vol') params.set('fly', '1');
+  else if (t === 'jour') params.set('day', '1');
+}
 const LOW = params.has('low') || /iPhone|iPad|Android/i.test(navigator.userAgent);
 const STEP = 1 / 120;           // physics rate, independent of the display
 const MAX_STEPS = 8;            // at most this much catch-up per frame
@@ -53,14 +65,24 @@ composer.addPass(new OutputPass());
 // --- the world ---------------------------------------------------------------
 const stepLabel = $('loading-step');
 const nextFrame = () => new Promise((r) => requestAnimationFrame(() => r()));
-const world = await buildWorld(THREE, { onStep: (s) => { stepLabel.textContent = s; }, pause: nextFrame });
+let fileSettings = {};
+try {
+  const r = await fetch('carte.json');
+  if (r.ok) fileSettings = await r.json();
+} catch (e) { /* no file: the defaults */ }
+const settings = resolveSettings(fileSettings, params);
+stepLabel.textContent = 'données';
+const source = await loadSource(fetchReader('data/'));
+const world = await buildWorld(THREE, source, {
+  settings, onStep: (s) => { stepLabel.textContent = s; }, pause: nextFrame,
+});
 scene.add(world.root);
 stepLabel.textContent = 'collisions';
 await nextFrame();
 const { layout, structures } = world;
 const surface = createSurface(layout, structures);
 const solids = buildSolids(layout, structures, world.buildings, {
-  lamps: world.lamps, trees: world.trees, footprints: landmarkFootprints(THREE, world.landmarks),
+  lamps: world.lamps, trees: world.trees, footprints: world.footprints,
 });
 const game = { layout, structures, surface, solids };
 
@@ -122,6 +144,30 @@ for (const b of document.querySelectorAll('[data-mode]')) {
   b.addEventListener('click', () => { setFlying(b.dataset.mode === 'fly'); b.blur(); });
 }
 
+// --- map settings: zone and scale ------------------------------------------------
+{
+  const zoneSel = $('set-zone'), scaleSel = $('set-echelle');
+  for (const [id, z] of Object.entries(ZONES)) zoneSel.add(new Option(z.nom, id));
+  for (const e of ECHELLES) scaleSel.add(new Option(`${e} %`, String(e)));
+  if (!ECHELLES.includes(settings.echelle)) scaleSel.add(new Option(`${settings.echelle} %`, String(settings.echelle)));
+  zoneSel.value = settings.zone;
+  scaleSel.value = String(settings.echelle);
+  const describe = () => { $('set-zone-desc').textContent = ZONES[zoneSel.value].description; };
+  zoneSel.addEventListener('change', describe);
+  describe();
+  $('settings-open').addEventListener('click', (e) => { $('settings').hidden = false; e.currentTarget.blur(); });
+  $('settings-close').addEventListener('click', () => { $('settings').hidden = true; });
+  $('settings-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    // The preview keeps only a bare #anchor; a local server keeps both.
+    const tokens = [zoneSel.value, scaleSel.value];
+    if (flying) tokens.push('vol');
+    if (!night) tokens.push('jour');
+    location.hash = tokens.join('-');
+    location.reload();
+  });
+}
+
 // --- pose: the physics state, interpolated for display -------------------------
 const prev = {}, cur = {}, pose = { x: 0, n: 0, y: 0, heading: 0, pitch: 0, roll: 0, speed: 0, slide: 0 };
 function capture(o) {
@@ -148,9 +194,20 @@ function blend(a) {
 }
 
 function spawnAt(id) {
-  const s = layout.map.spawns.find((p) => p.id === id) || layout.map.spawns[0];
-  driver.place(s.x, s.n, (s.heading * Math.PI) / 180, s.y ?? 0);
+  const list = layout.map.spawns;
+  const order = [list.find((p) => p.id === id), ...list].filter(Boolean);
+  for (const spec of order) {
+    const p = resolveSpawn(layout, spec);
+    if (!p) continue;
+    driver.place(p.x, p.n, p.heading, p.y);
+    settle();
+    return spec.id;
+  }
+  // No named start in this zone: the middle of the map.
+  const W = layout.map.world;
+  driver.teleport((W.x0 + W.x1) / 2, (W.n0 + W.n1) / 2);
   settle();
+  return null;
 }
 spawnAt(params.get('spawn') || 'decarie');
 
@@ -241,6 +298,28 @@ function setNear(v) {
   camera.updateProjectionMatrix();
 }
 
+// Far tiles drop their small things (trees, lamps, paint); the far plane
+// follows the view: a few kilometres from the street, the whole island from
+// the air.
+let detailTimer = 0;
+function updateDetails(dt) {
+  detailTimer -= dt;
+  if (detailTimer > 0) return;
+  detailTimer = 0.25;
+  const s = layout.map.scale;
+  const cx = camera.position.x, cn = -camera.position.z;
+  const alt = Math.max(0, camera.position.y - layout.terrain.height(cx, cn));
+  const reach = (flying ? 700 + alt * 1.5 : 1100) * Math.max(0.7, s);
+  for (const [key, list] of world.details) {
+    const b = world.tiles.bounds(key);
+    const dx = Math.max(b.x0 - cx, 0, cx - b.x1), dn = Math.max(b.n0 - cn, 0, cn - b.n1);
+    const show = Math.hypot(dx, dn) < reach;
+    for (const o of list) o.visible = show;
+  }
+  const far = flying ? 40000 : 7000;
+  if (camera.far !== far) { camera.far = far; camera.updateProjectionMatrix(); }
+}
+
 // --- the loop --------------------------------------------------------------------
 let frames = 0, acc = 0, last = performance.now();
 const clock = new THREE.Clock();
@@ -302,6 +381,8 @@ function frame(now) {
     scene.fog.density = fogBase;
     setNear(0.3);
   }
+
+  updateDetails(dt);
 
   // Sound.
   audio.update({

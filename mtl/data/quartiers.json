@@ -1,0 +1,248 @@
+[
+{
+"nom": "Les Bassins du Nouveau Havre",
+"type": "neighborhood",
+"x": -703,
+"n": -1365
+},
+{
+"nom": "Cité du Havre",
+"type": "neighborhood",
+"x": 509,
+"n": -2438
+},
+{
+"nom": "Côte-des-Neiges",
+"type": "neighborhood",
+"x": -2196,
+"n": 3295
+},
+{
+"nom": "Ville-Marie",
+"type": "macrohood",
+"x": 221,
+"n": -338
+},
+{
+"nom": "Saint-Lambert",
+"type": "locality",
+"x": 2556,
+"n": -4200
+},
+{
+"nom": "Le Triangle",
+"type": "neighborhood",
+"x": -3524,
+"n": 5221
+},
+{
+"nom": "Le Sud-Ouest",
+"type": "macrohood",
+"x": -1258,
+"n": -1490
+},
+{
+"nom": "Westmount",
+"type": "locality",
+"x": -2369,
+"n": 714
+},
+{
+"nom": "Hampstead",
+"type": "locality",
+"x": -4751,
+"n": 3897
+},
+{
+"nom": "Côte-des-Neiges–Notre-Dame-de-Grâce",
+"type": "macrohood",
+"x": -3833,
+"n": 2425
+},
+{
+"nom": "Pointe-Saint-Charles",
+"type": "neighborhood",
+"x": -1647,
+"n": -1828
+},
+{
+"nom": "Saint-Henri",
+"type": "neighborhood",
+"x": -2625,
+"n": -460
+},
+{
+"nom": "Verdun",
+"type": "macrohood",
+"x": -3982,
+"n": -2348
+},
+{
+"nom": "Notre-Dame-de-Grâce",
+"type": "neighborhood",
+"x": -5337,
+"n": 1900
+},
+{
+"nom": "Côte-St-Paul",
+"type": "neighborhood",
+"x": -4688,
+"n": -1469
+},
+{
+"nom": "Ville-Émard",
+"type": "neighborhood",
+"x": -5228,
+"n": -954
+},
+{
+"nom": "Saint-Michel",
+"type": "neighborhood",
+"x": 4564,
+"n": 7037
+},
+{
+"nom": "Rosemont",
+"type": "neighborhood",
+"x": 5706,
+"n": 3304
+},
+{
+"nom": "Maisonneuve",
+"type": "neighborhood",
+"x": 6657,
+"n": 775
+},
+{
+"nom": "Saint-Léonard",
+"type": "macrohood",
+"x": 7250,
+"n": 6393
+},
+{
+"nom": "Hochelaga-Maisonneuve",
+"type": "neighborhood",
+"x": 5848,
+"n": 814
+},
+{
+"nom": "Rosemont–La Petite-Patrie",
+"type": "macrohood",
+"x": 4399,
+"n": 3394
+},
+{
+"nom": "Villeray–Saint-Michel–Parc-Extension",
+"type": "macrohood",
+"x": 1407,
+"n": 5514
+},
+{
+"nom": "La Petite-Patrie",
+"type": "neighborhood",
+"x": 2623,
+"n": 4058
+},
+{
+"nom": "Villeray",
+"type": "neighborhood",
+"x": 1889,
+"n": 5657
+},
+{
+"nom": "Hochelaga",
+"type": "neighborhood",
+"x": 4946,
+"n": 580
+},
+{
+"nom": "Vieux-Longueuil",
+"type": "macrohood",
+"x": 5577,
+"n": -3979
+},
+{
+"nom": "Mile-End",
+"type": "neighborhood",
+"x": 1244,
+"n": 3164
+},
+{
+"nom": "Parc-Extension",
+"type": "neighborhood",
+"x": 462,
+"n": 4994
+},
+{
+"nom": "Village gai",
+"type": "neighborhood",
+"x": 2486,
+"n": -192
+},
+{
+"nom": "Outremont",
+"type": "macrohood",
+"x": 364,
+"n": 3252
+},
+{
+"nom": "Le Plateau-Mont-Royal",
+"type": "macrohood",
+"x": 1646,
+"n": 1769
+},
+{
+"nom": "Vieux Saint-Laurent",
+"type": "neighborhood",
+"x": -2966,
+"n": 7675
+},
+{
+"nom": "Mont-Royal",
+"type": "locality",
+"x": -1524,
+"n": 5516
+},
+{
+"nom": "Ville de Mont-Royal",
+"type": "locality",
+"x": -1524,
+"n": 5516
+},
+{
+"nom": "TOD quartier Berri UQAM",
+"type": "neighborhood",
+"x": 1961,
+"n": -31
+},
+{
+"nom": "Montréal",
+"type": "locality",
+"x": 356,
+"n": -107
+},
+{
+"nom": "Vieux-Montréal",
+"type": "neighborhood",
+"x": 861,
+"n": -929
+},
+{
+"nom": "Glenmount",
+"type": "neighborhood",
+"x": -1718,
+"n": 4743
+},
+{
+"nom": "Quartier des Spectacles",
+"type": "neighborhood",
+"x": 993,
+"n": -140
+},
+{
+"nom": "Quartier Chinois",
+"type": "neighborhood",
+"x": 1189,
+"n": -488
+}
+]

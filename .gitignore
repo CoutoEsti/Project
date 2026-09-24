@@ -3,3 +3,5 @@ hop/.shots/
 hop/data/*.raw.json
 mtl/.shots/
 mtl/export/
+mtl/.cache/
+mtl/tools/__pycache__/

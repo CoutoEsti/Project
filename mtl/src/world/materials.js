@@ -47,6 +47,14 @@ export function createMaterials(THREE, opts = {}) {
   std('Plaza', { color: 0xffffff, roughness: 0.85 }, T.pavers);
   if (!canvasOk) M.Plaza.color.set(0x8a8378);
   std('Terrain', { color: 0xffffff, roughness: 1, vertexColors: true });
+  // Streets lie on the terrain a few centimetres up; the offset settles the
+  // depth test far away, where a few centimetres are below its precision.
+  M.Street_Asphalt = M.Asphalt.clone();
+  M.Street_Asphalt.name = 'Asphalt';
+  Object.assign(M.Street_Asphalt, { polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -3 });
+  M.Street_Sidewalk = M.Sidewalk.clone();
+  M.Street_Sidewalk.name = 'Sidewalk';
+  Object.assign(M.Street_Sidewalk, { polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 });
   const water = std('Water', { color: 0x0b1e2c, roughness: 0.08, metalness: 0.1 });
   if (canvasOk) {
     const n = T.water(THREE);
@@ -197,4 +205,5 @@ function setNight(M, night) {
   if (M.Beacon) M.Beacon.visible = !!night;
   // Streets look wet at night — the NFSU look — and dry by day.
   if (M.Asphalt) M.Asphalt.roughness = night ? 0.42 : 0.82;
+  if (M.Street_Asphalt) M.Street_Asphalt.roughness = night ? 0.42 : 0.82;
 }

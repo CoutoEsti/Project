@@ -13,25 +13,32 @@ const STOP = 3.5;                 // clear distance before a crossing street
 
 export function streetMarkings(layout, structures) {
   const { index, ground } = structures;
+  const T = layout.terrain, s = layout.map.scale;
   const out = [];
   const tmp = [];
+  const STEP = 2;
+  const lift = 0.09;
   for (const st of layout.streets) {
-    const lines = streetLines(st);
+    const lines = streetLines(st, s);
     if (!lines.length) continue;
     for (let i = 0; i + 1 < st.path.length; i++) {
       const a = st.path[i], b = st.path[i + 1];
       const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (len < 0.5) continue;
       const tx = (b[0] - a[0]) / len, tn = (b[1] - a[1]) / len;
       const lx = -tn, ln = tx;
       // Walk the centreline, splitting it into runs that are clear of other
-      // streets, roads and holes.
+      // streets, roads, holes and water.
       const clear = [];
-      for (let d = 0; d <= len; d += 1) {
+      for (let d = 0; d <= len; d += STEP) {
         const x = a[0] + tx * d, n = a[1] + tn * d;
-        let ok = !layout.streetsAt(x, n, STOP, tmp).some((o) => o !== st && o.cls !== 'alley' && o.cls !== 'apron' && o.name !== st.name);
-        if (ok) ok = !layout.streetsAt(x, n, STOP, tmp).some((o) => o !== st && o.name === st.name && o.path !== st.path && crosses(o, st));
-        if (ok) ok = index.surfacesAt(x, n, 1).every((s) => s.covered || s.y < -1.5);
-        if (ok) ok = ground.kindAt(x, n) === 'land';
+        let ok = true;
+        for (const o of layout.streetsAt(x, n, STOP * s, tmp)) {
+          if (o === st || o.cls === 'alley') continue;
+          if (o.name !== st.name || (o.path !== st.path && crosses(o, st))) { ok = false; break; }
+        }
+        if (ok) ok = index.surfacesAt(x, n, 1).every((q) => q.covered || q.y < T.height(x, n) - 1.5);
+        if (ok) ok = ground.kindAt(x, n) === 'terrain';
         clear.push(ok ? d : null);
       }
       let run = [];
@@ -39,9 +46,17 @@ export function streetMarkings(layout, structures) {
         if (run.length >= 2) {
           const d0 = run[0], d1 = run[run.length - 1];
           for (const L of lines) {
-            const p0 = [a[0] + tx * d0 + lx * L.off, a[1] + tn * d0 + ln * L.off, 0.02];
-            const p1 = [a[0] + tx * d1 + lx * L.off, a[1] + tn * d1 + ln * L.off, 0.02];
-            out.push({ pts: [p0, p1], w: L.w || W, color: L.color, dash: L.dash || null });
+            const pts = [];
+            for (let d = d0; d <= d1 + 1e-6; d += 4) {
+              const dd = Math.min(d, d1);
+              const x = a[0] + tx * dd + lx * L.off, n = a[1] + tn * dd + ln * L.off;
+              pts.push([x, n, T.height(x, n) + lift]);
+              if (dd === d1) break;
+            }
+            const last = pts[pts.length - 1];
+            const ex = a[0] + tx * d1 + lx * L.off, en = a[1] + tn * d1 + ln * L.off;
+            if (Math.hypot(last[0] - ex, last[1] - en) > 0.01) pts.push([ex, en, T.height(ex, en) + lift]);
+            out.push({ pts, w: (L.w || W) * Math.max(0.8, s), color: L.color, dash: L.dash ? L.dash.map((v) => v * s) : null, street: st.index });
           }
         }
         run = [];
@@ -63,8 +78,12 @@ function crosses(o, st) {
 }
 
 /** Lateral offsets of a street's lines, by class and width. */
-function streetLines(st) {
-  const w = st.width, h = st.half;
+function streetLines(st, s = 1) {
+  const w = st.width / s, h = st.half / s;
+  return linesFor(st, w, h).map((L) => ({ ...L, off: L.off * s }));
+}
+
+function linesFor(st, w, h) {
   const L = [];
   if (st.oneway || st.cls === 'service') {
     const lanes = Math.max(1, Math.floor(w / 3.5));
@@ -118,6 +137,17 @@ export function roadMarkings(layout) {
 
 function roadLines(r) {
   const h = r.half, L = [];
+  if (r.oneway) {
+    // A carriageway: yellow on the left edge (Québec), white on the right,
+    // dashed white between lanes.
+    const lanes = Math.max(1, r.lanes || 1);
+    const edge = Math.min(0.6, h * 0.12);
+    const lane = (r.width - 2 * edge) / lanes;
+    L.push({ off: h - edge, color: 'yellow' });
+    for (let k = 1; k < lanes; k++) L.push({ off: h - edge - lane * k, color: 'white', dash: DASH });
+    L.push({ off: -(h - edge), color: 'white' });
+    return L;
+  }
   if (r.median) {
     const lane = 3.7, inner = 0.75;
     for (const s of [1, -1]) {

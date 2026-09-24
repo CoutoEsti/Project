@@ -4,7 +4,7 @@
 import { GeoBuilder, meshOf } from './builder.js';
 import { simplifyN } from '../map/geom.js';
 
-export function buildMarkings(THREE, strips, M) {
+export function buildMarkings(THREE, strips, M, tile = null) {
   const white = new GeoBuilder(), yellow = new GeoBuilder();
   for (const s of strips) {
     const b = s.color === 'yellow' ? yellow : white;
@@ -15,7 +15,15 @@ export function buildMarkings(THREE, strips, M) {
   const out = [];
   const w = meshOf(THREE, white, M.Marking_White, 'Marquage_blanc');
   const y = meshOf(THREE, yellow, M.Marking_Yellow, 'Marquage_jaune');
-  for (const m of [w, y]) if (m) { m.userData.zone = 'routes'; m.renderOrder = 1; out.push(m); }
+  for (const m of [w, y]) {
+    if (!m) continue;
+    m.userData.zone = 'routes';
+    m.userData.tile = tile;
+    m.userData.layer = 'marquage';
+    m.userData.detail = true;
+    m.renderOrder = 1;
+    out.push(m);
+  }
   return out;
 }
 

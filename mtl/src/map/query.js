@@ -55,13 +55,13 @@ export function createRoadIndex(roads) {
 }
 
 /**
- * What the ground is at a point: open water, a hole in the land (a trench
- * seen from above), the mountain, or plain street-level land.
+ * What the ground is at a point: open water (with its own level — the river,
+ * the canal above its locks and the lake on the mountain are not at the same
+ * height), a hole in the ground (a trench seen from above), or the relief.
  */
 export function createGround(layout) {
-  const { terrain, map } = layout;
+  const { terrain } = layout;
   const index = (multi) => multi.map((poly) => ({ poly, bb: ringBBox(poly[0]) }));
-  const water = index(layout.water);
   const holes = index(layout.holes);
   const inAny = (list, x, n) => {
     for (const { poly, bb } of list) {
@@ -72,19 +72,17 @@ export function createGround(layout) {
   };
 
   function kindAt(x, n) {
-    if (inAny(water, x, n)) return 'water';
+    if (layout.waterAt(x, n)) return 'water';
     if (inAny(holes, x, n)) return 'hole';
-    if (terrain.inside(x, n)) return 'terrain';
-    return 'land';
+    return 'terrain';
   }
 
   /** Height of the ground itself; a hole has none (the trench floor is a road). */
   function heightAt(x, n, kind = kindAt(x, n)) {
-    if (kind === 'water') return map.levels.water;
+    if (kind === 'water') { const w = layout.waterAt(x, n); return w ? w.level : 0; }
     if (kind === 'hole') return -Infinity;
-    if (kind === 'terrain') return terrain.height(x, n);
-    return 0;
+    return terrain.height(x, n);
   }
 
-  return { kindAt, heightAt, inWater: (x, n) => inAny(water, x, n), inHole: (x, n) => inAny(holes, x, n) };
+  return { kindAt, heightAt, inWater: (x, n) => !!layout.waterAt(x, n), inHole: (x, n) => inAny(holes, x, n) };
 }

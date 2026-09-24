@@ -23,6 +23,7 @@ export function buildLandmarks(THREE, map, layout, M) {
     const y = lm.ground ?? groundAt(layout, lm.x, lm.n);
     g.position.set(lm.x, y, -lm.n);
     g.rotation.y = (-(lm.heading || 0) * Math.PI) / 180;
+    g.scale.setScalar(layout.map.scale || 1);
     g.name = lm.name;
     g.userData.zone = 'reperes';
     g.userData.landmark = lm.id;
@@ -106,7 +107,7 @@ export function landmarkFootprints(THREE, objects) {
 }
 
 function groundAt(layout, x, n) {
-  return layout.terrain.inside(x, n) ? layout.terrain.height(x, n) : 0.15;
+  return layout.terrain.height(x, n);
 }
 
 // ------------------------------------------------------------- helpers --
@@ -714,9 +715,10 @@ function mansardRoof(ctx, w, d, h, mat, y) {
  * with its lighting, and the river piers. Follows the bridge's own samples.
  */
 export function buildJacquesCartier(THREE, layout, M) {
-  const r = layout.roadById['pont-jacques-cartier'];
+  const r = layout.roads.find((o) => o.structure === 'jacques-cartier');
   if (!r) return null;
-  const S = r.samples.filter((p) => p.gk === 'water' || (p.n < -690 && p.n > -1030));
+  // The truss spans the seaway: the stretch over the water.
+  const S = r.samples.filter((p) => p.gk === 'water');
   if (S.length < 2) return null;
   const g = new THREE.Group();
   g.name = 'Pont Jacques-Cartier';
