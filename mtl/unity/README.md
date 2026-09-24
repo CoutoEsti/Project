@@ -7,6 +7,23 @@
    zone : `routes`, `mont-royal`, `reperes`, `arbres`, `mobilier`, puis un par
    quartier pour les bâtiments.
 
+Les `.glb` passent le validateur officiel de Khronos (`gltf-validator`) sans
+erreur ni avertissement. Extensions utilisées, toutes lues par glTFast :
+`EXT_mesh_gpu_instancing` (arbres, lampadaires et autres objets répétés),
+`KHR_materials_unlit` (panneaux et autres surfaces sans éclairage) et `KHR_materials_emissive_strength`
+(lampes et enseignes plus brillantes que le blanc, pour le bloom).
+
+## Ce qui passe dans Unity, et ce qui ne passe pas
+
+- **Passe** : toute la géométrie (routes, tranchées, tunnel, ponts, bâtiments,
+  montagne, repères, mobilier), les matériaux de base et `map.json`.
+- **Ne passe pas** : la conduite, la caméra, le HUD et le son sont en
+  JavaScript. Dans Unity, il faut les refaire en C#, ou partir d'un
+  contrôleur de voiture existant (Asset Store, ou le `WheelCollider` de base). `map.json` donne ce qu'il faut pour rebrancher les
+  courses, les zones et les points de départ.
+- **À refaire à la main** : les matériaux URP/HDRP (voir plus bas), la
+  lumière et le ciel.
+
 ## Repère
 
 - 1 unité = 1 mètre.

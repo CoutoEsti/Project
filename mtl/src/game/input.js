@@ -15,7 +15,7 @@ const KEYS = {
 
 const ACTIONS = {
   KeyR: 'reset', KeyC: 'camera', KeyM: 'map', KeyN: 'night', KeyF: 'fly', KeyE: 'export',
-  KeyH: 'help', Escape: 'close',
+  KeyH: 'help', Escape: 'close', KeyO: 'overview', KeyG: 'drop',
 };
 
 // Standard gamepad mapping: A handbrake, X reset, Y camera, Start map.
@@ -33,6 +33,7 @@ export class Input {
     this.enabled = true;
     this.touch = { throttle: 0, brake: 0, steer: 0, handbrake: false, active: false };
     this.pad = { throttle: 0, brake: 0, steer: 0, handbrake: false, active: false };
+    this.fly = { up: 0 };            // free flight's climb buttons (touch)
     this._padPrev = [];
     this.onGesture = null;          // first user gesture: audio may start
 
@@ -165,6 +166,14 @@ export class Input {
     pedal('#gas', 'throttle');
     pedal('#brake', 'brake');
     pedal('#handbrake', 'handbrake');
+    for (const el of root.querySelectorAll('[data-hold]')) {
+      const key = el.dataset.hold, sign = Number(el.dataset.sign || 1);
+      const on = (v) => (e) => { e.preventDefault(); this.fly[key] = v ? sign : 0; el.classList.toggle('on', v); };
+      el.addEventListener('pointerdown', on(true));
+      el.addEventListener('pointerup', on(false));
+      el.addEventListener('pointerleave', on(false));
+      el.addEventListener('pointercancel', on(false));
+    }
     for (const el of root.querySelectorAll('[data-action]')) {
       el.addEventListener('pointerdown', (e) => {
         e.preventDefault();

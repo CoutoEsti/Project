@@ -219,6 +219,8 @@ drive('Remembrance, descente', 'remembrance', { dir: 1, vmax: 22 });
 drive('Côte-des-Neiges', 'cote-des-neiges', { dir: 1, vmax: 22 });
 drive('pont Jacques-Cartier', 'pont-jacques-cartier', { dir: 1, s1: layout.roadById['pont-jacques-cartier'].length - 60 });
 drive('circuit Gilles-Villeneuve, un tour', 'circuit', { dir: 1, vmax: 45, aLat: 9 });
+drive('Ville-Marie, sortie Peel (vers le centre-ville)', 'ville-marie-e-sortie-peel', { dir: 1, vmax: 20 });
+drive('Ville-Marie, entrée Peel (vers Turcot)', 'ville-marie-o-entree-peel', { dir: 1, vmax: 20 });
 
 {
   // Nose into the trench wall at 60 km/h: stopped by it, still in the trench.
@@ -266,6 +268,19 @@ drive('circuit Gilles-Villeneuve, un tour', 'circuit', { dir: 1, vmax: 45, aLat:
   check('rue au-dessus du tunnel', driver.n < -420 && minY > -0.1, `n = ${driver.n.toFixed(0)}, y min ${minY.toFixed(2)}`);
 }
 
+{
+  // Rue Guy crosses the open Ville-Marie trench on a slab.
+  driver.place(-704, -200, Math.PI, 0);
+  let minY = Infinity, maxY = -Infinity, impact = 0;
+  hold({ throttle: 0.6 }, () => {
+    minY = Math.min(minY, driver.y); maxY = Math.max(maxY, driver.y);
+    impact = Math.max(impact, driver.impact); driver.impact = 0;
+    return driver.n < -500;
+  }, 30);
+  check('Guy par-dessus la Ville-Marie', driver.n < -500 && minY > -0.1 && maxY < 0.3 && impact < 1,
+    `n = ${driver.n.toFixed(0)}, y entre ${minY.toFixed(2)} et ${maxY.toFixed(2)}, choc ${impact.toFixed(1)} m/s`);
+}
+
 // ---------------------------------------------------------------- browser --
 
 if (BROWSER) {
@@ -292,6 +307,26 @@ if (BROWSER) {
   await page.screenshot({ path: path.join(ROOT, '.shots', 'carte.png') }).catch(() => {});
   await page.keyboard.press('KeyM');
   check('grande carte (M)', mapOpen, mapOpen ? 'ouverte' : 'ne s’ouvre pas');
+  {
+    // Free flight: F leaves the car, Space climbs, G lands the car on the
+    // road in the middle of the view and gives the wheel back.
+    await page.keyboard.press('KeyF');
+    const on = await page.waitForFunction(() => document.body.classList.contains('fly'), null, { timeout: 30000 })
+      .then(() => true, () => false);
+    const h0 = await page.evaluate(() => window.__mtl.fly.h);
+    await page.keyboard.down('Space');
+    await page.waitForFunction((h) => window.__mtl.fly.h > h + 20, h0, { timeout: 60000 }).catch(() => {});
+    await page.keyboard.up('Space');
+    const h1 = await page.evaluate(() => window.__mtl.fly.h);
+    await page.evaluate(() => window.__mtl.look(-900, -600, 120, -700, -380, 0));
+    await page.keyboard.press('KeyG');
+    const back = await page.waitForFunction(() => !document.body.classList.contains('fly'), null, { timeout: 30000 })
+      .then(() => true, () => false);
+    const st = await page.evaluate(() => window.__mtl.state());
+    const d = Math.hypot(st.x + 700, st.n + 380);
+    check('vol libre (F, Espace, G)', on && h1 > h0 + 20 && back && d < 15,
+      `monté de ${(h1 - h0).toFixed(0)} m, voiture posée à ${d.toFixed(1)} m du centre de la vue (${st.where ? st.where.name : '?'})`);
+  }
   check('aucune erreur dans la page', errors.length === 0, errors.slice(0, 5).join(' | ') || '0');
   await browser.close();
   server.close();

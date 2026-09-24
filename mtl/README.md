@@ -23,18 +23,42 @@ Pas de build ni de `npm install` : three.js est dans `vendor/`.
 | C | caméra (poursuite, lointaine, capot) |
 | M | grande carte ; un clic y téléporte |
 | N | nuit / jour |
-| F | vol libre au-dessus de la carte |
+| F | vol libre (ou le bouton **Vol libre** en haut) |
 | E | exporter pour Unity (.glb par zone + map.json) |
 
+### Vol libre
+
+Pour vérifier la carte ou la voir de l'extérieur. La voiture reste où elle
+est ; la vitesse suit l'altitude (lent dans les rues, rapide à 2 km).
+
+| Touche | Action |
+|---|---|
+| glisser (souris ou doigt) | regarder |
+| WASD / flèches | avancer, reculer, glisser de côté |
+| Espace / Maj | monter / descendre |
+| molette | plonger vers ce qu'on regarde |
+| O | vue d'ensemble : toute la carte, vue du sud |
+| M | grande carte ; un clic y amène la caméra |
+| G | poser la voiture sur la route au centre de la vue et reprendre le volant |
+| F | revenir à la voiture |
+
+Manette : stick gauche pour avancer, stick droit pour regarder, gâchettes pour
+monter et descendre.
+
 Paramètres d'URL : `?spawn=decarie|metropolitaine|tunnel|plateau|camillien-houde|stade|circuit|vieux-port|sainte-catherine`,
-`?day=1`, `?low=1` (réglages téléphone), `?cam=x,n,h,tx,tn,th` (vol libre).
+`?day=1`, `?low=1` (réglages téléphone), `?fly=1` ou `#vol` (démarrer en vol
+libre, vue d'ensemble), `?cam=x,n,h,tx,tn,th` (vol libre à un point précis).
 
 ## Ce qu'il y a dedans
 
 - **La boucle** (≈ 9,5 km) : la Métropolitaine (A-40) surélevée à 10 m,
   l'échangeur Décarie, la **tranchée Décarie** à −8 m avec ses bretelles et ses
-  rues qui passent par-dessus, Turcot, l'A-720 et le **tunnel Ville-Marie**
-  sous le centre-ville, puis Notre-Dame Est et Pie-IX.
+  rues qui passent par-dessus, Turcot, puis l'A-720 : en tranchée ouverte
+  d'Atwater à Peel, avec les tours du centre-ville au-dessus des murs, et la
+  **sortie Peel** pour entrer au centre-ville. Ensuite le **tunnel Ville-Marie**
+  jusqu'au Vieux-Montréal, puis Notre-Dame Est et Pie-IX. C'est le vrai
+  chemin de Décarie au centre-ville : Décarie ne va pas directement au centre,
+  elle descend à Turcot, et c'est la Ville-Marie qui y entre.
 - **Quartiers** : centre-ville, Vieux-Montréal, Vieux-Port, Plateau (avec ses
   ruelles), Centre-Sud, Hochelaga, Rosemont, Petite-Italie, Mile-Ex,
   Villeray, Outremont, Côte-des-Neiges, NDG, Westmount, Saint-Henri,

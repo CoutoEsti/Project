@@ -325,7 +325,8 @@ const RING = [
   // Out of the trench and up onto Turcot.
   [-1800, -40, 1], [-1800, -200, 10],
   ...arc(-1550, -200, 250, 180, 270, 10).slice(1),
-  // A-720 Ville-Marie: down past Atwater, then the tunnel under downtown.
+  // A-720 Ville-Marie: down past Atwater into the open trench, where the
+  // downtown towers stand over the walls, then the tunnel from Peel on.
   [-1400, -448, 6], [-1250, -436, 1.5], [-1150, -422, -2], [-1060, -402, -6],
   [-990, -390, -8], [-880, -382, -8], [-600, -380, -8], [-300, -380, -8],
   [0, -380, -8], [300, -380, -8], [600, -380, -8], [880, -382, -8],
@@ -347,11 +348,12 @@ export const ROADS = [
       { from: [-1800, 1380], name: 'Autoroute Décarie', ref: '15' },
       { from: [-1800, -100], name: 'Échangeur Turcot', ref: '15' },
       { from: [-1550, -450], name: 'Autoroute Ville-Marie', ref: '720' },
-      { from: [-880, -382], name: 'Tunnel Ville-Marie', ref: '720' },
+      { from: [-426, -380], name: 'Tunnel Ville-Marie', ref: '720' },
       { from: [880, -382], name: 'Autoroute Ville-Marie', ref: '720' },
       { from: [1190, -535], name: 'Rue Notre-Dame Est', ref: null },
     ],
-    tunnel: { from: [-880, -382], to: [880, -382], name: 'Tunnel Ville-Marie' },
+    // The portal sits under Rue Peel: its bridge is the tunnel's first slab.
+    tunnel: { from: [-426, -380], to: [880, -382], name: 'Tunnel Ville-Marie' },
   },
 
   // --- Closed continuations: they carry the interchanges' silhouette and say
@@ -388,6 +390,9 @@ export const ROADS = [
   // centreline x = -1800: main lanes to ±15, ramp strip ±14.5..±20.5, service
   // road inner lane ±26.5. ---
   ...decarieRamps(),
+
+  // --- Ville-Marie: the way from Décarie into downtown, and back ---
+  ...villeMarieRamps(),
 
   // --- Métropolitaine diamonds at L'Acadie and Saint-Laurent ---
   ...a40Ramps(-700, 'Boulevard de l’Acadie'),
@@ -498,6 +503,25 @@ function decarieRamps() {
   });
 }
 
+function villeMarieRamps() {
+  // The trench centreline, as the ring draws it between Guy and Peel.
+  const c = (x) => (x < -600 ? -382 + ((x + 880) * 2) / 280 : -380);
+  const P = (x, off, y) => [x, round(c(x) + off), y];
+  // Same cross-section as Décarie: peel off the outer lane on the floor, climb
+  // the side strip, swing out onto the street. The floor ends are just clear of
+  // Rue Guy's bridge, the street ends on Rue Peel's centreline.
+  const X0 = -680, X1 = -420;
+  // Eastbound drives on the south side (offsets < 0), westbound on the north.
+  const east = [P(X0, -11.5, -8), P(X0 + 30, -14, -8), P(X0 + 60, -17.5, -8),
+    P(X1 - 40, -17.5, 0), P(X1 - 15, -23, 0), P(X1, -26.5, 0)];
+  const west = [P(X1, 26.5, 0), P(X1 - 15, 23, 0), P(X1 - 40, 17.5, 0),
+    P(X0 + 60, 17.5, -8), P(X0 + 30, 14, -8), P(X0, 11.5, -8)];
+  return [
+    { id: 'ville-marie-e-sortie-peel', name: 'Sortie Rue Peel (Ville-Marie)', cls: 'ramp', lanes: 1, width: 6, median: false, path: east },
+    { id: 'ville-marie-o-entree-peel', name: 'Entrée Rue Peel (Ville-Marie)', cls: 'ramp', lanes: 1, width: 6, median: false, path: west },
+  ];
+}
+
 function a40Ramps(xCross, crossName) {
   // Diamond: off-ramp before the cross street, on-ramp after, both sides.
   // Eastbound runs on the south side (t < 0), westbound on the north (t > 0).
@@ -568,8 +592,9 @@ export const SIGNS = [
   { road: 'ring', at: [-1800, 1150], facing: 'north', panels: [
     { ref: '40', dir: 'EST', text: 'Métropolitaine\nQuébec' },
   ] },
-  { road: 'ring', at: [-1000, -390], facing: 'east', panels: [
+  { road: 'ring', at: [-930, -386], facing: 'east', panels: [
     { ref: '720', dir: 'EST', text: 'Tunnel Ville-Marie\nVieux-Montréal' },
+    { ref: null, dir: 'SORTIE', text: 'Rue Peel\nCentre-ville' },
   ] },
   { road: 'ring', at: a40(0), facing: 'east', panels: [
     { ref: '40', dir: 'EST', text: 'Boul. Pie-IX\nStade olympique' },
@@ -586,7 +611,8 @@ export const SIGNS = [
 
 export const SPAWNS = [
   { id: 'sainte-catherine', name: 'Sainte-Catherine', x: -350, n: -3, heading: 90 },
-  { id: 'decarie', name: 'Tranchée Décarie', x: -1793, n: 300, heading: 0, y: -8 },
+  // Southbound: the first run leads to Turcot and the Ville-Marie downtown.
+  { id: 'decarie', name: 'Tranchée Décarie', x: -1807, n: 900, heading: 180, y: -8 },
   { id: 'metropolitaine', name: 'Sur la Métropolitaine', x: 200, n: round(a40n(200) - 7), heading: 90, y: 10 },
   { id: 'vieux-port', name: 'Vieux-Port', x: 300, n: -704, heading: 90 },
   { id: 'plateau', name: 'Avenue du Mont-Royal', x: 500, n: 716, heading: 90 },

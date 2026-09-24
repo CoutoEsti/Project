@@ -84,6 +84,18 @@ function nearest(S, [x, n]) {
 function shield(c, W, H, ref, dir, closed) {
   const x = W * 0.04, y = H * 0.1, w = H * 0.34, h = H * 0.38;
   c.save();
+  if (!ref) {
+    // An exit panel: the Québec yellow tab instead of a shield.
+    c.fillStyle = '#f6c21c';
+    c.fillRect(x, y, W * 0.36, h * 0.62);
+    c.fillStyle = '#111111';
+    c.font = `800 ${Math.round(h * 0.4)}px Helvetica, Arial, sans-serif`;
+    c.textAlign = 'center';
+    c.textBaseline = 'middle';
+    c.fillText(dir || 'SORTIE', x + W * 0.18, y + h * 0.33);
+    c.restore();
+    return;
+  }
   c.fillStyle = '#1d3f95';
   c.strokeStyle = '#ffffff';
   c.lineWidth = 4;

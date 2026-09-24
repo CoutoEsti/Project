@@ -3,12 +3,12 @@
 //
 // URL parameters:
 //   ?spawn=<id>           start driving at a spawn point (see montreal.js)
+//   ?fly=1  or  #vol      start in free flight, over the whole map
 //   ?cam=x,n,h,tx,tn,th   start in free flight, camera and target (map frame)
 //   ?day=1                start by day
 //   ?low=1                phone settings: no bloom, lower resolution
 
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
@@ -18,7 +18,8 @@ import { createSky } from './world/sky.js';
 import { landmarkFootprints } from './world/landmarks.js';
 import { createSurface } from './map/surface.js';
 import { buildSolids } from './map/collide.js';
-import { Driver } from './game/drive.js';
+import { Driver, zoneAt } from './game/drive.js';
+import { FlyCamera, OVERVIEW } from './game/flycam.js';
 import { ChaseCamera } from './game/camera.js';
 import { Input, wantsTouch } from './game/input.js';
 import { Hud } from './game/hud.js';
@@ -83,39 +84,42 @@ const hud = new Hud(layout, {
 });
 if (wantsTouch()) {
   $('touch').hidden = false;
-  $('help').hidden = true;
+  $('help').hidden = $('help-fly').hidden = true;
   input.bindTouch($('touch'));
 }
 
 // --- night and day -----------------------------------------------------------
 let night = !params.has('day');
+let fogBase = 0;
 function setNight(v) {
   night = v;
   sky.set(night ? 'night' : 'day');
   world.materials.setNight(night);
   bloom.enabled = night && !LOW;
   renderer.toneMappingExposure = night ? 1.15 : 1.0;
+  fogBase = scene.fog.density;
 }
 setNight(night);
 
 // --- free flight -------------------------------------------------------------
-const controls = new OrbitControls(camera, canvas);
-controls.enableDamping = true;
-controls.maxPolarAngle = Math.PI * 0.495;
-controls.enabled = false;
+const fly = new FlyCamera(camera, canvas, game);
 let flying = false;
 function setFlying(v) {
+  if (v === flying) return;
   flying = v;
-  controls.enabled = v;
+  fly.enabled = v;
   input.enabled = !v;
+  document.body.classList.toggle('fly', v);
+  for (const b of document.querySelectorAll('[data-mode]')) b.classList.toggle('on', (b.dataset.mode === 'fly') === v);
   if (v) {
-    hud.hide();
-    controls.target.set(driver.x, driver.y + 1, -driver.n);
-    controls.update();
+    fly.enter();
+    toast(wantsTouch() ? 'Vol libre — glisse pour regarder, ▲▼ pour avancer' : 'Vol libre — O : vue d’ensemble · G : poser la voiture ici', 3.5);
   } else {
-    hud.show();
     chase.snap(pose);
   }
+}
+for (const b of document.querySelectorAll('[data-mode]')) {
+  b.addEventListener('click', () => { setFlying(b.dataset.mode === 'fly'); b.blur(); });
 }
 
 // --- pose: the physics state, interpolated for display -------------------------
@@ -151,10 +155,10 @@ function spawnAt(id) {
 spawnAt(params.get('spawn') || 'decarie');
 
 hud.onTeleport = (x, n) => {
+  hud.closeMap();
+  if (flying) { fly.centreOn(x, n); return; }
   driver.teleport(x, n);
   settle();
-  hud.closeMap();
-  if (flying) setFlying(false);
 };
 
 // --- messages ------------------------------------------------------------------
@@ -181,21 +185,46 @@ async function exportWorld() {
 
 function act(action) {
   switch (action) {
-    case 'reset': driver.respawn(); settle(); break;
-    case 'camera': chase.cycle(); break;
+    case 'reset': if (!flying) { driver.respawn(); settle(); } break;
+    case 'camera': if (!flying) chase.cycle(); break;
     case 'map': hud.toggleMap(info()); break;
     case 'close': hud.closeMap(); break;
     case 'night': setNight(!night); break;
     case 'fly': setFlying(!flying); break;
+    case 'overview': setFlying(true); fly.overview(); break;
+    case 'drop': {
+      // Land the car on the road under the middle of the view, and drive.
+      if (!flying) break;
+      const t = fly.target() || { x: fly.x, n: fly.n };
+      driver.teleport(t.x, t.n);
+      settle();
+      setFlying(false);
+      break;
+    }
     case 'export': exportWorld(); break;
-    case 'help': $('help').hidden = !$('help').hidden; break;
+    case 'help': $('help').hidden = $('help-fly').hidden = !$('help').hidden; break;
     default: break;
   }
+}
+
+/** In flight: the point in the middle of the view, or under the camera. */
+function flyFocus() {
+  const t = fly.target();
+  if (!t) return { x: fly.x, n: fly.n };
+  const W = layout.map.world;
+  return { x: Math.min(W.x1, Math.max(W.x0, t.x)), n: Math.min(W.n1, Math.max(W.n0, t.n)) };
 }
 
 // Where the car is, for the HUD: cheap fields every frame, lookups at 5 Hz.
 let whereTimer = 0, zoneName = null, where = null;
 function info() {
+  if (flying) {
+    // The HUD follows what the camera looks at; the minimap widens with height.
+    const p = flyFocus();
+    // High up, a district banner at every glance would be noise.
+    return { x: p.x, n: p.n, heading: fly.yaw, kmh: 0, zone: fly.h < 250 ? zoneName : null, where: null,
+      span: Math.min(3200, Math.max(520, fly.h * 3)) };
+  }
   return { x: pose.x, n: pose.n, heading: pose.heading, kmh: driver.kmh, zone: zoneName, where };
 }
 
@@ -205,6 +234,12 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
   composer.setSize(innerWidth, innerHeight);
 });
+
+function setNear(v) {
+  if (Math.abs(camera.near - v) < 0.05) return;
+  camera.near = v;
+  camera.updateProjectionMatrix();
+}
 
 // --- the loop --------------------------------------------------------------------
 let frames = 0, acc = 0, last = performance.now();
@@ -249,10 +284,24 @@ function frame(now) {
   headlight.position.set(pose.x + fx * 2.1, pose.y + 0.8, -(pose.n + fn * 2.1));
   headlight.target.position.set(pose.x + fx * 28, pose.y - 0.4, -(pose.n + fn * 28));
   headlight.target.updateMatrixWorld();
-  headlight.intensity = night && !flying ? 260 : 0;
+  headlight.intensity = night ? 260 : 0;
 
-  // Camera.
-  if (flying) controls.update(); else chase.update(dt, pose);
+  // Camera. From above, the fog thins out, or the map would vanish in it.
+  if (flying) {
+    const T = input.touch;
+    fly.touch.fwd = T.throttle - T.brake;
+    fly.touch.turn = T.steer;
+    fly.touch.up = input.fly.up;
+    fly.update(dt, input.keys);
+    scene.fog.density = fogBase * Math.min(1, Math.max(0.06, 1 - (fly.h - 40) / 900));
+    // Push the near plane out with height: from 3 km up, 0.3 m of near
+    // plane leaves no depth precision and the river flickers through the land.
+    setNear(Math.min(25, Math.max(0.3, (fly.h - fly.ground(fly.x, fly.n)) * 0.01)));
+  } else {
+    chase.update(dt, pose);
+    scene.fog.density = fogBase;
+    setNear(0.3);
+  }
 
   // Sound.
   audio.update({
@@ -268,10 +317,10 @@ function frame(now) {
   whereTimer -= dt;
   if (whereTimer <= 0) {
     whereTimer = 0.2;
-    zoneName = driver.zone();
-    where = driver.where();
+    zoneName = flying ? zoneAt(layout, flyFocus().x, flyFocus().n) : driver.zone();
+    where = flying ? null : driver.where();
   }
-  if (!flying) hud.update(dt, info());
+  hud.update(dt, info());
   if (toastTimer > 0) {
     toastTimer -= dt;
     if (toastTimer <= 0) $('toast').classList.remove('show');
@@ -290,9 +339,11 @@ $('loading').classList.add('done');
 if (params.has('cam')) {
   const c = params.get('cam').split(',').map(Number);
   setFlying(true);
-  camera.position.set(c[0], c[2], -c[1]);
-  controls.target.set(c[3], c[5], -c[4]);
-  controls.update();
+  fly.lookAt(...c);
+} else if (params.has('fly') || location.hash === '#vol') {
+  setFlying(true);
+  const o = OVERVIEW;
+  fly.lookAt(o.x, o.n, o.h, o.tx, o.tn, o.th);
 }
 requestAnimationFrame(frame);
 
@@ -310,10 +361,10 @@ window.__mtl = {
   /** Free-flight view from (x, n, h) towards (tx, tn, th), map frame. */
   look(x, n, h, tx, tn, th) {
     if (!flying) setFlying(true);
-    camera.position.set(x, h, -n);
-    controls.target.set(tx, th, -tn);
-    controls.update();
+    fly.lookAt(x, n, h, tx, tn, th);
   },
+  fly,
+  act,
   /** Drive view: put the car somewhere (heading in degrees). */
   place(x, n, headingDeg, y) {
     if (flying) setFlying(false);

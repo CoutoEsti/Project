@@ -14,6 +14,23 @@ import { simplifyN } from '../map/geom.js';
 export async function exportZones(THREE, world) {
   world.root.updateMatrixWorld(true);
   const zones = new Map();
+  // Lamp heads and lit signs are brighter than white so the bloom catches
+  // them. glTF caps a base colour at 1: the excess goes out as emission
+  // (KHR_materials_emissive_strength), which Unity's bloom reads the same way.
+  const swaps = new Map();
+  const exportable = (m) => {
+    if (!m || !m.color) return m;
+    const k = Math.max(m.color.r, m.color.g, m.color.b);
+    if (k <= 1) return m;
+    if (!swaps.has(m)) {
+      const c = m.color.clone().multiplyScalar(1 / k);
+      swaps.set(m, new THREE.MeshStandardMaterial({
+        name: m.name, color: c, emissive: c, emissiveIntensity: k, map: m.map || null, emissiveMap: m.map || null,
+        transparent: m.transparent, opacity: m.opacity, side: m.side, roughness: 0.6, metalness: 0,
+      }));
+    }
+    return swaps.get(m);
+  };
   world.root.traverse((o) => {
     if (!o.isMesh || !o.visible) return;
     let zone = null;
@@ -28,9 +45,10 @@ export async function exportZones(THREE, world) {
       g.rotation.y = Math.PI;
       zones.set(zone, g);
     }
+    const mat = Array.isArray(o.material) ? o.material.map(exportable) : exportable(o.material);
     const copy = o.isInstancedMesh
-      ? new THREE.InstancedMesh(o.geometry, o.material, o.count)
-      : new THREE.Mesh(o.geometry, o.material);
+      ? new THREE.InstancedMesh(o.geometry, mat, o.count)
+      : new THREE.Mesh(o.geometry, mat);
     if (o.isInstancedMesh) copy.instanceMatrix = o.instanceMatrix;
     copy.name = o.name || o.material.name || 'maillage';
     o.matrixWorld.decompose(copy.position, copy.quaternion, copy.scale);

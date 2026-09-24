@@ -46,7 +46,7 @@ export class Hud {
 
   /**
    * @param dt   render delta
-   * @param info { x, n, heading, kmh, zone, where: {name, ref} | null }
+   * @param info { x, n, heading, kmh, zone, where: {name, ref} | null, span? }
    */
   update(dt, info) {
     const kmh = Math.round(info.kmh);
@@ -93,7 +93,7 @@ export class Hud {
   _minimap(info) {
     const cv = this.el.minimap, c = cv.getContext('2d');
     const S = cv.width, r = S / 2;
-    const metres = 520 + Math.min(1, info.kmh / 160) * 380;       // diameter shown
+    const metres = info.span || 520 + Math.min(1, info.kmh / 160) * 380;   // diameter shown
     const k = S / metres;
     c.save();
     c.clearRect(0, 0, S, S);

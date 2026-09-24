@@ -74,12 +74,26 @@ export function buildBlocks(THREE, layout, M) {
   return out;
 }
 
-/** The river and the canal: a single plane under the land. */
+/**
+ * The river and the canal, where there is water and nowhere else: a plane
+ * under the whole map would show through every trench seen from above, and
+ * a trench is not a canal. Past the map's edge it runs on under the horizon.
+ */
 export function buildWater(THREE, layout, M) {
   const W = layout.map.world, y = layout.map.levels.water, pad = 4000;
   const b = new GeoBuilder();
-  const pts = [[W.x0 - pad, W.n0 - pad], [W.x1 + pad, W.n0 - pad], [W.x1 + pad, W.n1 + pad], [W.x0 - pad, W.n1 + pad]];
-  b.flat(pts, [0, 1, 2, 0, 2, 3], y);
+  const open = (ring) => {
+    const a = ring[0], z = ring[ring.length - 1];
+    return a[0] === z[0] && a[1] === z[1] ? ring.slice(0, -1) : ring;
+  };
+  for (const poly of layout.water) {
+    const { pts, tris } = triangulate(THREE, poly.map(open));
+    b.flat(pts, tris, y);
+  }
+  const outer = [[W.x0 - pad, W.n0 - pad], [W.x1 + pad, W.n0 - pad], [W.x1 + pad, W.n1 + pad], [W.x0 - pad, W.n1 + pad]];
+  const inner = [[W.x0, W.n0], [W.x0, W.n1], [W.x1, W.n1], [W.x1, W.n0]];
+  const ring = triangulate(THREE, [outer, inner]);
+  b.flat(ring.pts, ring.tris, y);
   const m = meshOf(THREE, b, M.Water, 'Fleuve');
   m.userData.zone = 'sol';
   return m;

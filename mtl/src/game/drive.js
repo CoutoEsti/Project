@@ -250,14 +250,16 @@ export class Driver {
   }
 
   /** The district under the car, or the mountain. */
-  zone() {
-    const L = this.layout;
-    if (L.terrain.inside(this.x, this.n)) return L.map.mountain.name;
-    for (const d of L.districts) {
-      if (d.ring && pointInRing(this.x, this.n, d.ring)) return d.name;
-    }
-    return null;
+  zone() { return zoneAt(this.layout, this.x, this.n); }
+}
+
+/** The district's name at a point, or the mountain's. */
+export function zoneAt(L, x, n) {
+  if (L.terrain.inside(x, n)) return L.map.mountain.name;
+  for (const d of L.districts) {
+    if (d.ring && pointInRing(x, n, d.ring)) return d.name;
   }
+  return null;
 }
 
 /**
