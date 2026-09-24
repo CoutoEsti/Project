@@ -214,7 +214,7 @@ export function lightPool(THREE) {
  * The facade atlas: one row per facade type, each row a single window bay one
  * floor high. The shader tiles it per bay and per floor and decides, window by
  * window, which ones are lit — so the pattern never repeats.
- * RGB = albedo, A = glass mask.
+ * RGB = albedo of the walls, A = 1 - glass mask (the glass colour is the shader's).
  */
 export const FACADES = [
   'brick_red', 'brick_brown', 'brick_buff', 'brick_dark', 'brick_old', 'stone', 'stone_dark',
@@ -295,7 +295,9 @@ export function facadeAtlas(THREE) {
     for (let y = row * H; y < (row + 1) * H; y++) {
       for (let x = 0; x < W; x++) {
         const inside = x >= x0 && x < x1 && y >= ya && y < yb;
-        img.data[(y * W + x) * 4 + 3] = inside ? 255 : 0;
+        // Walls opaque, glass transparent: a canvas drops the colour of a
+        // transparent pixel, and the wall's colour is the one that matters.
+        img.data[(y * W + x) * 4 + 3] = inside ? 0 : 255;
       }
     }
   });

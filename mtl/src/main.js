@@ -311,7 +311,9 @@ function updateDetails(dt) {
   const s = layout.map.scale;
   const cx = camera.position.x, cn = -camera.position.z;
   const alt = Math.max(0, camera.position.y - layout.terrain.height(cx, cn));
-  const reach = (flying ? 700 + alt * 1.5 : 1100) * Math.max(0.7, s);
+  // Past ~2 km a sign or a tree is under a pixel: capped, or the overview
+  // draws every one of them.
+  const reach = (flying ? Math.min(2200, 700 + alt * 1.5) : 1100) * Math.max(0.7, s);
   for (const [key, list] of world.details) {
     const b = world.tiles.bounds(key);
     const dx = Math.max(b.x0 - cx, 0, cx - b.x1), dn = Math.max(b.n0 - cn, 0, cn - b.n1);

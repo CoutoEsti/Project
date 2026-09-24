@@ -7,6 +7,7 @@ export function createSky(THREE, scene, renderer) {
     top: { value: new THREE.Color() },
     horizon: { value: new THREE.Color() },
     glow: { value: new THREE.Color() },
+    glow2: { value: new THREE.Color() },
     stars: { value: 1 },
   };
   const dome = new THREE.Mesh(
@@ -25,14 +26,18 @@ export function createSky(THREE, scene, renderer) {
           gl_Position.z = gl_Position.w;
         }`,
       fragmentShader: `
-        uniform vec3 top; uniform vec3 horizon; uniform vec3 glow; uniform float stars;
+        uniform vec3 top; uniform vec3 horizon; uniform vec3 glow; uniform vec3 glow2; uniform float stars;
         varying vec3 vDir;
         float h(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.yzx + 33.33); return fract((p.x + p.y) * p.z); }
         void main() {
           float y = clamp(vDir.y, -0.2, 1.0);
           vec3 c = mix(horizon, top, pow(max(y, 0.0), 0.55));
-          // City glow low on the horizon: sodium light scattered in the haze.
-          c += glow * exp(-max(y, 0.0) * 9.0);
+          // City glow low on the horizon, scattered in the haze: magenta one
+          // way, teal the other, slowly turning round the sky.
+          float side = 0.5 + 0.5 * sin(atan(vDir.z, vDir.x) * 1.0 + 0.6);
+          c += mix(glow, glow2, side) * exp(-max(y, 0.0) * 7.0);
+          // Low cloud deck lit from below.
+          c += glow * 0.35 * smoothstep(0.08, 0.2, y) * (1.0 - smoothstep(0.2, 0.45, y));
           if (stars > 0.0 && y > 0.05) {
             vec3 q = floor(vDir * 420.0);
             float s = step(0.9985, h(q)) * smoothstep(0.05, 0.4, y);
@@ -62,22 +67,27 @@ export function createSky(THREE, scene, renderer) {
   function set(mode) {
     const night = mode !== 'day';
     if (night) {
-      uniforms.top.value.set(0x03060d);
-      uniforms.horizon.value.set(0x0f1624);
-      uniforms.glow.value.set(0x22160d);
-      uniforms.stars.value = 1;
-      hemi.color.set(0x6d82b0);
-      hemi.groundColor.set(0x3a2a1c);
-      hemi.intensity = 0.9;
-      sun.color.set(0x9fb4de);
-      sun.intensity = 0.45;
+      // Not the future: Montréal on a humid night, where the signs win over
+      // the sodium. Indigo overhead, a violet haze, the city's glow low on
+      // the horizon going from magenta to teal.
+      uniforms.top.value.set(0x04030c);
+      uniforms.horizon.value.set(0x1a1030);
+      uniforms.glow.value.set(0x3a1440);
+      uniforms.glow2.value.set(0x0a3a4a);
+      uniforms.stars.value = 0.35;
+      hemi.color.set(0x5566c8);
+      hemi.groundColor.set(0x4a1c46);
+      hemi.intensity = 0.6;
+      sun.color.set(0x8ea6ff);
+      sun.intensity = 0.4;
       sun.position.set(900, 1400, -500);
-      scene.fog.color.set(0x121419);
-      scene.fog.density = 0.00052;
+      scene.fog.color.set(0x1a1128);
+      scene.fog.density = 0.00058;
     } else {
       uniforms.top.value.set(0x2f6fb8);
       uniforms.horizon.value.set(0xbcd3e6);
       uniforms.glow.value.set(0x000000);
+      uniforms.glow2.value.set(0x000000);
       uniforms.stars.value = 0;
       hemi.color.set(0xcfe2ff);
       hemi.groundColor.set(0x5a5043);
@@ -101,7 +111,7 @@ export function createSky(THREE, scene, renderer) {
       envRT = pmrem.fromScene(env, 0, 1, 20000);
       uniforms.stars.value = stars;
       scene.environment = envRT.texture;
-      scene.environmentIntensity = night ? 0.6 : 1.0;
+      scene.environmentIntensity = night ? 0.45 : 1.0;
     }
     return night;
   }

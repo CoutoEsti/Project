@@ -20,6 +20,8 @@ import { buildLamps, buildTrees } from './props.js';
 import { buildMarkings } from './markings.js';
 import { buildLandmarks, buildJacquesCartier, landmarkFootprints } from './landmarks.js';
 import { buildSigns } from './signs.js';
+import { placeNeon } from '../map/neon.js';
+import { buildNeon } from './neon.js';
 
 /**
  * @param THREE  the three.js namespace (world modules never import it)
@@ -90,6 +92,14 @@ export async function buildWorld(THREE, source, opts = {}) {
   buildings = buildings.filter((b) => !under(b));
 
   await step('maillage bâtiments', () => add(buildBuildings(THREE, buildings, M)));
+  const neon = await step('néons', () => {
+    const signs = placeNeon(layout, buildings, styleAt);
+    const T = layout.terrain;
+    for (const [key, list] of byTile(tiles, signs, (sg) => [sg.x, sg.n])) add(buildNeon(THREE, list, M, key, (x, n) => T.height(x, n)));
+    return signs;
+  });
+  stats.neon = neon.length;
+  animated.push(buzzer(M.Neon_Buzz), blinker(M.Beacon_Red));
   const oldTown = (x, n) => styleAt(x, n) === 'oldstone';
   const lamps = await step('lampadaires', () => placeStreetLamps(layout, structures, oldTown));
   const { trees, mapped } = await step('arbres', () => placeTrees(layout, structures, map, lamps));
@@ -97,7 +107,7 @@ export async function buildWorld(THREE, source, opts = {}) {
   const strips = await step('marquage', () => [...streetMarkings(layout, structures), ...roadMarkings(layout)]);
   await step('maillage mobilier', () => {
     const allLamps = [...structures.lamps, ...lamps];
-    for (const [key, list] of byTile(tiles, allLamps, (l) => [l.x, l.n])) add(buildLamps(THREE, list, M, key));
+    for (const [key, list] of byTile(tiles, allLamps, (l) => [l.x, l.n])) add(buildLamps(THREE, list, M, key, (x, n) => layout.terrain.height(x, n)));
     for (const [key, list] of byTile(tiles, trees, (t) => [t.x, t.n])) add(buildTrees(THREE, list, M, key));
     for (const [key, list] of byTile(tiles, strips, (s) => s.pts[0])) add(buildMarkings(THREE, list, M, key));
   });
@@ -202,6 +212,27 @@ function clearStreets(layout, objects, footprints) {
     }
   }
   return footprints;
+}
+
+/** Bad contacts: the buzzing signs cut out now and then, all together. */
+function buzzer(mat) {
+  return {
+    update(t) {
+      const k = Math.sin(t * 13.1) + Math.sin(t * 7.3 + 1.7) + Math.sin(t * 2.1);
+      light(mat, k > 1.6 ? 0.08 : k > 1.3 ? 0.5 : 1);
+    },
+  };
+}
+
+/** Set a glowing material to a share of its night brightness (see setNight). */
+function light(mat, k) {
+  const base = mat.userData.base || (mat.userData.base = mat.color.clone());
+  mat.color.copy(base).multiplyScalar(k * (mat.userData.level ?? 1));
+}
+
+/** Aviation lights: a slow blink, every tower together. */
+function blinker(mat) {
+  return { update(t) { light(mat, (t % 1.6) < 0.5 ? 1 : 0.04); } };
 }
 
 function tagAll(list, layer) {

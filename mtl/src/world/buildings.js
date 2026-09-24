@@ -21,7 +21,10 @@ export function buildBuildings(THREE, buildings, M) {
         roof: new GeoBuilder(),
         copper: new GeoBuilder(),
         stairs: new GeoBuilder(),
+        trim: new GeoBuilder(),
         glow: new GeoBuilder(),
+        glow2: new GeoBuilder(),
+        beacon: new GeoBuilder(),
       });
     }
     return zones.get(id);
@@ -53,8 +56,15 @@ export function buildBuildings(THREE, buildings, M) {
     else if (bld.roof === 'gable' && ring.length === 4) gable(THREE, Z, ring, top, fIndex, seed, floorH, bay);
     else {
       const { pts, tris } = triangulate(THREE, [ring]);
+      const s = bld.scale || 1;
+      const real = (top - base) / s;
+      // A parapet on anything taller than a plex: the silhouette a flat roof
+      // has against the sky.
+      if (real >= 12) cornice(Z.trim, ring, top, 0.28 * s, 0.7 * s);
       Z.roof.flat(pts, tris, top);
       if (bld.roof === 'crown') crown(Z, ring, top, k);
+      else if (real >= 7) rooftop(Z.roof, ring, top, k, s);
+      if (real >= 80) beacons(Z.beacon, ring, top + (bld.roof === 'crown' ? 7 : 0.7 * s), s);
     }
 
     if (bld.stairs && bld.front) stairs(Z.stairs, ring, bld, k);
@@ -77,7 +87,10 @@ export function buildBuildings(THREE, buildings, M) {
     add(Z.roof, M.Roof, 'Toits');
     add(Z.copper, M.Copper, 'Toits_cuivre');
     add(Z.stairs, M.Metal_Black, 'Escaliers');
-    add(Z.glow, M.Neon_White, 'Couronnes');
+    add(Z.trim, M.Concrete_Dark, 'Corniches');
+    add(Z.glow, M.Neon_Cyan, 'Couronnes_cyan');
+    add(Z.glow2, M.Neon_Magenta, 'Couronnes_magenta');
+    add(Z.beacon, M.Beacon_Red, 'Feux_aviation');
   }
   return out;
 }
@@ -164,7 +177,92 @@ function crown(Z, ring, top, k) {
   const ux = ex / l, un = en / l;
   const hu = l * 0.3, hv = Math.hypot(ring[2][0] - ring[1][0], ring[2][1] - ring[1][1]) * 0.3;
   Z.roof.box(cx, cn, top, top + 7, ux, un, hu, hv);
-  if (hash01(k, 5) < 0.3) Z.glow.box(cx, cn, top + 6.6, top + 6.9, ux, un, hu + 0.05, hv + 0.05);
+  // A lit band round the penthouse on most towers: the skyline at night.
+  const r = hash01(k, 5);
+  if (r < 0.7) (r < 0.4 ? Z.glow : Z.glow2).box(cx, cn, top + 6.4, top + 6.9, ux, un, hu + 0.06, hv + 0.06);
+  // And round the top of the tower itself on some.
+  if (r < 0.25) edgeBand(r < 0.12 ? Z.glow2 : Z.glow, ring, top - 1.2, top - 0.8, 0.08);
+}
+
+/** A flat band just proud of the walls: a parapet (or a lit strip). */
+function cornice(b, ring, top, out, h) {
+  edgeBand(b, ring, top - 0.25, top + h, out);
+}
+
+function edgeBand(b, ring, y0, y1, out) {
+  const m = ring.length;
+  const off = (i) => {
+    // Corner pushed out along the bisector of its two walls.
+    const p = ring[(i - 1 + m) % m], c = ring[i], q = ring[(i + 1) % m];
+    const n1 = norm(c[1] - p[1], -(c[0] - p[0])), n2 = norm(q[1] - c[1], -(q[0] - c[0]));
+    let bx = n1[0] + n2[0], bn = n1[1] + n2[1];
+    const l = Math.hypot(bx, bn) || 1;
+    bx /= l; bn /= l;
+    const k = Math.min(3, 1 / Math.max(0.35, bx * n1[0] + bn * n1[1]));
+    return [c[0] + bx * out * k, c[1] + bn * out * k];
+  };
+  const O = ring.map((_, i) => off(i));
+  for (let i = 0; i < m; i++) {
+    const a = O[i], c = O[(i + 1) % m];
+    const ex = c[0] - a[0], en = c[1] - a[1], l = Math.hypot(ex, en);
+    if (l < 0.3) continue;
+    const nx = en / l, nn = -ex / l;
+    const i0 = b.v(a[0], a[1], y0, nx, nn, 0, 0, 0), i1 = b.v(c[0], c[1], y0, nx, nn, 0, l, 0);
+    const i2 = b.v(c[0], c[1], y1, nx, nn, 0, l, y1 - y0), i3 = b.v(a[0], a[1], y1, nx, nn, 0, 0, y1 - y0);
+    b.quad(i0, i1, i2, i3);
+    // Cap on top, back to the wall line.
+    const ia = ring[i], ic = ring[(i + 1) % m];
+    const j0 = b.v(a[0], a[1], y1, 0, 0, 1, 0, 0), j1 = b.v(c[0], c[1], y1, 0, 0, 1, l, 0);
+    const j2 = b.v(ic[0], ic[1], y1, 0, 0, 1, l, 0.3), j3 = b.v(ia[0], ia[1], y1, 0, 0, 1, 0, 0.3);
+    b.quad(j0, j1, j2, j3);
+  }
+}
+
+function norm(x, n) {
+  const l = Math.hypot(x, n) || 1;
+  return [x / l, n / l];
+}
+
+/** Mechanical boxes on a flat roof: an air handler, sometimes a stair head. */
+function rooftop(b, ring, top, k, s) {
+  const bb = bbox(ring);
+  const w = bb.x1 - bb.x0, d = bb.n1 - bb.n0;
+  if (w * d < 150 * s * s) return;
+  const count = 1 + Math.floor(hash01(k, 21) * 3);
+  for (let i = 0; i < count; i++) {
+    const x = bb.x0 + w * (0.25 + 0.5 * hash01(k, i, 22)), n = bb.n0 + d * (0.25 + 0.5 * hash01(k, i, 23));
+    const hu = (0.8 + 1.6 * hash01(k, i, 24)) * s, hv = (0.8 + 1.2 * hash01(k, i, 25)) * s;
+    // Stay on the roof: all four corners inside the footprint.
+    if (![[-1, -1], [1, -1], [1, 1], [-1, 1]].every(([a, c]) => inside(x + a * hu, n + c * hv, ring))) continue;
+    b.box(x, n, top, top + (1.1 + 1.4 * hash01(k, i, 26)) * s, 1, 0, hu, hv);
+  }
+}
+
+/** Red aviation lights at the corners of a tall roof. */
+function beacons(b, ring, y, s) {
+  const bb = bbox(ring);
+  const r = 0.35 * s;
+  for (const [x, n] of [[bb.x0, bb.n0], [bb.x1, bb.n1]]) {
+    // The ring point nearest that corner of the box.
+    let best = ring[0], bd = Infinity;
+    for (const p of ring) { const dd = Math.hypot(p[0] - x, p[1] - n); if (dd < bd) { bd = dd; best = p; } }
+    b.box(best[0], best[1], y, y + r * 2, 1, 0, r, r);
+  }
+}
+
+function bbox(ring) {
+  let x0 = Infinity, n0 = Infinity, x1 = -Infinity, n1 = -Infinity;
+  for (const [x, n] of ring) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); n0 = Math.min(n0, n); n1 = Math.max(n1, n); }
+  return { x0, n0, x1, n1 };
+}
+
+function inside(x, n, ring) {
+  let c = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const a = ring[i], b = ring[j];
+    if ((a[1] > n) !== (b[1] > n) && x < ((b[0] - a[0]) * (n - a[1])) / (b[1] - a[1]) + a[0]) c = !c;
+  }
+  return c;
 }
 
 /** A thin slab rising from y0 to y1 over `run` metres along (ux, un). */

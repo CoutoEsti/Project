@@ -8,7 +8,7 @@
 3. Glisser les `.glb` de `mtl/export/` dans `Assets/`. Un fichier par couche :
    `sol`, `eau`, `rues`, `trottoirs`, `routes`, `ouvrages` (murs, glissières,
    piliers, tunnels), `marquage`, `reperes`, `arbres`, `mobilier`,
-   `alentours` ; et les bâtiments par tuile de 1 km (`batiments_<i>_<j>`),
+   `neons` (enseignes, auvents), `alentours` ; et les bâtiments par tuile de 1 km (`batiments_<i>_<j>`),
    pour pouvoir les charger ou les décharger par morceaux. `--tuiles` découpe
    aussi toutes les autres couches.
 
@@ -46,6 +46,17 @@ les remplacer par nom avec des matériaux URP/HDRP. Les façades utilisent un
 shader maison dans le navigateur ; dans Unity, prévoir un matériau à atlas de
 fenêtres, avec les attributs de sommet `_FACADE` et `_SEED` s'ils sont présents.
 
+## Néons et lumières
+
+Les tubes des néons sont instanciés avec une couleur par instance (attribut
+`_COLOR_0` de `EXT_mesh_gpu_instancing`) ; si l'importeur l'ignore, ils
+arrivent blancs : leur donner un matériau émissif et une couleur par
+enseigne. Les flaques de lumière au sol et les traînées « chaussée mouillée »
+sont des effets du navigateur, non exportés : dans Unity, les refaire avec
+des lumières ou un reflet d'écran. Le shader des façades (fenêtres allumées,
+vitrines colorées, bandes LED) est aussi à refaire : les `.glb` portent les
+attributs `_FACADE` et `_SEED` pour ça.
+
 ## Collisions
 
 Ajouter un `MeshCollider` sur `sol`, `rues`, `routes` et `ouvrages` (le sol
@@ -57,7 +68,7 @@ par tuile suffit.
 
 À 100 %, la zone `anneau` fait ~12 × 11 km, soit ±6 km autour de l'origine
 (Peel et Sainte-Catherine) : la précision des flottants de Unity tient. Le
-poids total dépasse 300 Mo (surtout les bâtiments) ; `centre` en fait ~140.
+poids total dépasse 300 Mo (surtout les bâtiments) ; `centre` en fait ~185.
 
 ## Ce que `map.json` contient
 

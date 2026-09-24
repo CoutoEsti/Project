@@ -38,7 +38,10 @@ export function placeStreetLamps(layout, structures, oldTown = () => false) {
           if (index.surfacesAt(x, n, 1).length) continue;
           if (ground.kindAt(x, n) !== 'terrain') continue;
           if (taken(x, n, 11 * s)) continue;
-          const lamp = { x, n, y: T.height(x, n) + 0.05, kind: oldTown(x, n) || st.cls === 'narrow' || st.cls === 'plaza' ? 'lantern' : 'cobra',
+          // Lanterns in the old town, white LED on the arteries, the old
+          // sodium cobras on the side streets.
+          const kind = oldTown(x, n) || st.cls === 'narrow' || st.cls === 'plaza' ? 'lantern' : both ? 'led' : 'cobra';
+          const lamp = { x, n, y: T.height(x, n) + 0.05, kind,
             lx: -lx * side, ln: -ln * side, tx, tn };
           lamps.push(lamp);
           near.insert(lamp, x, n, x, n);

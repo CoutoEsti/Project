@@ -97,27 +97,75 @@ export function createMaterials(THREE, opts = {}) {
 
   // --- vegetation ---
   std('Bark', { color: 0x3b2e24, roughness: 1 });
-  std('Leaves', { color: 0x355e2c, roughness: 0.95 });
-  std('Leaves_Dark', { color: 0x284a24, roughness: 0.95 });
+  // A trace of emission so the canopy reads against the night as a shape,
+  // not a hole.
+  std('Leaves', { color: 0x355e2c, roughness: 0.95, emissive: 0x0b1f1c });
+  std('Leaves_Dark', { color: 0x284a24, roughness: 0.95, emissive: 0x08171a });
 
   // --- light: these glow, and bloom picks them up ---
   glow('Lamp_Sodium', 0xffb36b, 3.2);
   glow('Lamp_White', 0xe4ecff, 3.0);
-  glow('Lamp_Tunnel', 0xffe2b8, 1.7);
+  glow('Lamp_LED', 0xcfe8ff, 2.2);
+  glow('Neon_Cyan', 0x22e6ff, 1.8);
+  glow('Neon_Magenta', 0xe03cff, 1.8);
+  glow('Beacon_Red', 0xff1a1a, 4.0);
+  glow('Lamp_Tunnel', 0xdff2ff, 1.5);
   glow('Neon_Red', 0xff2a1f, 4.0);
   glow('Neon_White', 0xffffff, 3.5);
   glow('Beacon', 0xfff4dc, 0.9, { transparent: true, opacity: 0.1, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
   if (canvasOk) M.Beacon.alphaMap = T.beamFade(THREE);
+  // Neon: tubes brighter than white so the bloom haloes them, per-instance
+  // colour; a few buzz (animated in the frame loop).
+  glow('Neon', 0xffffff, 1.45);
+  glow('Neon_Buzz', 0xffffff, 1.45);
+  std('Neon_Back', { color: 0x101018, roughness: 0.45, metalness: 0.5 });
+  std('Awning', { color: 0xffffff, roughness: 0.95, side: THREE.DoubleSide });
   const pool = new THREE.MeshBasicMaterial({
-    color: 0xffffff, transparent: true, opacity: 0.26, depthWrite: false,
+    color: 0xffffff, transparent: true, opacity: 0.2, depthWrite: false,
     blending: THREE.AdditiveBlending, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -6,
   });
   pool.name = 'Light_Pool';
   if (canvasOk) pool.map = T.lightPool(THREE);
+  wetStreaks(pool);
   M.Light_Pool = pool;
+  // The colour a sign throws on the wet sidewalk and the street.
+  const npool = pool.clone();
+  npool.name = 'Neon_Pool';
+  npool.opacity = 0.55;
+  wetStreaks(npool);
+  M.Neon_Pool = npool;
 
   M.setNight = (night) => setNight(M, night);
   return M;
+}
+
+/**
+ * Wet asphalt, faked: a light's pool on the ground stretches towards the eye,
+ * the way its reflection streaks down a wet street. Done in the vertex shader
+ * per instance (pools are unrotated discs), so it follows the camera for free.
+ */
+function wetStreaks(m) {
+  m.customProgramCacheKey = () => 'wet-streaks-v1';
+  m.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+#ifdef USE_INSTANCING
+{
+  vec3 c = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+  vec2 toEye = cameraPosition.xz - c.xz;
+  float dist = length(toEye);
+  vec2 d = toEye / max(dist, 1e-3);
+  float r = length(instanceMatrix[0].xyz);
+  // Longer the lower the eye: a streak is a grazing reflection.
+  float graze = clamp(dist / max(cameraPosition.y - c.y, 0.5), 1.0, 12.0);
+  float stretch = 1.0 + min(graze * 0.3, 2.6);
+  vec2 p = transformed.xz;
+  float along = dot(p, d);
+  vec2 perp = p - along * d;
+  along = along * stretch + (stretch - 1.0);
+  transformed.xz = perp * mix(1.0, 0.32, clamp((stretch - 1.0) / 2.0, 0.0, 1.0)) + d * along;
+}
+#endif`);
+  };
 }
 
 /**
@@ -133,11 +181,11 @@ function facadeMaterial(THREE, atlas) {
     facadeAtlas: { value: atlas },
     facadeRows: { value: T.FACADES.length },
     night: { value: 1 },
-    litRatio: { value: 0.36 },
+    litRatio: { value: 0.3 },
   };
   m.userData.uniforms = uniforms;
   if (!atlas) return m;
-  m.customProgramCacheKey = () => 'facades-v1';
+  m.customProgramCacheKey = () => 'facades-v3';
   m.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
     shader.vertexShader = shader.vertexShader
@@ -145,8 +193,8 @@ function facadeMaterial(THREE, atlas) {
 attribute float facade;
 attribute float seed;
 varying vec2 vFacadeUv;
-varying float vFacade;
-varying float vSeed;`)
+flat varying float vFacade;
+flat varying float vSeed;`)
       .replace('#include <uv_vertex>', `#include <uv_vertex>
 vFacadeUv = uv;
 vFacade = facade;
@@ -158,8 +206,8 @@ uniform float facadeRows;
 uniform float night;
 uniform float litRatio;
 varying vec2 vFacadeUv;
-varying float vFacade;
-varying float vSeed;
+flat varying float vFacade;
+flat varying float vSeed;
 float fHash(vec3 p) {
   p = fract(p * 0.3183099 + vec3(0.11, 0.17, 0.13));
   p *= 17.0;
@@ -174,21 +222,52 @@ vec2 auv = vec2(ff.x, (facadeRows - vFacade - 1.0 + ff.y) / facadeRows);
 vec2 gx = dFdx(vFacadeUv) * vec2(1.0, 1.0 / facadeRows);
 vec2 gy = dFdy(vFacadeUv) * vec2(1.0, 1.0 / facadeRows);
 vec4 fs = textureGrad(facadeAtlas, auv, gx, gy);
-fGlass = fs.a;
-diffuseColor.rgb *= fs.rgb * (0.88 + 0.24 * fHash(vec3(vSeed, 3.0, 1.0)));`)
+fGlass = 1.0 - fs.a;
+vec3 glassTint = mix(vec3(0.05, 0.07, 0.1), vec3(0.1, 0.16, 0.24), step(9.5, vFacade));
+diffuseColor.rgb *= mix(fs.rgb * (0.88 + 0.24 * fHash(vec3(vSeed, 3.0, 1.0))), glassTint, fGlass);`)
       .replace('#include <roughnessmap_fragment>', `
-float roughnessFactor = mix(roughness, 0.14, fGlass);`)
+// Far off, a window is less than a pixel: its reflection is noise. Glass
+// turns matte with distance, so the walls stop sparkling.
+float fFar = clamp(length(fwidth(vFacadeUv)) * 1.6 - 0.2, 0.0, 1.0);
+float roughnessFactor = mix(roughness, mix(0.22, 0.7, fFar), fGlass);`)
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
 float fr = fHash(vec3(fCell, vSeed * 97.0 + 1.0));
-// Curtain-wall offices light up by floor, homes window by window.
+// Curtain-wall offices light up by floor, homes window by window, and the
+// ground floor is shops: lit more often, and in colour.
 float office = step(9.5, vFacade);
 float floorLit = fHash(vec3(0.0, fCell.y, vSeed * 13.0 + 2.0));
-float byFloor = step(floorLit, litRatio * 0.8) * step(fr, 0.85);
-float lit = mix(step(fr, litRatio), byFloor, office) * fGlass * night;
+float byFloor = step(floorLit, litRatio * 0.6) * step(fr, 0.8);
+float shop = 1.0 - step(1.0, fCell.y);
+float ratio = mix(litRatio, 0.62, shop);
+float lit = mix(step(fr, ratio), byFloor, office * (1.0 - shop)) * fGlass * night;
 float tone = fHash(vec3(fCell.yx, vSeed + 7.0));
-vec3 wcol = tone < 0.72 ? vec3(1.0, 0.66, 0.36) : (tone < 0.9 ? vec3(0.7, 0.8, 0.95) : vec3(1.0, 0.86, 0.66));
+// Homes: mostly warm, some cool LED, a few rooms lit in colour. Offices:
+// fluorescent white, nothing else.
+vec3 wcol = tone < 0.62 ? vec3(1.0, 0.64, 0.36)
+  : tone < 0.86 ? vec3(0.78, 0.86, 1.0)
+  : tone < 0.92 ? vec3(0.25, 0.85, 1.0)
+  : tone < 0.96 ? vec3(0.8, 0.35, 1.0)
+  : vec3(1.0, 0.3, 0.55);
+wcol = mix(wcol, tone < 0.7 ? vec3(0.82, 0.9, 1.0) : vec3(1.0, 0.86, 0.66), office);
+// Shops: warm white, or the colour of their sign.
+float st = fHash(vec3(fCell.x, vSeed, 3.0));
+vec3 scol = st < 0.45 ? vec3(1.0, 0.82, 0.62) : st < 0.62 ? vec3(0.2, 0.9, 1.0) : st < 0.8 ? vec3(1.0, 0.25, 0.65) : st < 0.9 ? vec3(0.6, 0.35, 1.0) : vec3(1.0, 0.6, 0.25);
+wcol = mix(wcol, scol, shop);
 float shade = 0.45 + 0.55 * fHash(vec3(fCell, 5.0 + vSeed));
-totalEmissiveRadiance += wcol * lit * shade * 1.05;`);
+// Blinds in some windows: bands across the light.
+float blinds = step(0.72, fHash(vec3(fCell, vSeed + 19.0)));
+shade *= mix(1.0, 0.55 + 0.45 * step(0.35, fract(ff.y * 11.0)), blinds);
+totalEmissiveRadiance += wcol * lit * shade * mix(0.95, 1.15, shop);
+// The street lights the bottom of every wall, fading up two floors: warm,
+// or tinted by the signs.
+float bounce = exp(-vFacadeUv.y * 1.3) * night * (1.0 - fGlass * 0.5);
+vec3 bcol = mix(vec3(0.55, 0.32, 0.2), vec3(0.45, 0.15, 0.55), step(0.6, fHash(vec3(vSeed, 1.0, 9.0))));
+totalEmissiveRadiance += diffuseColor.rgb * bcol * bounce * 0.7;
+// Some towers wear LED strips up their corners.
+float strip = office * step(fHash(vec3(vSeed, 11.0, 4.0)), 0.3) * night;
+float edge = (1.0 - step(0.06, ff.x)) * (1.0 - step(0.5, fCell.x));
+vec3 lcol = fHash(vec3(vSeed, 2.0, 8.0)) < 0.5 ? vec3(0.1, 0.9, 1.0) : vec3(0.95, 0.2, 1.0);
+totalEmissiveRadiance += lcol * edge * strip * 2.5;`);
   };
   return m;
 }
@@ -196,12 +275,14 @@ totalEmissiveRadiance += wcol * lit * shade * 1.05;`);
 function setNight(M, night) {
   const u = M.Facades.userData.uniforms;
   if (u) u.night.value = night ? 1 : 0;
-  for (const k of ['Lamp_Sodium', 'Lamp_White', 'Lamp_Tunnel', 'Neon_Red', 'Neon_White']) {
+  for (const k of ['Lamp_Sodium', 'Lamp_White', 'Lamp_LED', 'Lamp_Tunnel', 'Neon_Red', 'Neon_White', 'Neon', 'Neon_Buzz', 'Neon_Cyan', 'Neon_Magenta', 'Beacon_Red']) {
     if (!M[k]) continue;
     M[k].userData.base = M[k].userData.base || M[k].color.clone();
-    M[k].color.copy(M[k].userData.base).multiplyScalar(night ? 1 : 0.25);
+    M[k].userData.level = night ? 1 : 0.25;
+    M[k].color.copy(M[k].userData.base).multiplyScalar(M[k].userData.level);
   }
   if (M.Light_Pool) M.Light_Pool.visible = !!night;
+  if (M.Neon_Pool) M.Neon_Pool.visible = !!night;
   if (M.Beacon) M.Beacon.visible = !!night;
   // Streets look wet at night — the NFSU look — and dry by day.
   if (M.Asphalt) M.Asphalt.roughness = night ? 0.42 : 0.82;

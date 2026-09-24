@@ -65,6 +65,32 @@ Autres paramètres d'URL : `?spawn=decarie|metropolitaine|ville-marie|centre-vil
 `?day=1`, `?low=1` (réglages téléphone), `?fly=1` ou `#vol` (démarrer en vol
 libre), `?cam=x,n,h,tx,tn,th` (vol libre à un point précis).
 
+## La nuit
+
+Le jeu se passe de nuit (N bascule le jour, pour lire la carte). Low poly,
+mais détaillé, et une couleur qui donne le ton sans faire futuriste : la
+Montréal humide d'un soir d'été, où les enseignes gagnent sur le sodium.
+
+- **Ciel et brume** : indigo au zénith, brume violette, lueur de la ville à
+  l'horizon qui passe du magenta au sarcelle.
+- **Façades** (un seul shader pour toute la ville) : fenêtres allumées une par
+  une, surtout chaudes, quelques pièces en couleur, des stores ; bureaux
+  éclairés par étage en blanc froid ; rez-de-chaussée commerciaux plus
+  souvent allumés, en couleur ; le bas des murs éclairé par la rue ; bandes
+  LED cyan ou magenta sur les coins de certaines tours.
+- **Néons** (`map/neon.js`, `world/neon.js`) : sur les artères (boulevards et
+  avenues), bandeaux au-dessus des vitrines, enseignes drapeau façon
+  Saint-Laurent, auvents, noms lumineux en haut des tours. Couleurs selon le
+  quartier (cyan et magenta au centre-ville, rose et ambre sur le Plateau,
+  ambre et rouge dans le Vieux). Quelques-uns grésillent.
+- **Chaussée mouillée, simulée** : chaque flaque de lumière (lampadaire,
+  enseigne) s'étire vers la caméra comme un reflet sur l'asphalte mouillé,
+  dans le vertex shader. Pas de vrais reflets (trop cher sur téléphone).
+- **Éclairage** : LED blanc froid sur les artères et les autoroutes, sodium
+  orange dans les rues résidentielles, lanternes dans le Vieux.
+- **Détails** : corniches sur les toits plats, blocs techniques, couronnes
+  lumineuses et feux d'avion clignotants sur les tours.
+
 ## Comment c'est fait
 
 ```
@@ -141,7 +167,9 @@ Voir [`unity/README.md`](unity/README.md).
   sont trop courtes dans les données pour atteindre le tablier : elles
   finissent sur une barrière « Fermé ».
 - À 70 %, les voies sont étroites (la voiture ne rapetisse pas).
-- Premier chargement lourd : ~25 s pour `anneau` sur un bon ordinateur, et
-  la vue d'ensemble de l'anneau dépasse le budget d'appels de rendu. Sur
-  téléphone, utiliser la zone `centre`.
+- Premier chargement lourd : ~25 s pour `anneau` sur un bon ordinateur. Au
+  volant, 400 à 750 appels de rendu et 3 à 5 M triangles au centre-ville ;
+  la vue d'ensemble de l'anneau, ~1 400 appels et 6,7 M. Sur téléphone,
+  utiliser la zone `centre` (non mesuré sur un vrai téléphone).
+- Les voitures, piétons et le trafic manquent : les rues sont vides.
 - Pas encore de trafic, de piétons, ni de course jouable.

@@ -8,24 +8,39 @@ import { hash01 } from '../map/geom.js';
 // radius, and whether the pole is drawn at all.
 const KINDS = {
   cobra: { h: 8.6, arm: 2.3, light: 'sodium', pool: 10, pole: 'arm' },
-  pole: { h: 9.2, arm: 2.4, light: 'sodium', pool: 11, pole: 'arm' },
+  led: { h: 8.6, arm: 2.3, light: 'led', pool: 11, pole: 'arm' },
+  pole: { h: 9.2, arm: 2.4, light: 'led', pool: 11, pole: 'arm' },
   lantern: { h: 4.4, arm: 0, light: 'warm', pool: 6, pole: 'post' },
-  mast: { h: 13.5, arm: 5, light: 'sodium', pool: 12, pole: 'mast' },
+  mast: { h: 13.5, arm: 5, light: 'led', pool: 12, pole: 'mast' },
   flood: { h: 16, arm: 0.8, light: 'white', pool: 16, pole: 'post' },
   tunnel: { h: 0, arm: 0, light: 'tunnel', pool: 4.5, pole: 'none' },
 };
 
 const LIGHT = {
   sodium: { material: 'Lamp_Sodium', pool: 0xc98a4c },
+  led: { material: 'Lamp_LED', pool: 0x5a7fa8 },
   warm: { material: 'Lamp_White', pool: 0xc9ae88 },
   white: { material: 'Lamp_White', pool: 0xb6c0d0 },
-  tunnel: { material: 'Lamp_Tunnel', pool: 0x9a7f58 },
+  tunnel: { material: 'Lamp_Tunnel', pool: 0x2c3f4c },
 };
 
-export function buildLamps(THREE, lamps, M, tile = null) {
+/**
+ * Tilt of a light pool lying on the ground at (x, n): the quaternion that
+ * turns +Y onto the relief's normal there, so the disc hugs a slope instead
+ * of half sinking into it.
+ */
+export function groundTilt(THREE, height, x, n, q) {
+  const e = 2;
+  const gx = (height(x + e, n) - height(x - e, n)) / (2 * e);
+  const gn = (height(x, n + e) - height(x, n - e)) / (2 * e);
+  const v = new THREE.Vector3(-gx, 1, gn).normalize();
+  return q.setFromUnitVectors(new THREE.Vector3(0, 1, 0), v);
+}
+
+export function buildLamps(THREE, lamps, M, tile = null, height = null) {
   const out = [];
   const poles = { arm: [], post: [], mast: [] };
-  const heads = { sodium: [], warm: [], white: [], tunnel: [] };
+  const heads = { sodium: [], led: [], warm: [], white: [], tunnel: [] };
   const pools = [];
 
   for (const l of lamps) {
@@ -57,6 +72,7 @@ export function buildLamps(THREE, lamps, M, tile = null) {
   }
   const headGeo = {
     sodium: new THREE.BoxGeometry(1.1, 0.22, 0.45),
+    led: new THREE.BoxGeometry(0.9, 0.12, 0.38),
     warm: new THREE.BoxGeometry(0.5, 0.75, 0.5),
     white: new THREE.BoxGeometry(1.6, 0.9, 0.5),
     tunnel: new THREE.BoxGeometry(1.1, 0.08, 0.22),
@@ -72,7 +88,11 @@ export function buildLamps(THREE, lamps, M, tile = null) {
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();
     const c = new THREE.Color();
     pools.forEach((pl, i) => {
-      p.set(pl.x, pl.y, -pl.n);
+      // On the street (not a deck, not a tunnel): hug the relief, above the
+      // kerb-high sidewalk or the sidewalk cuts it in half.
+      const onGround = height && Math.abs(pl.y - height(pl.x, pl.n)) < 0.6;
+      p.set(pl.x, onGround ? height(pl.x, pl.n) + 0.2 : pl.y, -pl.n);
+      if (onGround) groundTilt(THREE, height, pl.x, pl.n, q); else q.identity();
       s.set(pl.r, 1, pl.r);
       m.compose(p, q, s);
       mesh.setMatrixAt(i, m);
