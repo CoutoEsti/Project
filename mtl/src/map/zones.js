@@ -13,7 +13,7 @@ export const ZONES = {
   anneau: {
     nom: 'Anneau',
     description: 'Le centre, plus Décarie, la 40, Turcot et le Stade olympique',
-    box: [-4700, -3800, 6900, 6900],
+    box: [-4700, -3800, 6900, 7150],
   },
 };
 

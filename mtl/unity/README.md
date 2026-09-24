@@ -1,11 +1,16 @@
 # Importer MTL dans Unity
 
 1. Installer **glTFast** (`com.unity.cloud.gltfast`) depuis le Package Manager.
-2. Générer l'export : `node mtl/tools/export.mjs`, ou la touche **E** dans le
-   navigateur (celle-ci garde les textures générées).
-3. Glisser les `.glb` de `mtl/export/` dans `Assets/`. Il y a un fichier par
-   zone : `routes`, `mont-royal`, `reperes`, `arbres`, `mobilier`, puis un par
-   quartier pour les bâtiments.
+2. Générer l'export : `node mtl/tools/export.mjs` (options `--zone`,
+   `--echelle`, `--tuiles`), ou la touche **E** dans le navigateur, qui
+   télécharge un `.zip` et garde les textures générées. La zone et l'échelle
+   exportées sont celles de la carte construite.
+3. Glisser les `.glb` de `mtl/export/` dans `Assets/`. Un fichier par couche :
+   `sol`, `eau`, `rues`, `trottoirs`, `routes`, `ouvrages` (murs, glissières,
+   piliers, tunnels), `marquage`, `reperes`, `arbres`, `mobilier`,
+   `alentours` ; et les bâtiments par tuile de 1 km (`batiments_<i>_<j>`),
+   pour pouvoir les charger ou les décharger par morceaux. `--tuiles` découpe
+   aussi toutes les autres couches.
 
 Les `.glb` passent le validateur officiel de Khronos (`gltf-validator`) sans
 erreur ni avertissement. Extensions utilisées, toutes lues par glTFast :
@@ -43,12 +48,20 @@ fenêtres, avec les attributs de sommet `_FACADE` et `_SEED` s'ils sont présent
 
 ## Collisions
 
-Ajouter un `MeshCollider` sur `routes` et `mont-royal`. Pour les bâtiments,
-des `BoxCollider` suffisent. Les glissières, murs et piliers font partie de
-`routes`.
+Ajouter un `MeshCollider` sur `sol`, `rues`, `routes` et `ouvrages` (le sol
+porte le relief réel : les rues sont drapées dessus). Pour les bâtiments, un
+`MeshCollider` convexe par bâtiment coûte cher : un `MeshCollider` non convexe
+par tuile suffit.
+
+## Taille
+
+À 100 %, la zone `anneau` fait ~12 × 11 km, soit ±6 km autour de l'origine
+(Peel et Sainte-Catherine) : la précision des flottants de Unity tient. Le
+poids total dépasse 300 Mo (surtout les bâtiments) ; `centre` en fait ~140.
 
 ## Ce que `map.json` contient
 
-Axes des routes avec leur hauteur (pour l'IA et les courses), rues, quartiers
-(polygones, pour les bannières de zone), repères, points de départ et
-courses.
+Zone et échelle, axes des routes avec leur hauteur (et leurs tronçons en
+tunnel), rues avec la hauteur du sol, quartiers (points nommés), repères tels
+que placés, points de départ résolus sur la route, courses. Tout en repère
+Unity : `[x, y, z]`, x = est, z = nord.

@@ -23,7 +23,7 @@ import { resolveSpawn } from './game/spawn.js';
 import { createSurface } from './map/surface.js';
 import { buildSolids } from './map/collide.js';
 import { Driver, zoneAt } from './game/drive.js';
-import { FlyCamera, OVERVIEW } from './game/flycam.js';
+import { FlyCamera } from './game/flycam.js';
 import { ChaseCamera } from './game/camera.js';
 import { Input, wantsTouch } from './game/input.js';
 import { Hud } from './game/hud.js';
@@ -231,9 +231,11 @@ async function exportWorld() {
   toast('Export glTF en cours…', 30);
   try {
     const { exportZones, download } = await import('./export/gltf.js');
+    const { zip } = await import('./export/zip.js');
     const files = await exportZones(THREE, world);
-    for (const f of files) download(f.name, f.data);
-    toast(`${files.length} fichiers exportés (glTF + map.json)`, 4);
+    const name = `mtl-unity-${settings.zone}-${settings.echelle}.zip`;
+    download(name, zip(files), 'application/zip');
+    toast(`${name} : ${files.length} fichiers (glTF + map.json)`, 4);
   } catch (e) {
     console.error(e);
     toast(`Export impossible : ${e.message}`, 5);
@@ -423,8 +425,7 @@ if (params.has('cam')) {
   fly.lookAt(...c);
 } else if (params.has('fly') || location.hash === '#vol') {
   setFlying(true);
-  const o = OVERVIEW;
-  fly.lookAt(o.x, o.n, o.h, o.tx, o.tn, o.th);
+  fly.overview(false);
 }
 requestAnimationFrame(frame);
 

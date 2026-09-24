@@ -13,6 +13,7 @@
 // either side of each road (see structures.js); none of them is authored.
 
 import * as G from './geom.js';
+import { createRoadIndex } from './query.js';
 
 export const SPACING = 2;         // metres between road samples
 
@@ -28,6 +29,7 @@ export const ROAD_CLASS = {
 
 const SUNKEN = -0.12;             // below the ground by this much, a road needs a hole
 const COVER_DEPTH = -1.0;         // a street only covers a road deeper than this
+const TUNNEL_DEPTH = -5.0;        // a tunnel needs this much ground over the road
 
 export function compile(map) {
   const T = {};
@@ -57,10 +59,20 @@ export function compile(map) {
   };
 
   // --- 1. roads ------------------------------------------------------------
+  const lap = (k, t) => { T[k] = Math.round(now() - t); return now(); };
+  let tl = now();
   const roads = map.roads.map((r) => sampleRoad(r));
   const roadGrid = indexRoads(roads);
+  tl = lap('sample', tl);
   pinJunctions(roads, roadGrid);
+  tl = lap('pin', tl);
+  separateCrossings(roads);
+  tl = lap('cross', tl);
+  settleEnds(roads, map.streets, terrain);
+  relaxSamples(roads);
+  tl = lap('relax', tl);
   carve(terrain, roads);
+  tl = lap('carve', tl);
   T.roads = now() - t0;
 
   // --- 2. streets ------------------------------------------------------------
@@ -86,12 +98,20 @@ export function compile(map) {
     return out;
   };
 
+  tl = now();
+  meetStreets(terrain, roads, streetsAt);
+  tl = lap('meet', tl);
+
   // --- 3. ground, tunnels, covers, holes ---------------------------------------
   const coverers = new Set();
   const tmp = [];
   for (const r of roads) {
     for (const p of r.samples) {
       p.gs = terrain.height(p.x, p.n);          // the ground surface, even over a trench
+      // A tunnel only where there is room for one: near a portal the grade
+      // limit can bring the road within a car's height of the ground, and
+      // that stretch is an open trench.
+      if (p.tunnel && p.y - p.gs > TUNNEL_DEPTH) p.tunnel = false;
       if (p.tunnel) { p.covered = true; continue; }
       if (p.y - p.gs > COVER_DEPTH) continue;
       for (const st of streetsAt(p.x, p.n, 0, tmp)) {
@@ -215,39 +235,241 @@ function indexRoads(roads) {
 function pinJunctions(roads, grid) {
   const tmp = [];
   const rank = (r) => (r.priority || 0) * 1e6 + r.length;
-  for (const r of roads) {
+  const FADE = 60;
+  // Majors first: a ramp takes the height its carriageway ends up with.
+  for (const r of [...roads].sort((a, b) => rank(b) - rank(a))) {
     if (r.loop) continue;
     r.junctions = [];
-    for (const end of [0, r.samples.length - 1]) {
-      const p = r.samples[end];
-      let major = null, best = Infinity;
+    const S = r.samples;
+    const pinned = new Map();          // sample index → height
+    const hard = new Set();            // samples standing on the other road
+    const edges = [];                  // { k, s, delta, dir }
+    for (const end of [0, S.length - 1]) {
+      const p = S[end];
+      // Every higher road the end lands on: at a fork the way before and the
+      // other branch both hold it, and it follows whichever is nearest until
+      // it is clear of them all.
+      const majors = [];
       for (const o of grid.query(p.x, p.n, 0, tmp)) {
-        if (o === r || rank(o) < rank(r)) continue;
+        if (o === r || rank(o) < rank(r) || majors.includes(o)) continue;
         const hit = projectOnRoad(o, p.x, p.n);
-        if (!hit || hit.d > o.half + 0.5) continue;
+        if (!hit || hit.d > o.half + r.half * 0.5) continue;
         if (Math.abs(hit.y - p.y) > 3) continue;       // one passes over the other
-        if (hit.d < best) { best = hit.d; major = o; }
+        majors.push(o);
       }
-      if (!major) continue;
+      if (!majors.length) continue;
       const dir = end === 0 ? 1 : -1;
-      let k = end, lastDelta = 0, inside = 0, sTrim = p.s;
-      for (; k >= 0 && k < r.samples.length; k += dir) {
-        const q = r.samples[k];
-        const hit = projectOnRoad(major, q.x, q.n);
-        if (!hit || hit.d > major.half + r.half) break;
-        if (hit.d <= major.half) sTrim = q.s;
-        lastDelta = hit.y - q.y;
-        q.y = hit.y;
+      let k = end, lastDelta = 0, inside = 0, sTrim = p.s, major = majors[0];
+      const near = [];
+      for (; k >= 0 && k < S.length; k += dir) {
+        const q = S[k];
+        // Any higher road it still overlaps holds it too: a ramp leaving one
+        // tunnel bore runs over the other before it can climb.
+        for (const o of grid.query(q.x, q.n, 0, tmp)) {
+          if (o !== r && !majors.includes(o) && !near.includes(o) && rank(o) >= rank(r)) near.push(o);
+        }
+        let best = null;
+        for (const o of [...majors, ...near]) {
+          const hit = projectOnRoad(o, q.x, q.n);
+          if (!hit || hit.d > o.half + r.half - 0.5) continue;
+          if (!majors.includes(o) && Math.abs(hit.y - q.y) > 3) continue;
+          if (!best || hit.d < best.hit.d) best = { o, hit };
+        }
+        if (!best) break;
+        if (best.hit.d <= best.o.half) { sTrim = q.s; major = best.o; hard.add(k); }
+        lastDelta = best.hit.y - q.y;
+        pinned.set(k, pinned.has(k) ? (pinned.get(k) + best.hit.y) / 2 : best.hit.y);
         inside++;
       }
-      const sEdge = r.samples[Math.max(0, Math.min(r.samples.length - 1, k))].s;
-      for (let j = k; j >= 0 && j < r.samples.length; j += dir) {
-        const q = r.samples[j];
-        const w = 1 - G.smoothstep(0, 60, Math.abs(q.s - sEdge));
-        if (w <= 0) break;
-        q.y += lastDelta * w;
+      const kk = Math.max(0, Math.min(S.length - 1, k));
+      edges.push({ k: kk, s: S[kk].s, delta: lastDelta, dir });
+      r.junctions.push({ end: end === 0 ? 'start' : 'end', major: major.id, sEdge: S[kk].s, sTrim, samples: inside });
+    }
+    if (!edges.length) continue;
+    // Ease the rest of the road onto the pinned stretches: over 60 m from
+    // each, or straight across when the two ends are closer than that.
+    const both = edges.length === 2 && edges[0].dir > 0 && edges[1].dir < 0 && edges[1].s - edges[0].s < FADE * 2;
+    const add = new Float64Array(S.length);
+    if (both) {
+      const [A, B] = edges;
+      for (let i = A.k; i <= B.k; i++) {
+        const t = B.s - A.s > 1e-3 ? G.smoothstep(A.s, B.s, S[i].s) : 0.5;
+        add[i] = A.delta + (B.delta - A.delta) * t;
       }
-      r.junctions.push({ end: end === 0 ? 'start' : 'end', major: major.id, sEdge, sTrim, samples: inside });
+    } else {
+      for (const e of edges) {
+        for (let j = e.k; j >= 0 && j < S.length; j += e.dir) {
+          const w = 1 - G.smoothstep(0, FADE, Math.abs(S[j].s - e.s));
+          if (w <= 0) break;
+          add[j] += e.delta * w;
+        }
+      }
+    }
+    for (let i = 0; i < S.length; i++) S[i].y = pinned.has(i) ? pinned.get(i) : S[i].y + add[i];
+    r.hard = hard;
+  }
+}
+
+/**
+ * Last pass over every profile: pins, crossings and settled ends each bent
+ * it for a good reason, and together they can leave a step. Any stretch
+ * steeper than the class allows is shared out between its two ends, except
+ * where the road stands on another one (it must keep that one's height).
+ */
+function relaxSamples(roads) {
+  for (const r of roads) {
+    const S = r.samples;
+    const lim = r.rules.maxGrade;
+    const hard = r.hard || new Set();
+    for (let iter = 0; iter < 3000; iter++) {
+      let worst = 0;
+      for (let i = 1; i < S.length; i++) {
+        const ds = Math.max(0.1, S[i].s - S[i - 1].s);
+        const d = S[i].y - S[i - 1].y;
+        const excess = Math.abs(d) - lim * ds;
+        if (excess <= 1e-3) continue;
+        let a = hard.has(i - 1), b = hard.has(i);
+        // Standing on two roads that disagree: a step either way, so share
+        // it rather than keep a wall in the asphalt.
+        if (a && b) { if (excess < 0.05) continue; a = b = false; }
+        worst = Math.max(worst, excess);
+        const ka = b ? 1 : a ? 0 : 0.5;
+        const sgn = Math.sign(d);
+        S[i - 1].y += sgn * excess * ka;
+        S[i].y -= sgn * excess * (1 - ka);
+      }
+      if (worst < 0.005) break;
+    }
+  }
+}
+
+/**
+ * Two roads crossing with too little between them — OpenStreetMap's layers
+ * say which is on top, not by how much, and the grade limit can eat the
+ * difference. The minor road gives way: within a few metres of the major it
+ * comes down (or up) to meet it, a crossing at grade; otherwise it is pushed
+ * a full headroom clear, over or under, and eased back on either side.
+ */
+const HEADROOM = 6.2;
+function separateCrossings(roads) {
+  const index = createRoadIndex(roads);
+  const rank = (r) => (r.priority || 0) * 1e6 + r.length;
+  const tmp = [];
+  for (const r of [...roads].sort((a, b) => rank(b) - rank(a))) {
+    const S = r.samples;
+    const maxGrade = r.rules.maxGrade * 0.9;
+    const shifts = [];
+    // Runs of samples inside a higher road's footprint, crossing it rather
+    // than running along it.
+    const open = new Map();
+    const close = (o) => {
+      const run = open.get(o);
+      open.delete(o);
+      const dy = run.dy / run.k;
+      if (Math.abs(dy) > 0.45 && Math.abs(dy) < HEADROOM) {
+        const delta = Math.abs(dy) < 2.5 ? -dy : Math.sign(dy) * HEADROOM - dy;
+        shifts.push({ s0: run.s0, s1: run.s1, delta });
+        // Crossing at grade: those samples stand on the major road.
+        if (Math.abs(dy) < 2.5) for (const i of run.idx) (r.hard ||= new Set()).add(i);
+      }
+    };
+    for (const p of S) {
+      const seen = new Set();
+      for (const h of index.surfacesAt(p.x, p.n, 0.5, tmp)) {
+        const o = h.road;
+        if (o === r || rank(o) < rank(r)) continue;
+        const q = o.samples[h.i];
+        if (Math.abs(p.tx * q.tn - p.tn * q.tx) <= 0.35) continue;
+        seen.add(o);
+        let run = open.get(o);
+        if (!run) { run = { s0: p.s, s1: p.s, dy: 0, k: 0, idx: [] }; open.set(o, run); }
+        run.s1 = p.s;
+        run.dy += p.y - h.y;
+        run.k++;
+        run.idx.push(p.i);
+      }
+      for (const o of [...open.keys()]) if (!seen.has(o)) close(o);
+    }
+    for (const o of [...open.keys()]) close(o);
+    if (!shifts.length) continue;
+    const add = new Float64Array(S.length);
+    for (const sh of shifts) {
+      const ease = Math.abs(sh.delta) / maxGrade;
+      for (let i = 0; i < S.length; i++) {
+        const p = S[i];
+        const d = p.s < sh.s0 ? sh.s0 - p.s : p.s > sh.s1 ? p.s - sh.s1 : 0;
+        if (d >= ease) continue;
+        const w = 1 - G.smoothstep(0, ease, d);
+        if (Math.abs(sh.delta * w) > Math.abs(add[i])) add[i] = sh.delta * w;
+      }
+    }
+    for (let i = 0; i < S.length; i++) S[i].y += add[i];
+  }
+}
+
+/**
+ * A ramp that ends on a street, not on another road, ends at the street's
+ * height: the relief there. Its vertical curve and the grade limit leave it a
+ * metre or so off, a step a car cannot climb.
+ */
+function settleEnds(roads, streets, terrain) {
+  const grid = new G.Grid(48);
+  for (const st of streets) {
+    for (let i = 0; i + 1 < st.path.length; i++) {
+      const a = st.path[i], b = st.path[i + 1], h = st.width / 2 + 2;
+      grid.insert({ a, b, h }, Math.min(a[0], b[0]) - h, Math.min(a[1], b[1]) - h, Math.max(a[0], b[0]) + h, Math.max(a[1], b[1]) + h);
+    }
+  }
+  const tmp = [];
+  const onStreet = (p) => grid.query(p.x, p.n, 0, tmp).some((c) => G.segDist2(p.x, p.n, c.a[0], c.a[1], c.b[0], c.b[1]).d2 < c.h * c.h);
+  for (const r of roads) {
+    if (r.loop || r.samples.length < 3) continue;
+    const S = r.samples;
+    const grade = r.rules.maxGrade * 0.8;
+    for (const [end, dir, name] of [[0, 1, 'start'], [S.length - 1, -1, 'end']]) {
+      if ((r.junctions || []).some((j) => j.end === name)) continue;
+      const p = S[end];
+      if (!onStreet(p)) continue;
+      const delta = terrain.height(p.x, p.n) - p.y;
+      if (Math.abs(delta) < 0.05 || Math.abs(delta) > 3) continue;
+      const fade = Math.max(30, Math.abs(delta) / grade);
+      for (let k = end; k >= 0 && k < S.length; k += dir) {
+        const d = Math.abs(S[k].s - p.s);
+        if (d >= fade) break;
+        S[k].y += delta * (1 - G.smoothstep(0, fade, d));
+      }
+    }
+  }
+}
+
+/**
+ * A street crossing a road a metre or three off its level can neither pass
+ * under it nor over it: it meets it. The relief around the crossing is set to
+ * the road's height, and the street, which lies on the relief, ramps up or
+ * down to the junction over the next mesh cell.
+ */
+function meetStreets(terrain, roads, streetsAt) {
+  const g = terrain.grid;
+  const tmp = [];
+  for (const r of roads) {
+    if (r.cls === 'bridge' && r.structure) continue;
+    for (let k = 0; k < r.samples.length; k += 2) {
+      const p = r.samples[k];
+      if (p.tunnel) continue;
+      const rel = p.y - terrain.height(p.x, p.n);
+      if (Math.abs(rel) < 0.3 || Math.abs(rel) > 3.5) continue;
+      const hits = streetsAt(p.x, p.n, 0, tmp);
+      if (!hits.length) continue;
+      const reach = r.half + g.cell * 0.75;
+      const i0 = Math.floor((p.x - reach - g.x0) / g.cell), i1 = Math.ceil((p.x + reach - g.x0) / g.cell);
+      const j0 = Math.floor((p.n - reach - g.n0) / g.cell), j1 = Math.ceil((p.n + reach - g.n0) / g.cell);
+      for (let j = Math.max(0, j0); j <= Math.min(g.rows - 1, j1); j++) {
+        for (let i = Math.max(0, i0); i <= Math.min(g.cols - 1, i1); i++) {
+          const x = g.x0 + i * g.cell, n = g.n0 + j * g.cell;
+          if (Math.hypot(x - p.x, n - p.n) > reach) continue;
+          g.h[j * g.cols + i] = p.y - 0.1;
+        }
+      }
     }
   }
 }

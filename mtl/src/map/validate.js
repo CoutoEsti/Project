@@ -81,13 +81,15 @@ export function validate(layout) {
     for (const p of r.samples) {
       for (const st of layout.streetsAt(p.x, p.n, -0.5, tmp)) {
         if (st.cls === 'apron') continue;
-        const ok = Math.abs(p.y) < 0.45 || p.y >= headroom || (p.covered && p.y <= -headroom);
+        // Streets lie on the relief: heights are measured from it.
+        const rel = p.y - (p.gs ?? 0);
+        const ok = Math.abs(rel) < 0.45 || rel >= headroom || (p.covered && rel <= -headroom);
         if (ok) continue;
         const key = r.id + '|' + st.index;
         if (seen.has(key)) continue;
         seen.add(key);
         findings.push({ kind: 'crossing', road: r.id, street: st.name, severity: 'error',
-          text: `${r.name} rencontre ${st.name} en ${at(p)} à ${p.y.toFixed(1)} m : ni au niveau, ni dessus, ni dessous` });
+          text: `${r.name} rencontre ${st.name} en ${at(p)} à ${rel.toFixed(1)} m : ni au niveau, ni dessus, ni dessous` });
       }
     }
   }

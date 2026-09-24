@@ -81,7 +81,7 @@ export async function buildWorld(THREE, source, opts = {}) {
     add(tagAll(buildSigns(THREE, map, layout, M), 'panneaux'));
     return lm.objects;
   });
-  const footprints = await step('emprises', () => landmarkFootprints(THREE, landmarks));
+  const footprints = await step('emprises', () => clearStreets(layout, landmarks, landmarkFootprints(THREE, landmarks)));
   const boxes = footprints.map((f) => ({ f, bb: ringBBox(f.ring) }));
   const under = (b) => boxes.some(({ f, bb }) => {
     if (b.cx < bb.x0 - 150 || b.cx > bb.x1 + 150 || b.cn < bb.n0 - 150 || b.cn > bb.n1 + 150) return false;
@@ -115,6 +115,93 @@ export async function buildWorld(THREE, source, opts = {}) {
     root, map, layout, structures, buildings, lamps, trees, landmarks, footprints,
     materials: M, timings: T, animated, tiles, details, stats, settings,
   };
+}
+
+/**
+ * A landmark placed by hand, or grown by the scale, can end up across a real
+ * street or road. Slide it (and turn it if need be), the nearest way first,
+ * until none of its footprints touches a carriageway at its level; a model
+ * with no free spot within 120 m stays put.
+ */
+function clearStreets(layout, objects, footprints) {
+  const s = layout.map.scale || 1;
+  const SEARCH = 120 * s;
+  // Every point a model must not cover near (x, n): the centreline and both
+  // edges of each carriageway at the model's level, every 2 m.
+  const obstacles = (x, n, reach, y0) => {
+    const out = [];
+    const R = reach + SEARCH;
+    for (const r of layout.roads) {
+      const h = Math.max(0, r.half - 1);
+      for (const p of r.samples) {
+        if (Math.abs(p.x - x) > R || Math.abs(p.n - n) > R) continue;
+        if (p.y > y0 + 5 || p.y < y0 - 3) continue;
+        out.push([p.x, p.n], [p.x + p.lx * h, p.n + p.ln * h], [p.x - p.lx * h, p.n - p.ln * h]);
+      }
+    }
+    for (const st of layout.streets) {
+      if (st.cls === 'plaza' || st.cls === 'alley') continue;
+      const P = st.path, h = Math.max(0, st.half - 1);
+      if (!P.some(([px, pn]) => Math.abs(px - x) < R + 200 && Math.abs(pn - n) < R + 200)) continue;
+      for (let i = 0; i + 1 < P.length; i++) {
+        const ex = P[i + 1][0] - P[i][0], en = P[i + 1][1] - P[i][1], len = Math.hypot(ex, en) || 1;
+        const lx = -en / len, ln = ex / len;
+        for (let d = 0; d <= len; d += 2) {
+          const px = P[i][0] + (ex * d) / len, pn = P[i][1] + (en * d) / len;
+          if (Math.abs(px - x) > R || Math.abs(pn - n) > R) continue;
+          out.push([px, pn], [px + lx * h, pn + ln * h], [px - lx * h, pn - ln * h]);
+        }
+      }
+    }
+    return out;
+  };
+  const blocks = (ring, dx, dn, pts) => {
+    const bb = ringBBox(ring);
+    for (const [x, n] of pts) {
+      const u = x - dx, v = n - dn;
+      if (u < bb.x0 || u > bb.x1 || v < bb.n0 || v > bb.n1) continue;
+      if (pointInRing(u, v, ring)) return true;
+    }
+    return false;
+  };
+  // A footprint turned by `turn` degrees (clockwise) about (ox, on).
+  const turned = (ring, ox, on, turn) => {
+    if (!turn) return ring;
+    const c = Math.cos((turn * Math.PI) / 180), sn = Math.sin((turn * Math.PI) / 180);
+    return ring.map(([x, n]) => [ox + (x - ox) * c + (n - on) * sn, on - (x - ox) * sn + (n - on) * c]);
+  };
+  for (const g of objects) {
+    const mine = footprints.filter((f) => f.id === g.userData.landmark);
+    if (!mine.length) continue;
+    const ox = g.position.x, on = -g.position.z;
+    let reach = 0;
+    for (const f of mine) for (const [x, n] of f.ring) reach = Math.max(reach, Math.hypot(x - ox, n - on));
+    const pts = obstacles(ox, on, reach, Math.min(...mine.map((f) => f.y0)));
+    if (!mine.some((f) => blocks(f.ring, 0, 0, pts))) continue;
+    let found = null;
+    for (let r = 0; r <= SEARCH && !found; r += 3 * s) {
+      for (const turn of [0, 90, -90, 45, -45, 180]) {
+        const rings = mine.map((f) => turned(f.ring, ox, on, turn));
+        for (let a = 0; a < (r ? 16 : 1) && !found; a++) {
+          const dx = Math.cos((a * Math.PI) / 8) * r, dn = Math.sin((a * Math.PI) / 8) * r;
+          if (!rings.some((ring) => blocks(ring, dx, dn, pts))) found = [dx, dn, turn];
+        }
+        if (found) break;
+      }
+    }
+    if (!found) continue;
+    const [dx, dn, turn] = found;
+    const x = ox + dx, n = on + dn;
+    const dy = layout.terrain.height(x, n) - g.position.y;
+    g.position.set(x, g.position.y + dy, -n);
+    g.rotation.y -= (turn * Math.PI) / 180;
+    g.updateMatrixWorld(true);
+    for (const f of mine) {
+      f.ring = turned(f.ring, ox, on, turn).map(([px, pn]) => [px + dx, pn + dn]);
+      f.y0 += dy; f.y1 += dy;
+    }
+  }
+  return footprints;
 }
 
 function tagAll(list, layer) {

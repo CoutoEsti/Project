@@ -16,7 +16,7 @@ const KEYS = {
 
 const PITCH_MIN = -Math.PI / 2 + 0.01;
 const PITCH_MAX = Math.PI / 2 - 0.05;
-const H_MAX = 4000;
+const H_MAX = 8000;
 
 /** Above the whole map, from the south: the island, the river and the islands at once. */
 export const OVERVIEW = { x: 380, n: -3700, h: 2700, tx: 380, tn: 150, th: 0 };
@@ -95,16 +95,26 @@ export class FlyCamera {
     this.apply();
   }
 
-  overview() {
-    const o = OVERVIEW;
-    this.lookAt(o.x, o.n, o.h, o.tx, o.tn, o.th, true);
+  /** The whole map from the south, framed on the zone that was built. */
+  overviewPose() {
+    const W = this.game.layout && this.game.layout.map.world;
+    if (!W) return OVERVIEW;
+    const cx = (W.x0 + W.x1) / 2, cn = (W.n0 + W.n1) / 2;
+    const span = Math.max(W.x1 - W.x0, W.n1 - W.n0);
+    return { x: cx, n: W.n0 - span * 0.3, h: span * 0.5, tx: cx, tn: cn, th: 0 };
+  }
+
+  overview(glide = true) {
+    const o = this.overviewPose();
+    this.lookAt(o.x, o.n, o.h, o.tx, o.tn, o.th, glide);
   }
 
   /** Put the point (x, n) in the middle of the view, keeping height and angle. */
   centreOn(x, n) {
-    const h = Math.max(this.h, 150);
+    const g = this.ground(x, n);
+    const h = Math.max(this.h, g + 150);
     const pitch = Math.min(this.pitch, -0.35);
-    const back = h / Math.tan(-pitch);
+    const back = (h - g) / Math.tan(-pitch);
     const fx = Math.sin(this.yaw), fn = Math.cos(this.yaw);
     this.vel.x = this.vel.n = this.vel.h = 0;
     this.anim = { from: { x: this.x, n: this.n, h: this.h, yaw: this.yaw, pitch: this.pitch },
@@ -116,12 +126,23 @@ export class FlyCamera {
     return [Math.sin(this.yaw) * cp, Math.cos(this.yaw) * cp, Math.sin(this.pitch)];
   }
 
-  /** Where the line of sight meets the street plane, or null above the horizon. */
+  /** Where the line of sight meets the ground, or null above the horizon. */
   target() {
     const [fx, fn, fh] = this.forward();
     if (fh > -0.02) return null;
-    const t = this.h / -fh;
-    return { x: this.x + fx * t, n: this.n + fn * t };
+    // March along the ray, a step growing with the distance, then bisect.
+    const below = (t) => this.h + fh * t <= this.ground(this.x + fx * t, this.n + fn * t);
+    let a = 0, b = 0;
+    for (let t = 1, step = 1; t < 40000; t += step, step = Math.min(50, step * 1.2)) {
+      if (below(t)) { b = t; break; }
+      a = t;
+    }
+    if (!b) return null;
+    for (let k = 0; k < 24; k++) {
+      const m = (a + b) / 2;
+      if (below(m)) b = m; else a = m;
+    }
+    return { x: this.x + fx * b, n: this.n + fn * b };
   }
 
   /**

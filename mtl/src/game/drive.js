@@ -260,7 +260,7 @@ export class Driver {
 export function zoneAt(L, x, n) {
   let best = null, bd = Infinity;
   for (const q of L.quartiers || []) {
-    const w = q.type === 'macrohood' || q.type === 'locality' ? 1.6 : 1;
+    const w = q.type === 'macrohood' || q.type === 'locality' ? 2.5 : 1;
     const d = Math.hypot(q.x - x, q.n - n) * w;
     if (d < bd) { bd = d; best = q; }
   }

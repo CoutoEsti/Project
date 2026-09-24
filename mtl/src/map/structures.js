@@ -24,6 +24,8 @@ const PROBE = 0.8;          // how far past the edge we look
 const WALL_OFFSET = 0.5;    // retaining walls stand on the hole's boundary
 const DEEP = -12;           // skirt bottom when there is nothing underneath
 const TWIN = 6;             // twin columns stand this far either side
+const HEADROOM = 6.2;       // a road this far below drives under the deck
+const MERGE = 2.0;          // closer than this in height, two roads merge
 
 export function buildStructures(layout) {
   const { roads, map } = layout;
@@ -43,7 +45,7 @@ export function buildStructures(layout) {
 
   for (const r of roads) annotate(r, ground);
   for (const r of roads) roadStructures(r, index, ground, layout, out);
-  covers(roads, out);
+  covers(roads, out, index);
   quays(layout, index, out);
   out.index = index;
   out.ground = ground;
@@ -62,26 +64,36 @@ function annotate(r, ground) {
 }
 
 function classify(r, p, side, index, ground) {
-  if (p.covered) return { kind: p.tunnel ? 'tunnel' : 'covered' };
   const qx = p.x + side * p.lx * (r.half + PROBE);
   const qn = p.n + side * p.ln * (r.half + PROBE);
-  let merge = false, lower = null, higher = null;
+  let merge = false, lower = null, higher = null, aboveInTunnel = false;
   for (const o of index.surfacesAt(qx, qn, 0)) {
-    if (o.road === r || o.covered) continue;
+    // Itself, unless it is another stretch of it: a hairpin's other leg.
+    if (o.road === r && Math.abs(o.s - p.s) < r.width * 3) continue;
     const dy = o.y - p.y;
-    if (Math.abs(dy) < 0.45) merge = true;
+    // A ramp joining in the tunnel merges like anywhere else. Up to a step
+    // a car could stumble over, no wall: the data's ramps often land a metre
+    // off the carriageway they join, and a wall there stands in its lanes.
+    if (Math.abs(dy) < MERGE) merge = true;
+    else if (o.covered) { if (dy > 0 && dy < HEADROOM) aboveInTunnel = true; continue; }
     else if (dy < 0) { if (!lower || o.y > lower.y) lower = o; }
     else if (!higher || o.y < higher.y) higher = o;
   }
   if (merge) return { kind: 'merge' };
+  // Two bores diverging under the ground: the lower one's wall would stand
+  // in the upper one's lanes.
+  if (p.covered && aboveInTunnel) return { kind: 'under' };
+  if (p.covered) return { kind: p.tunnel ? 'tunnel' : 'covered' };
   const gk = ground.kindAt(qx, qn);
   if (gk === 'hole') {
     if (lower) {
       // A road alongside and below (a ramp over the main lanes) gets a skirt
       // down to it. A road crossing underneath gets nothing: the deck spans
       // it, and a skirt would be a wall across its carriageway.
+      // So does one far enough below to drive under the deck: a skirt there
+      // would be a wall standing on its lanes.
       const q = lower.road.samples[lower.i];
-      if (Math.abs(q.tx * p.tx + q.tn * p.tn) < 0.7) return { kind: 'viaduct', g: lower.y };
+      if (Math.abs(q.tx * p.tx + q.tn * p.tn) < 0.7 || p.y - lower.y > HEADROOM) return { kind: 'viaduct', g: lower.y };
       return { kind: 'over', to: lower.y };
     }
     if (higher) return { kind: 'under' };
@@ -91,12 +103,16 @@ function classify(r, p, side, index, ground) {
   const rel = p.y - g;
   if (gk === 'water') return { kind: rel > 1.5 ? 'water' : 'grade', g };
   if (rel > 4.5) return { kind: 'viaduct', g };
-  if (rel > 0.3) {
-    if (lower && lower.y > g + 0.3) return { kind: 'over', to: lower.y };
+  // Carved ground sits 25 cm under the asphalt: that is not an embankment.
+  if (rel > 0.6) {
+    if (lower && lower.y > g + 0.3 && p.y - lower.y <= HEADROOM) return { kind: 'over', to: lower.y };
     return { kind: 'embankment', g };
   }
   if (rel < -0.3) {
     if (higher && higher.y - p.y < 3) return { kind: 'under' };
+    // A road crossing over at ground level: the wall stops under its deck,
+    // and no fence stands across its lanes.
+    if (higher && higher.y - g < 2) return { kind: 'sunken', g: Math.min(g, higher.y - 1.2), under: true };
     return { kind: 'sunken', g };
   }
   return { kind: 'grade', g };
@@ -137,10 +153,20 @@ function roadStructures(r, index, ground, layout, out) {
         out.walls.push({ kind: 'retaining', road: r.id, side, thickness: 0.6,
           pts: seg.map((p, j) => [...at(p, r.half + WALL_OFFSET + 0.3), p.y - 0.5, ks[j].g + 0.05]) });
         // A fence on the street side wherever the drop is worth falling into.
-        const deep = seg.filter((p, j) => ks[j].g - p.y > 1.2);
-        if (deep.length >= 2) {
-          out.fences.push({ height: 1.6, pts: seg.map((p, j) => [...at(p, r.half + WALL_OFFSET + 0.45), ks[j].g + 0.05]) });
-        }
+        // Split where a road passes over.
+        let run = [], deep = false;
+        const flush = () => {
+          if (run.length >= 2 && deep) out.fences.push({ height: 1.6, pts: run });
+          run = []; deep = false;
+        };
+        seg.forEach((p, j) => {
+          const f = at(p, r.half + WALL_OFFSET + 0.45);
+          const over = index.surfacesAt(f[0], f[1], 1.5).some((o) => o.road !== r && o.y > ks[j].g - 1.5);
+          if (ks[j].under || over) { flush(); return; }
+          run.push([...f, ks[j].g + 0.05]);
+          if (ks[j].g - p.y > 1.2) deep = true;
+        });
+        flush();
       } else if (kind === 'covered' || kind === 'tunnel') {
         out.walls.push({ kind: 'tunnel', road: r.id, side, thickness: 0.6,
           pts: seg.map((p) => [...at(p, r.half + WALL_OFFSET + 0.3), p.y - 0.5, ceilingY(p) + 0.1]) });
@@ -255,7 +281,7 @@ function lampsFor(r, out) {
  * Covers: ceilings over tunnels and under streets, the face of each cover
  * where the trench opens again, and the railing along the street's edge.
  */
-function covers(roads, out) {
+function covers(roads, out, index) {
   for (const r of roads) {
     const S = r.samples;
     runsOf(S, (p) => (p.covered ? 'c' : 'o'), (k, i0, i1) => {
@@ -268,7 +294,10 @@ function covers(roads, out) {
         const w = r.half + WALL_OFFSET + 0.6;
         const a = [p.x + p.lx * w, p.n + p.ln * w], b = [p.x - p.lx * w, p.n - p.ln * w];
         out.fascias.push({ a, b, y0: ceilingY(p), y1: p.gs + 0.05, face: io > ic ? 1 : -1, tx: p.tx, tn: p.tn });
-        out.fences.push({ height: 1.3, pts: [[a[0], a[1], p.gs + 0.05], [b[0], b[1], p.gs + 0.05]] });
+        // No railing where another road runs across the cover at street level.
+        const m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+        const crossed = [a, m, b].some(([x, n]) => index.surfacesAt(x, n, 1.5).some((q) => q.road !== r && Math.abs(q.y - p.gs) < 2.5));
+        if (!crossed) out.fences.push({ height: 1.3, pts: [[a[0], a[1], p.gs + 0.05], [b[0], b[1], p.gs + 0.05]] });
       }
     });
   }

@@ -55,16 +55,20 @@ export function buildSolids(layout, structures, buildings, extras = {}) {
     const h = c.width / 2 + 0.5;
     S.add(c.x + c.lx * h, c.n + c.ln * h, c.x - c.lx * h, c.n - c.ln * h, c.y - 0.3, c.y + 1.3, 0.3);
   }
-  for (const f of structures.fascias) S.add(f.a[0], f.a[1], f.b[0], f.b[1], f.y0, 0.02, 0.35);
+  // Cover faces (fascias) are not solid: they hang over the trench, above
+  // the car under them and below the car on the street.
   for (const p of structures.pillars) {
     for (const [cx, cn] of pillarColumns(p)) S.add(cx, cn, cx, cn, p.y0, p.y1, (p.w / 2) * 1.2);
   }
   for (const b of buildings) {
+    // From its own base: the Ville-Marie runs under whole blocks, and a
+    // part raised on columns (minH) lets a car through underneath.
+    const base = (b.base || 0) + (b.minH > 2 ? b.minH : 0);
     const top = (b.base || 0) + b.h;
     const ring = b.ring;
     for (let i = 0; i < ring.length; i++) {
       const a = ring[i], c = ring[(i + 1) % ring.length];
-      S.add(a[0], a[1], c[0], c[1], -0.5, top, 0);
+      S.add(a[0], a[1], c[0], c[1], base - 0.5, top, 0);
     }
   }
   for (const l of extras.lamps || []) S.add(l.x, l.n, l.x, l.n, l.y - 0.2, l.y + 6, 0.18);

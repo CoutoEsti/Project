@@ -85,10 +85,13 @@ export function buildMap(src, settings) {
   const streets = [], roads = [];
   const special = OVERLAY.bridges || {};
   for (const r of src.roads) {
+    // A motorway is one way unless tagged otherwise (OpenStreetMap's implied
+    // rule); the data only says so when someone wrote it down.
+    const oneway = r.oneway || r.cls === 'motorway';
     for (const piece of clipRoad(r, zone.box)) {
       const highway = r.cls === 'motorway' || (r.cls === 'trunk' && (r.kind === 'link' || /^Autoroute/.test(r.name)));
       const width = S(r.kind === 'link' && highway ? LINK_WIDTH : r.kind === 'alley' ? WIDTH.alley[0]
-        : (WIDTH[r.cls] || WIDTH.residential)[r.oneway ? 1 : 0]);
+        : (WIDTH[r.cls] || WIDTH.residential)[oneway ? 1 : 0]);
       const pts = piece.pts.map(P);
       const edges = piece.pts.length - 1;
       const level = (i) => (piece.levels ? piece.levels[i] : 0);
@@ -101,7 +104,7 @@ export function buildMap(src, settings) {
       const lifted = [];
       for (let i = 0; i < edges; i++) lifted.push(level(i) !== 0 || (flag(i) & 2) || ((flag(i) & 1) && wet(i)));
       const name = r.name;
-      const common = { name, ref: r.ref, oneway: r.oneway, osm: r.id, a: r.a, b: r.b, cutStart: piece.cutStart, cutEnd: piece.cutEnd };
+      const common = { name, ref: r.ref, oneway, osm: r.id, a: r.a, b: r.b, cutStart: piece.cutStart, cutEnd: piece.cutEnd };
       if (highway || special[name]) {
         const loop = pts.length > 3 && Math.hypot(pts[0][0] - pts[pts.length - 1][0], pts[0][1] - pts[pts.length - 1][1]) < 1;
         roads.push({
@@ -120,7 +123,7 @@ export function buildMap(src, settings) {
       // become roads; the rest is draped on the ground.
       const need = (i) => {
         const o = Math.abs(offsetOf(level(i), flag(i), false));
-        return o > 0 ? S(o) / GRADE.road + S(25) : S(30);
+        return o > 0 ? o / GRADE.road + S(25) : S(30);
       };
       const cum = [0];
       for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
@@ -151,7 +154,7 @@ export function buildMap(src, settings) {
           ...common,
           id: `s${r.id}-${k}${piece.part ? `-${piece.part}` : ''}`,
           cls,
-          lanes: r.oneway ? 1 : 2, width, median: false,
+          lanes: oneway ? 1 : 2, width, median: false,
           pts: sub.pts, levels: sub.edges.map(level), flags: sub.edges.map(flag), wet: sub.edges.map(wet),
           priority: PRIORITY[r.cls] || 0,
           street: true,
@@ -273,17 +276,19 @@ function profile(r, terrain, waterAt, s, done, spec) {
   // Hard targets on vertices touching a lifted edge.
   const target = new Array(m).fill(null);
   for (let i = 0; i < m - 1; i++) {
-    const o = offsetOf(lv[i], fl[i], !r.street) * s;
+    // Headroom is for the car, which keeps its size: not scaled.
+    const o = offsetOf(lv[i], fl[i], !r.street);
     const bridgeFlat = !o && ((fl[i] & 1) || wt[i]);
     if (!o && !bridgeFlat) continue;
     for (const k of [i, i + 1]) {
-      const y = g[k] + (bridgeFlat ? Math.max(0.5 * s, 0) : o);
+      const y = g[k] + (bridgeFlat ? 0.5 : o);
       if (target[k] === null || Math.abs(y - g[k]) > Math.abs(target[k] - g[k])) target[k] = y;
     }
   }
   if (spec && spec.peak) {
     // A named bridge with a known silhouette (Jacques-Cartier over the
-    // seaway): a parabola over its wet span, peaking at `peak` metres.
+    // river and Île Sainte-Hélène): a parabola from its first wet span to
+    // its last, peaking at `peak` metres.
     let i0 = -1, i1 = -1;
     for (let i = 0; i < m - 1; i++) if (wt[i]) { if (i0 < 0) i0 = i; i1 = i + 1; }
     if (i0 >= 0) {
@@ -294,7 +299,11 @@ function profile(r, terrain, waterAt, s, done, spec) {
       }
     }
   }
-  // Pin the ends onto a road already profiled, when they land on one.
+  // Pin the ends onto a road already profiled, when they land on one — and
+  // when it can be reached at all: a short ramp up to a deck forty metres
+  // over the island cannot, and is closed off where it ends instead.
+  const fixed = new Uint8Array(m);
+  const grade0 = GRADE[r.cls] || GRADE.road;
   for (const k of [0, m - 1]) {
     const [x, n] = pts[k];
     let best = null;
@@ -302,7 +311,15 @@ function profile(r, terrain, waterAt, s, done, spec) {
       const hit = nearestOnPath(o.path, x, n, 1.2 * s + o.width / 2);
       if (hit && (!best || hit.d < best.d)) best = hit;
     }
-    if (best) target[k] = best.y;
+    if (!best) continue;
+    const other = k === 0 ? m - 1 : 0;
+    const base = target[other] ?? g[other];
+    if (Math.abs(best.y - base) > cum[m - 1] * grade0 * 1.6 + 1) {
+      if (k === 0) r.cutStart = true; else r.cutEnd = true;
+      r.closure = 'Fermé';
+      continue;
+    }
+    target[k] = best.y; fixed[k] = 1;
   }
 
   const grade = GRADE[r.cls] || GRADE.road;
@@ -331,10 +348,40 @@ function profile(r, terrain, waterAt, s, done, spec) {
     else y = g[i];
     out.push([pts[i][0], pts[i][1], y]);
   }
+  relax(out, cum, grade, fixed);
   r.edgeFlags = fl;
   r.edgeLevels = lv;
   r.cum = cum;
   return out;
+}
+
+/**
+ * OpenStreetMap's layers are an order, not heights: a tunnel on layer −3 can
+ * come out onto a viaduct on layer 3 a hundred metres on. Where the targets
+ * cannot all be met within the grade, the grade wins: each too-steep step is
+ * shared between its two ends until none is left, the ends landing on
+ * another road staying put.
+ */
+function relax(out, cum, grade, fixed) {
+  const m = out.length;
+  const lim = grade * 1.02;
+  for (let iter = 0; iter < 400; iter++) {
+    let worst = 0;
+    for (let i = 1; i < m; i++) {
+      const ds = cum[i] - cum[i - 1];
+      const d = out[i][2] - out[i - 1][2];
+      const excess = Math.abs(d) - lim * ds;
+      if (excess <= 1e-3) continue;
+      worst = Math.max(worst, excess);
+      const sgn = Math.sign(d);
+      const a = fixed[i - 1], b = fixed[i];
+      if (a && b) continue;
+      const ka = b ? 1 : a ? 0 : 0.5;
+      out[i - 1][2] += sgn * excess * ka;
+      out[i][2] -= sgn * excess * (1 - ka);
+    }
+    if (worst < 0.01) break;
+  }
 }
 
 /** Split long edges so heights have somewhere to change; edge data carried. */

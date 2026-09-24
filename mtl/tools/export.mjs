@@ -1,7 +1,8 @@
 // Export the map for Unity from the command line.
 //
 //   node mtl/tools/export.mjs            → mtl/export/*.glb + map.json
-//   node mtl/tools/export.mjs --out DIR
+//   node mtl/tools/export.mjs --out DIR --zone centre --echelle 85
+//   node mtl/tools/export.mjs --tuiles   → un fichier par couche et par tuile de 1 km
 //
 // Same code as the E key in the page. Without a canvas in node the textures
 // are left out: Unity maps the materials by name (see unity/README.md).
@@ -13,7 +14,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
-const OUT = path.resolve(args.includes('--out') ? args[args.indexOf('--out') + 1] : path.join(ROOT, 'export'));
+const arg = (k, d) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : d; };
+const OUT = path.resolve(arg('--out', path.join(ROOT, 'export')));
 
 // The page's import map, for node: 'three' and 'three/addons/' → vendor/.
 register(pathToFileURL(path.join(ROOT, 'tools', 'lib', 'three-hooks.mjs')));
@@ -26,10 +28,18 @@ globalThis.FileReader ??= class {
 const THREE = await import('three');
 const { buildWorld } = await import('../src/world/build.js');
 const { exportZones } = await import('../src/export/gltf.js');
+const { resolveSettings } = await import('../src/map/zones.js');
+const { loadSourceNode } = await import('./lib/source-node.mjs');
 
 const t0 = Date.now();
-const world = await buildWorld(THREE, {});
-const files = await exportZones(THREE, world);
+const file = JSON.parse(await fs.readFile(path.join(ROOT, 'carte.json'), 'utf8').catch(() => '{}'));
+const params = new URLSearchParams();
+if (arg('--zone', null)) params.set('zone', arg('--zone', null));
+if (arg('--echelle', null)) params.set('echelle', arg('--echelle', null));
+const settings = resolveSettings(file, params);
+console.log(`zone ${settings.zone}, échelle ${settings.echelle} %`);
+const world = await buildWorld(THREE, await loadSourceNode(), { settings });
+const files = await exportZones(THREE, world, { tiles: args.includes('--tuiles') });
 await fs.mkdir(OUT, { recursive: true });
 let total = 0;
 for (const f of files) {

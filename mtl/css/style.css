@@ -34,8 +34,9 @@ html, body {
 
 #hud { position: fixed; inset: 0; pointer-events: none; }
 #zone {
-  position: absolute; top: 18%; left: 0; right: 0; text-align: center;
-  font-size: clamp(28px, 6vw, 64px); font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase;
+  position: absolute; top: 18%; left: 16px; right: 16px; text-align: center;
+  font-size: clamp(22px, 4.6vw, 60px); font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase;
+  overflow-wrap: anywhere; line-height: 1.1;
   color: #fff; text-shadow: 0 0 18px rgba(55, 224, 255, 0.8), 0 2px 0 #000;
   opacity: 0; transition: opacity 0.6s;
 }
@@ -92,7 +93,7 @@ body.fly #speed, body.fly #road { display: none; }
   position: fixed; inset: 0; background: rgba(3, 5, 9, 0.92); z-index: 5;
   display: flex; align-items: center; justify-content: center;
 }
-#bigmap[hidden] { display: none; }
+#bigmap[hidden], #settings[hidden] { display: none; }
 #bigmap-canvas { max-width: 96vw; max-height: 88vh; cursor: crosshair; border-radius: 8px; }
 .bigmap-caption { position: absolute; bottom: 14px; left: 0; right: 0; text-align: center; color: var(--dim); font-size: 13px; }
 
