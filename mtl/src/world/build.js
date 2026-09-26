@@ -232,7 +232,8 @@ function light(mat, k) {
 
 /** Aviation lights: a slow blink, every tower together. */
 function blinker(mat) {
-  return { update(t) { light(mat, (t % 1.6) < 0.5 ? 1 : 0.04); } };
+  // By day they burn steady: off, a dimmed red box would read as a black one.
+  return { update(t) { light(mat, (t % 1.6) < 0.5 || (mat.userData.level ?? 1) < 1 ? 1 : 0.04); } };
 }
 
 function tagAll(list, layer) {

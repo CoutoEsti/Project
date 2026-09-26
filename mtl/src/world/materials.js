@@ -52,9 +52,21 @@ export function createMaterials(THREE, opts = {}) {
   M.Street_Asphalt = M.Asphalt.clone();
   M.Street_Asphalt.name = 'Asphalt';
   Object.assign(M.Street_Asphalt, { polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -3 });
+  if (canvasOk) antiTile(M.Street_Asphalt);
   M.Street_Sidewalk = M.Sidewalk.clone();
   M.Street_Sidewalk.name = 'Sidewalk';
-  Object.assign(M.Street_Sidewalk, { polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 });
+  // Vertex colours: the kerb is the same concrete, a band lighter.
+  Object.assign(M.Street_Sidewalk, { polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2, vertexColors: true });
+  // Beyond the zone: a far-off city, lit at night.
+  std('Outskirts', { color: 0xffffff, roughness: 1, emissive: 0x000000 });
+  if (canvasOk) {
+    const o = T.outskirts(THREE);
+    for (const t of [o.albedo, o.lights]) t.repeat.set(1 / T.OUTSKIRTS_METRES, 1 / T.OUTSKIRTS_METRES);
+    M.Outskirts.map = o.albedo;
+    M.Outskirts.emissiveMap = o.lights;
+  } else {
+    M.Outskirts.color.set(0x5d5c57);
+  }
   const water = std('Water', { color: 0x0b1e2c, roughness: 0.08, metalness: 0.1 });
   if (canvasOk) {
     const n = T.water(THREE);
@@ -67,8 +79,13 @@ export function createMaterials(THREE, opts = {}) {
   std('Concrete', { color: 0xffffff, roughness: 0.88 }, (t) => T.concrete(t));
   if (!canvasOk) M.Concrete.color.set(0x8b8883);
   std('Concrete_Dark', { color: 0xffffff, roughness: 0.95 }, (t) => T.concrete(t, '#56544f', 4));
+  // Deck undersides and tunnel ceilings: at night the lamps below light them a
+  // little, or they read as holes in the picture.
+  if (M.Concrete_Dark.map) M.Concrete_Dark.emissiveMap = M.Concrete_Dark.map;
   if (!canvasOk) M.Concrete_Dark.color.set(0x56544f);
   std('Tunnel', { color: 0xffffff, roughness: 0.4 }, T.tiles);
+  // At night the tiles glow faintly: the tunnel's own strip lights on them.
+  if (M.Tunnel.map) M.Tunnel.emissiveMap = M.Tunnel.map;
   if (!canvasOk) M.Tunnel.color.set(0xc9c3b0);
   std('Metal', { color: 0x6b6f73, roughness: 0.45, metalness: 0.7 });
   std('Metal_Dark', { color: 0x2a2c2e, roughness: 0.5, metalness: 0.6 });
@@ -99,8 +116,9 @@ export function createMaterials(THREE, opts = {}) {
   std('Bark', { color: 0x3b2e24, roughness: 1 });
   // A trace of emission so the canopy reads against the night as a shape,
   // not a hole.
-  std('Leaves', { color: 0x355e2c, roughness: 0.95, emissive: 0x0b1f1c });
-  std('Leaves_Dark', { color: 0x284a24, roughness: 0.95, emissive: 0x08171a });
+  // Vertex colours shade the crowns darker underneath.
+  std('Leaves', { color: 0x355e2c, roughness: 0.95, emissive: 0x0b1f1c, vertexColors: true });
+  std('Leaves_Dark', { color: 0x284a24, roughness: 0.95, emissive: 0x08171a, vertexColors: true });
 
   // --- light: these glow, and bloom picks them up ---
   glow('Lamp_Sodium', 0xffb36b, 3.2);
@@ -140,12 +158,32 @@ export function createMaterials(THREE, opts = {}) {
 }
 
 /**
+ * Break an 8 m texture's repeat: a second sample of the same map, four times
+ * larger and turned, modulates the first by its brightness. One extra
+ * texture read, and a street no longer shows the same crack every car length.
+ */
+function antiTile(m) {
+  m.customProgramCacheKey = () => 'anti-tile-v1';
+  m.onBeforeCompile = (shader) => {
+    shader.fragmentShader = shader.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+#ifdef USE_MAP
+{
+  vec2 bigUv = mat2(0.8, -0.6, 0.6, 0.8) * vMapUv * 0.23 + vec2(0.37, 0.11);
+  vec3 big = texture2D(map, bigUv).rgb;
+  float k = dot(big, vec3(0.3333)) / 0.026;
+  diffuseColor.rgb *= clamp(0.55 + 0.45 * k, 0.75, 1.3);
+}
+#endif`);
+  };
+}
+
+/**
  * Wet asphalt, faked: a light's pool on the ground stretches towards the eye,
  * the way its reflection streaks down a wet street. Done in the vertex shader
  * per instance (pools are unrotated discs), so it follows the camera for free.
  */
 function wetStreaks(m) {
-  m.customProgramCacheKey = () => 'wet-streaks-v1';
+  m.customProgramCacheKey = () => 'wet-streaks-v2';
   m.onBeforeCompile = (shader) => {
     shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
 #ifdef USE_INSTANCING
@@ -163,6 +201,14 @@ function wetStreaks(m) {
   vec2 perp = p - along * d;
   along = along * stretch + (stretch - 1.0);
   transformed.xz = perp * mix(1.0, 0.32, clamp((stretch - 1.0) / 2.0, 0.0, 1.0)) + d * along;
+  // Seen from above, the pools are what draws the streets at night: a
+  // little wider and brighter, the higher the eye.
+  float above = clamp((cameraPosition.y - c.y - 30.0) / 250.0, 0.0, 1.0);
+  float high = clamp((cameraPosition.y - c.y - 300.0) / 1500.0, 0.0, 1.0);
+  transformed.xz *= 1.0 + above * 0.6 + high * 0.6;
+#ifdef USE_INSTANCING_COLOR
+  vColor.rgb *= 1.0 + above * 1.4;
+#endif
 }
 #endif`);
   };
@@ -182,10 +228,11 @@ function facadeMaterial(THREE, atlas) {
     facadeRows: { value: T.FACADES.length },
     night: { value: 1 },
     litRatio: { value: 0.3 },
+    winRect: { value: T.facadeWindows().map(([x, y, w, h]) => new THREE.Vector4(x, y, w, h)) },
   };
   m.userData.uniforms = uniforms;
   if (!atlas) return m;
-  m.customProgramCacheKey = () => 'facades-v3';
+  m.customProgramCacheKey = () => 'facades-v4';
   m.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
     shader.vertexShader = shader.vertexShader
@@ -205,6 +252,7 @@ uniform sampler2D facadeAtlas;
 uniform float facadeRows;
 uniform float night;
 uniform float litRatio;
+uniform vec4 winRect[${T.FACADES.length}];
 varying vec2 vFacadeUv;
 flat varying float vFacade;
 flat varying float vSeed;
@@ -254,10 +302,28 @@ float st = fHash(vec3(fCell.x, vSeed, 3.0));
 vec3 scol = st < 0.45 ? vec3(1.0, 0.82, 0.62) : st < 0.62 ? vec3(0.2, 0.9, 1.0) : st < 0.8 ? vec3(1.0, 0.25, 0.65) : st < 0.9 ? vec3(0.6, 0.35, 1.0) : vec3(1.0, 0.6, 0.25);
 wcol = mix(wcol, scol, shop);
 float shade = 0.45 + 0.55 * fHash(vec3(fCell, 5.0 + vSeed));
-// Blinds in some windows: bands across the light.
-float blinds = step(0.72, fHash(vec3(fCell, vSeed + 19.0)));
-shade *= mix(1.0, 0.55 + 0.45 * step(0.35, fract(ff.y * 11.0)), blinds);
-totalEmissiveRadiance += wcol * lit * shade * mix(0.95, 1.15, shop);
+// Inside the window: a room lit from its ceiling, brighter up top, the
+// corners in shadow, furniture dark along the sill. Curtains drawn to the
+// sides in some, blinds across others.
+vec4 wr = winRect[int(vFacade + 0.5)];
+vec2 wuv = clamp((ff - wr.xy) / wr.zw, 0.0, 1.0);
+float room = mix(0.5, 1.1, smoothstep(0.0, 1.0, wuv.y));
+room *= 1.0 - 0.45 * pow(abs(wuv.x * 2.0 - 1.0), 3.0);
+room *= mix(0.55, 1.0, smoothstep(0.12, 0.3, wuv.y));
+float cur = fHash(vec3(fCell, vSeed + 23.0));
+float curtain = step(0.55, cur) * (1.0 - office) * (1.0 - shop);
+float cw = 0.14 + 0.16 * fract(cur * 7.0);
+float side = 1.0 - smoothstep(cw, cw + 0.05, min(wuv.x, 1.0 - wuv.x));
+room = mix(room, 0.42, side * curtain);
+float blinds = step(0.78, fHash(vec3(fCell, vSeed + 19.0)));
+room *= mix(1.0, 0.5 + 0.5 * step(0.3, fract(wuv.y * 9.0)), blinds);
+// Shops: an even, brighter shopfront.
+room = mix(room, 0.9 + 0.2 * wuv.y, shop);
+// A few rooms lit only by a television: dim and blue.
+float tv = step(0.93, fHash(vec3(fCell, vSeed + 31.0))) * (1.0 - office) * (1.0 - shop);
+wcol = mix(wcol, vec3(0.35, 0.5, 1.0), tv);
+shade *= mix(1.0, 0.45, tv);
+totalEmissiveRadiance += wcol * lit * shade * room * mix(0.82, 1.05, shop);
 // The street lights the bottom of every wall, fading up two floors: warm,
 // or tinted by the signs.
 float bounce = exp(-vFacadeUv.y * 1.3) * night * (1.0 - fGlass * 0.5);
@@ -286,5 +352,9 @@ function setNight(M, night) {
   if (M.Beacon) M.Beacon.visible = !!night;
   // Streets look wet at night — the NFSU look — and dry by day.
   if (M.Asphalt) M.Asphalt.roughness = night ? 0.42 : 0.82;
+  if (M.Concrete_Dark && M.Concrete_Dark.emissiveMap) M.Concrete_Dark.emissive.set(night ? 0x766e7c : 0x000000);
+  if (M.Tunnel && M.Tunnel.emissiveMap) M.Tunnel.emissive.set(night ? 0x766d5f : 0x000000);
+  // Sparse one-texel lamps: bright, or the mipmaps average them away.
+  if (M.Outskirts) M.Outskirts.emissive.setScalar(night ? 2.6 : 0);
   if (M.Street_Asphalt) M.Street_Asphalt.roughness = night ? 0.42 : 0.82;
 }

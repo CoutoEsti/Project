@@ -9,6 +9,7 @@ export function createSky(THREE, scene, renderer) {
     glow: { value: new THREE.Color() },
     glow2: { value: new THREE.Color() },
     stars: { value: 1 },
+    haze: { value: new THREE.Color() },
   };
   const dome = new THREE.Mesh(
     new THREE.SphereGeometry(9000, 32, 16),
@@ -26,7 +27,7 @@ export function createSky(THREE, scene, renderer) {
           gl_Position.z = gl_Position.w;
         }`,
       fragmentShader: `
-        uniform vec3 top; uniform vec3 horizon; uniform vec3 glow; uniform vec3 glow2; uniform float stars;
+        uniform vec3 top; uniform vec3 horizon; uniform vec3 glow; uniform vec3 glow2; uniform float stars; uniform vec3 haze;
         varying vec3 vDir;
         float h(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.yzx + 33.33); return fract((p.x + p.y) * p.z); }
         void main() {
@@ -38,6 +39,9 @@ export function createSky(THREE, scene, renderer) {
           c += mix(glow, glow2, side) * exp(-max(y, 0.0) * 7.0);
           // Low cloud deck lit from below.
           c += glow * 0.35 * smoothstep(0.08, 0.2, y) * (1.0 - smoothstep(0.2, 0.45, y));
+          // The sky meets the ground in the fog's own colour: no seam where
+          // the last fogged rooftop ends and the dome begins.
+          c = mix(haze, c, smoothstep(-0.01, 0.07, vDir.y));
           if (stars > 0.0 && y > 0.05) {
             vec3 q = floor(vDir * 420.0);
             float s = step(0.9985, h(q)) * smoothstep(0.05, 0.4, y);
@@ -75,8 +79,8 @@ export function createSky(THREE, scene, renderer) {
       uniforms.glow.value.set(0x3a1440);
       uniforms.glow2.value.set(0x0a3a4a);
       uniforms.stars.value = 0.35;
-      hemi.color.set(0x5566c8);
-      hemi.groundColor.set(0x4a1c46);
+      hemi.color.set(0x5262b0);
+      hemi.groundColor.set(0x3e2040);
       hemi.intensity = 0.6;
       sun.color.set(0x8ea6ff);
       sun.intensity = 0.4;
@@ -98,6 +102,7 @@ export function createSky(THREE, scene, renderer) {
       scene.fog.color.set(0xa9bfd3);
       scene.fog.density = 0.00022;
     }
+    uniforms.haze.value.copy(scene.fog.color);
     if (pmrem) {
       // Bake the dome alone into an environment map — without the stars, or
       // every dark window in the city sparkles with them.

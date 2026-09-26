@@ -11,7 +11,11 @@
 import { GeoBuilder, meshOf } from './builder.js';
 import * as G from '../map/geom.js';
 
-const LIFT = { asphalt: 0.07, sidewalk: 0.05 };
+const LIFT = { asphalt: 0.07, sidewalk: 0.05, kerb: 0.06 };
+// The kerb: a lighter band of the sidewalk along the carriageway, a hair above
+// the sidewalk and still under any crossing street's asphalt. Same mesh as the
+// sidewalk (vertex colours), so it costs no draw call.
+const KERB = { width: 0.3, tint: 1.45 };
 const SIDEWALK = { boulevard: 3.6, avenue: 3.2, street: 2.6, narrow: 1.8, plaza: 0, alley: 0 };
 const STEP = 4;            // metres between height probes
 const TOL = 0.03;          // metres a ribbon may stray from the ground
@@ -28,7 +32,7 @@ export function buildStreets(THREE, layout, M, tiles) {
   const per = new Map();
   const tile = (key) => {
     let t = per.get(key);
-    if (!t) { t = { asphalt: new GeoBuilder(), sidewalk: new GeoBuilder() }; per.set(key, t); }
+    if (!t) { t = { asphalt: new GeoBuilder(), sidewalk: new GeoBuilder({ color: 3 }) }; per.set(key, t); }
     return t;
   };
   let stations = 0;
@@ -41,8 +45,11 @@ export function buildStreets(THREE, layout, M, tiles) {
     const t = tile(tiles.key(mid[0], mid[1]));
     ribbon(t.asphalt, line, -half, half, LIFT.asphalt, cut, T);
     if (walk > 0) {
-      ribbon(t.sidewalk, line, half, half + walk, LIFT.sidewalk, cut, T);
-      ribbon(t.sidewalk, line, -half - walk, -half, LIFT.sidewalk, cut, T);
+      ribbon(t.sidewalk, line, half, half + walk, LIFT.sidewalk, cut, T, 1);
+      ribbon(t.sidewalk, line, -half - walk, -half, LIFT.sidewalk, cut, T, 1);
+      const kw = Math.min(KERB.width * s, walk * 0.5);
+      ribbon(t.sidewalk, line, half, half + kw, LIFT.kerb, cut, T, KERB.tint);
+      ribbon(t.sidewalk, line, -half - kw, -half, LIFT.kerb, cut, T, KERB.tint);
     }
   }
   const meshes = [];
@@ -131,14 +138,17 @@ function keepIndices(pts, tol) {
   return out;
 }
 
-/** A strip between lateral offsets o0 < o1, at the ground plus `lift`. */
-function ribbon(b, line, o0, o1, lift, cut, T) {
+/**
+ * A strip between lateral offsets o0 < o1, at the ground plus `lift`;
+ * `tint` is its vertex colour when the builder has one.
+ */
+function ribbon(b, line, o0, o1, lift, cut, T, tint = 1) {
   let prev = null;
   for (const p of line) {
     const [x, n, , , , lx, ln] = p;
     const ax = x + lx * o0, an = n + ln * o0, bx = x + lx * o1, bn = n + ln * o1;
-    const i0 = b.v(ax, an, T.height(ax, an) + lift, 0, 0, 1, ax, an);
-    const i1 = b.v(bx, bn, T.height(bx, bn) + lift, 0, 0, 1, bx, bn);
+    const i0 = b.v(ax, an, T.height(ax, an) + lift, 0, 0, 1, ax, an, tint, tint, tint);
+    const i1 = b.v(bx, bn, T.height(bx, bn) + lift, 0, 0, 1, bx, bn, tint, tint, tint);
     if (prev) {
       const cx = (x + prev.x) / 2 + lx * (o0 + o1) / 2, cn = (n + prev.n) / 2 + ln * (o0 + o1) / 2;
       if (!cut(cx, cn)) b.quad(prev.i1, prev.i0, i0, i1);

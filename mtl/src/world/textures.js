@@ -33,30 +33,41 @@ function speckle(ctx, w, h, R, count, size, colours) {
   }
 }
 
-/** Asphalt: aggregate, tar snakes, patches. Tiles every 8 m. */
+/**
+ * Asphalt: fine aggregate, a few pale stones, slow mottling and thin sealed
+ * cracks. Kept low in contrast: it tiles every 8 m and the
+ * street shader breaks the repeat with a second, larger sample.
+ */
 export function asphalt(THREE) {
   const S = 512, c = canvas(S, S), g = c.getContext('2d'), R = mulberry(11);
-  g.fillStyle = '#2d2d31';
+  g.fillStyle = '#2c2c30';
   g.fillRect(0, 0, S, S);
-  speckle(g, S, S, R, 26000, 1.4, ['#38383c', '#26262a', '#414145', '#1f1f22', '#333337']);
-  // Slow mottling.
-  for (let i = 0; i < 40; i++) {
-    const x = R() * S, y = R() * S, r = 30 + R() * 90;
+  // Slow mottling first, so the aggregate sits on top of it.
+  for (let i = 0; i < 60; i++) {
+    const x = R() * S, y = R() * S, r = 40 + R() * 120;
     const gr = g.createRadialGradient(x, y, 0, x, y, r);
-    const v = R() < 0.5 ? 'rgba(255,255,255,0.025)' : 'rgba(0,0,0,0.05)';
+    const v = R() < 0.5 ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.06)';
     gr.addColorStop(0, v);
     gr.addColorStop(1, 'rgba(0,0,0,0)');
     g.fillStyle = gr;
-    g.fillRect(x - r, y - r, r * 2, r * 2);
+    for (const [ox, oy] of [[0, 0], [S, 0], [-S, 0], [0, S], [0, -S]]) g.fillRect(x - r + ox, y - r + oy, r * 2, r * 2);
   }
-  // Tar snakes: sealed cracks, darker and a little glossy.
-  g.strokeStyle = 'rgba(12,12,14,0.55)';
-  for (let i = 0; i < 7; i++) {
-    g.lineWidth = 1.5 + R() * 2;
+  speckle(g, S, S, R, 36000, 1.1, ['#37373b', '#262629', '#3e3e42', '#212124', '#323236', '#2a2a2e']);
+  // Pale stones catching the light.
+  speckle(g, S, S, R, 1400, 1.3, ['#4c4b4b', '#56534f', '#46464a']);
+  // Sealed cracks: thin, wandering, a little glossy.
+  g.strokeStyle = 'rgba(14,14,16,0.4)';
+  g.lineCap = 'round';
+  for (let i = 0; i < 4; i++) {
+    g.lineWidth = 0.8 + R() * 1.2;
     g.beginPath();
-    let x = R() * S, y = R() * S;
+    let x = R() * S, y = R() * S, a = R() * Math.PI * 2;
     g.moveTo(x, y);
-    for (let k = 0; k < 8; k++) { x += (R() - 0.5) * 70; y += (R() - 0.5) * 70; g.lineTo(x, y); }
+    for (let k = 0; k < 14; k++) {
+      a += (R() - 0.5) * 1.1;
+      x += Math.cos(a) * 9; y += Math.sin(a) * 9;
+      g.lineTo(x, y);
+    }
     g.stroke();
   }
   return tex(THREE, c, 8);
@@ -84,18 +95,42 @@ export function concrete(THREE, base = '#8b8883', seed = 3) {
   return tex(THREE, c, 4);
 }
 
+/**
+ * Sidewalk: poured slabs 1.5 m square, each its own shade, with thin saw
+ * joints, a few stains and gum spots. 4 × 4 slabs, so the repeat is 6 m.
+ */
 export function sidewalk(THREE) {
-  const S = 256, c = canvas(S, S), g = c.getContext('2d'), R = mulberry(5);
-  g.fillStyle = '#85827b';
-  g.fillRect(0, 0, S, S);
-  speckle(g, S, S, R, 4000, 1.1, ['rgba(0,0,0,0.07)', 'rgba(255,255,255,0.06)']);
-  g.strokeStyle = 'rgba(40,38,34,0.45)';
-  g.lineWidth = 2;
-  for (let i = 0; i <= 2; i++) {
-    g.beginPath(); g.moveTo(0, (i * S) / 2); g.lineTo(S, (i * S) / 2); g.stroke();
-    g.beginPath(); g.moveTo((i * S) / 2, 0); g.lineTo((i * S) / 2, S); g.stroke();
+  const S = 512, c = canvas(S, S), g = c.getContext('2d'), R = mulberry(5);
+  const n = 4, w = S / n;
+  for (let j = 0; j < n; j++) {
+    for (let i = 0; i < n; i++) {
+      const v = 128 + Math.floor((R() - 0.5) * 16);
+      g.fillStyle = `rgb(${v + 3},${v},${v - 6})`;
+      g.fillRect(i * w, j * w, w, w);
+    }
   }
-  return tex(THREE, c, 3);
+  speckle(g, S, S, R, 14000, 1.1, ['rgba(0,0,0,0.07)', 'rgba(255,255,255,0.05)', 'rgba(0,0,0,0.04)']);
+  // Stains and gum.
+  for (let i = 0; i < 18; i++) {
+    const x = R() * S, y = R() * S, r = 6 + R() * 28;
+    const gr = g.createRadialGradient(x, y, 0, x, y, r);
+    gr.addColorStop(0, 'rgba(30,26,22,0.12)');
+    gr.addColorStop(1, 'rgba(30,26,22,0)');
+    g.fillStyle = gr;
+    g.fillRect(x - r, y - r, r * 2, r * 2);
+  }
+  speckle(g, S, S, R, 90, 2.2, ['rgba(40,38,36,0.35)', 'rgba(70,66,60,0.3)']);
+  // Saw joints: a dark line with a pale lip beside it.
+  for (let i = 0; i < n; i++) {
+    const p = i * w;
+    g.fillStyle = 'rgba(30,28,26,0.55)';
+    g.fillRect(0, p, S, 1.5);
+    g.fillRect(p, 0, 1.5, S);
+    g.fillStyle = 'rgba(255,255,255,0.08)';
+    g.fillRect(0, p + 1.5, S, 1);
+    g.fillRect(p + 1.5, 0, 1, S);
+  }
+  return tex(THREE, c, 6);
 }
 
 export function grass(THREE) {
@@ -143,12 +178,94 @@ export function tiles(THREE) {
   return tex(THREE, c, 2);
 }
 
+/**
+ * Flat roofs: gravel ballast and membrane patches in several greys, so a
+ * block seen from the air is a mosaic, not a hole.
+ */
 export function roof(THREE) {
   const S = 256, c = canvas(S, S), g = c.getContext('2d'), R = mulberry(17);
-  g.fillStyle = '#3a3836';
+  g.fillStyle = '#5a5752';
   g.fillRect(0, 0, S, S);
-  speckle(g, S, S, R, 9000, 1.3, ['#44423f', '#302e2c', '#4d4a46', '#2a2826']);
-  return tex(THREE, c, 10);
+  for (let i = 0; i < 26; i++) {
+    const x = R() * S, y = R() * S, w = 20 + R() * 80, h = 20 + R() * 80;
+    const v = 70 + Math.floor(R() * 60);
+    g.fillStyle = `rgba(${v},${v - 2},${v - 6},0.55)`;
+    for (const [ox, oy] of [[0, 0], [S, 0], [0, S], [S, S], [-S, 0], [0, -S]]) g.fillRect(x + ox, y + oy, w, h);
+  }
+  speckle(g, S, S, R, 9000, 1.3, ['rgba(0,0,0,0.12)', 'rgba(255,255,255,0.07)', 'rgba(0,0,0,0.07)']);
+  // Membrane seams.
+  g.fillStyle = 'rgba(0,0,0,0.12)';
+  for (let i = 0; i < 4; i++) g.fillRect(0, (i * S) / 4 + R() * 8, S, 1);
+  return tex(THREE, c, 12);
+}
+
+/**
+ * The land beyond the zone, seen from far off: blocks of roofs, streets and
+ * green patches by day (`albedo`), and by night sparse street lamps and lit
+ * windows (`lights`, an emissive map), thinned out in broad patches so it
+ * reads as neighbourhoods, not graph paper. Tiles every 1 km.
+ */
+export const OUTSKIRTS_METRES = 1024;
+
+export function outskirts(THREE) {
+  const S = 512, R = mulberry(29);
+  const a = canvas(S, S), g = a.getContext('2d');
+  const l = canvas(S, S), h = l.getContext('2d');
+  g.fillStyle = '#5e5c57';
+  g.fillRect(0, 0, S, S);
+  h.fillStyle = '#000';
+  h.fillRect(0, 0, S, S);
+  // Blocks elongated along n, as on the island: 60-90 m by 120-220 m.
+  const xs = [], ys = [];
+  for (let p = 0; p < S - 20; p += 30 + R() * 15) xs.push(Math.round(p));
+  for (let p = 0; p < S - 40; p += 60 + R() * 50) ys.push(Math.round(p));
+  const wrap = (fn) => { for (const [ox, oy] of [[0, 0], [S, 0], [-S, 0], [0, S], [0, -S]]) fn(ox, oy); };
+  for (let j = 0; j < ys.length; j++) {
+    for (let i = 0; i < xs.length; i++) {
+      const x0 = xs[i] + 2, y0 = ys[j] + 2, x1 = (xs[i + 1] ?? S) - 2, y1 = (ys[j + 1] ?? S) - 2;
+      if (x1 <= x0 || y1 <= y0) continue;
+      const park = R() < 0.07;
+      const v = 84 + Math.floor(R() * 22);
+      g.fillStyle = park ? 'rgb(66,88,52)' : `rgb(${v},${v - 3},${v - 8})`;
+      g.fillRect(x0, y0, x1 - x0, y1 - y0);
+      if (park) continue;
+      for (let k = 0; k < ((x1 - x0) * (y1 - y0)) / 18; k++) {
+        const hx = x0 + R() * (x1 - x0), hy = y0 + R() * (y1 - y0);
+        const t = 92 + Math.floor(R() * 34);
+        g.fillStyle = `rgb(${t},${t - 4},${t - 10})`;
+        g.fillRect(hx, hy, 1 + R() * 2, 1 + R() * 2);
+        if (R() < 0.07) {
+          h.fillStyle = R() < 0.75 ? 'rgba(255,185,110,0.75)' : 'rgba(190,215,255,0.7)';
+          h.fillRect(hx, hy, 1, 1);
+        }
+      }
+    }
+  }
+  // Streets: grey in the albedo, lamps every 30 m or so in the lights.
+  g.fillStyle = '#54534f';
+  h.fillStyle = 'rgba(255,165,80,0.85)';
+  for (const x of xs) {
+    g.fillRect(x - 1.5, 0, 3, S);
+    for (let y = R() * 15; y < S; y += 13 + R() * 5) h.fillRect(x, y, 1, 1);
+  }
+  for (const y of ys) {
+    g.fillRect(0, y - 1.5, S, 3);
+    for (let x = R() * 15; x < S; x += 13 + R() * 5) h.fillRect(x, y, 1, 1);
+  }
+  // Broad dark patches — rail yards, parks, industry — over the lights.
+  for (let i = 0; i < 22; i++) {
+    const x = R() * S, y = R() * S, r = 30 + R() * 90;
+    wrap((ox, oy) => {
+      const gr = h.createRadialGradient(x + ox, y + oy, 0, x + ox, y + oy, r);
+      gr.addColorStop(0, 'rgba(0,0,0,0.85)');
+      gr.addColorStop(1, 'rgba(0,0,0,0)');
+      h.fillStyle = gr;
+      h.fillRect(x + ox - r, y + oy - r, r * 2, r * 2);
+    });
+  }
+  const albedo = tex(THREE, a, OUTSKIRTS_METRES);
+  const lights = tex(THREE, l, OUTSKIRTS_METRES);
+  return { albedo, lights };
 }
 
 export function water(THREE) {
@@ -289,12 +406,19 @@ export function facadeAtlas(THREE) {
   // Glass mask into the alpha channel, from the window rectangles.
   const img = g.getImageData(0, 0, W, H * rows);
   FACADES.forEach((name, row) => {
-    const [wx, wy, ww, wh] = FACADE_LOOK[name].win;
+    const L = FACADE_LOOK[name];
+    const [wx, wy, ww, wh] = L.win;
     const x0 = Math.floor(wx * W), x1 = Math.ceil((wx + ww) * W);
     const ya = Math.floor(row * H + (1 - wy - wh) * H), yb = Math.ceil(row * H + (1 - wy) * H);
     for (let y = row * H; y < (row + 1) * H; y++) {
       for (let x = 0; x < W; x++) {
-        const inside = x >= x0 && x < x1 && y >= ya && y < yb;
+        let inside = x >= x0 && x < x1 && y >= ya && y < yb;
+        // The mullion and the transom are frame, not glass: a lit window
+        // shows its cross.
+        if (inside && !L.curtain) {
+          const mx = (x0 + x1) / 2, ty = ya + (yb - ya) * 0.38;
+          if (Math.abs(x + 0.5 - mx) < 1.6 || (y + 0.5 >= ty && y + 0.5 < ty + 3)) inside = false;
+        }
         // Walls opaque, glass transparent: a canvas drops the colour of a
         // transparent pixel, and the wall's colour is the one that matters.
         img.data[(y * W + x) * 4 + 3] = inside ? 0 : 255;
@@ -310,6 +434,11 @@ export function facadeAtlas(THREE) {
   t.generateMipmaps = true;
   t.premultiplyAlpha = false;
   return t;
+}
+
+/** Each facade's window rectangle in its cell: [x, y, w, h], 0..1, y up. */
+export function facadeWindows() {
+  return FACADES.map((name) => FACADE_LOOK[name].win);
 }
 
 /** Plain colour of each facade, for exports and far LODs. */

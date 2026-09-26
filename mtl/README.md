@@ -72,9 +72,16 @@ mais détaillé, et une couleur qui donne le ton sans faire futuriste : la
 Montréal humide d'un soir d'été, où les enseignes gagnent sur le sodium.
 
 - **Ciel et brume** : indigo au zénith, brume violette, lueur de la ville à
-  l'horizon qui passe du magenta au sarcelle.
+  l'horizon qui passe du magenta au sarcelle ; le bas du ciel se fond dans la
+  couleur de la brume, sans ligne d'horizon dure.
+- **Hors zone** : le relief continue, habillé d'une ville lointaine générée
+  (îlots, parcs, rues) qui s'allume la nuit — lampadaires et fenêtres épars.
+  Plus de vide noir autour de la carte vue du ciel.
 - **Façades** (un seul shader pour toute la ville) : fenêtres allumées une par
-  une, surtout chaudes, quelques pièces en couleur, des stores ; bureaux
+  une, surtout chaudes, quelques pièces en couleur, des stores ; chaque
+  fenêtre montre ses meneaux et une pièce éclairée par le plafond (coins
+  sombres, rideaux tirés sur les côtés, parfois juste la lueur bleue d'une
+  télé) ; bureaux
   éclairés par étage en blanc froid ; rez-de-chaussée commerciaux plus
   souvent allumés, en couleur ; le bas des murs éclairé par la rue ; bandes
   LED cyan ou magenta sur les coins de certaines tours.
@@ -85,11 +92,19 @@ Montréal humide d'un soir d'été, où les enseignes gagnent sur le sodium.
   ambre et rouge dans le Vieux). Quelques-uns grésillent.
 - **Chaussée mouillée, simulée** : chaque flaque de lumière (lampadaire,
   enseigne) s'étire vers la caméra comme un reflet sur l'asphalte mouillé,
-  dans le vertex shader. Pas de vrais reflets (trop cher sur téléphone).
+  dans le vertex shader. Pas de vrais reflets (trop cher sur téléphone). Vues
+  d'en haut, les flaques s'élargissent et s'éclairent : ce sont elles qui
+  dessinent les rues la nuit.
 - **Éclairage** : LED blanc froid sur les artères et les autoroutes, sodium
   orange dans les rues résidentielles, lanternes dans le Vieux.
 - **Détails** : corniches sur les toits plats, blocs techniques, couronnes
   lumineuses et feux d'avion clignotants sur les tours.
+- **Sol** (textures générées) : asphalte à granulat fin dont la répétition
+  est cassée par un second échantillon plus large ; trottoirs en dalles de
+  1,5 m bordés d'une bordure plus claire (même maillage, couleurs de sommet :
+  aucun appel de rendu en plus) ; toits en mosaïque de gris.
+- **Ouvrages** : carreaux des tunnels et dessous de tabliers légèrement
+  éclairés la nuit ; houppiers des arbres ombrés par-dessous, sans facettes.
 
 ## Comment c'est fait
 

@@ -237,11 +237,13 @@ export function buildOutside(THREE, layout, M) {
     }
   }
   const out = [];
-  const m = meshOf(THREE, b, M.Terrain, 'Alentours');
+  // A far-off city in a texture: roofs and parks by day, street lights by night.
+  const mat = M.Outskirts || M.Terrain;
+  const m = meshOf(THREE, b, mat, 'Alentours');
   if (m) {
     m.userData.layer = 'alentours';
     m.userData.exportSkip = true;
-    m.material = M.Terrain;
+    m.material = mat;
     out.push(m);
   }
   // The river, around and outside the zone: a plane at its level with the zone

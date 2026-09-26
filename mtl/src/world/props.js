@@ -18,10 +18,10 @@ const KINDS = {
 
 const LIGHT = {
   sodium: { material: 'Lamp_Sodium', pool: 0xc98a4c },
-  led: { material: 'Lamp_LED', pool: 0x5a7fa8 },
+  led: { material: 'Lamp_LED', pool: 0x7f9cc0 },
   warm: { material: 'Lamp_White', pool: 0xc9ae88 },
-  white: { material: 'Lamp_White', pool: 0xb6c0d0 },
-  tunnel: { material: 'Lamp_Tunnel', pool: 0x2c3f4c },
+  white: { material: 'Lamp_White', pool: 0xc4ccd8 },
+  tunnel: { material: 'Lamp_Tunnel', pool: 0x4a5560 },
 };
 
 /**
@@ -173,6 +173,27 @@ function merge(THREE, parts) {
   return out;
 }
 
+/**
+ * Shade a crown in its vertex colours — dark underneath, lit on top, the way
+ * a canopy shades itself — and, for the round ones, give it the normals of a
+ * sphere so twenty facets read as one soft mass instead of a gem.
+ */
+function foliage(THREE, geo, halfH, round) {
+  const P = geo.attributes.position, N = geo.attributes.normal;
+  const col = new Float32Array(P.count * 3);
+  for (let i = 0; i < P.count; i++) {
+    const x = P.getX(i), y = P.getY(i), z = P.getZ(i);
+    if (round) {
+      const l = Math.hypot(x, y * 1.2, z) || 1;
+      N.setXYZ(i, x / l, (y * 1.2) / l, z / l);
+    }
+    const t = Math.min(1, Math.max(0, (y / halfH + 1) / 2));   // 0 bottom, 1 top
+    const k = 0.45 + 0.7 * t;
+    col[i * 3] = k * 0.95; col[i * 3 + 1] = k; col[i * 3 + 2] = k * 0.9;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+}
+
 /** Trees: a trunk and a crown, round or conical, each tinted a little. */
 export function buildTrees(THREE, trees, M, tile = null) {
   const out = [];
@@ -182,8 +203,10 @@ export function buildTrees(THREE, trees, M, tile = null) {
   trunk.translate(0, 1.6, 0);
   const crown = new THREE.IcosahedronGeometry(2.7, 0);
   crown.scale(1, 0.9, 1);
+  foliage(THREE, crown, 2.7 * 0.9, true);
   crown.translate(0, 4.8, 0);
   const cone = new THREE.ConeGeometry(2.3, 7.5, 6, 1, true);
+  foliage(THREE, cone, 3.75, false);
   cone.translate(0, 5.2, 0);
 
   const place = (list, geo, mat, name, tint) => {
