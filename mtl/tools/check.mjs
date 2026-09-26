@@ -409,7 +409,16 @@ if (BROWSER) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
-  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  page.on('console', (m) => {
+    if (m.type() !== 'error') return;
+    // The optional civic.glb (mtl/README.md, "La voiture") is absent in this
+    // checkout by design — game/gltf-car.js probes it with a HEAD request and
+    // falls back silently, but Chromium still logs the failed HTTP request
+    // itself to the console; no amount of catching in page JS suppresses
+    // that. Expected, not a bug — only swallow this one exact 404.
+    if (/Failed to load resource.*404/.test(m.text()) && /\/models\/civic\.glb$/.test(m.location().url || '')) return;
+    errors.push(m.text());
+  });
   const tl = Date.now();
   await page.goto(`${url}/index.html?spawn=decarie&zone=${settings.zone}&echelle=${settings.echelle}`);
   await page.waitForFunction(() => window.__mtl && window.__mtl.ready, null, { timeout: 300000 });

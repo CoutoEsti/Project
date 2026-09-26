@@ -28,6 +28,7 @@ import { ChaseCamera } from './game/camera.js';
 import { Input, wantsTouch } from './game/input.js';
 import { Hud } from './game/hud.js';
 import { createCar } from './game/car.js';
+import { loadCarModel } from './game/gltf-car.js';
 import { EngineAudio } from './game/audio.js';
 
 const params = new URLSearchParams(location.search);
@@ -88,7 +89,11 @@ const game = { layout, structures, surface, solids };
 
 // --- the car -----------------------------------------------------------------
 const driver = new Driver(game);
-const car = createCar(THREE, { color: 0xd9a441 });
+const CAR_COLOR = 0x1f4e8c; // Aegean Blue Metallic-ish; configurable via createCar()'s opts.color
+// A dropped-in models/civic.glb (or ?car=<url>) replaces the generated car;
+// absent or unreadable, this silently falls back to it — see mtl/README.md.
+const car = (await loadCarModel(THREE, params.get('car') || 'models/civic.glb', { color: CAR_COLOR }))
+  || createCar(THREE, { color: CAR_COLOR });
 car.group.name = 'Voiture';
 scene.add(car.group);
 // One spot light for the headlights. It stays in the scene by day at zero

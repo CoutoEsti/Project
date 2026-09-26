@@ -159,6 +159,32 @@ au hasard. Il compte chaque choc, chaque saut et chaque écart vertical, mesure
 le 0-100 et le freinage, et vérifie qu'aucun repère n'est sur une rue. Passe
 aux zones `anneau` 100 % et 70 %, et `centre` 100 % et 85 %.
 
+## La voiture
+
+Une Honda Civic générée (`src/game/car.js`) roule par défaut : un hull
+low-poly texturé par sa seule couleur, avec les proportions d'une 10e/11e
+génération — long capot bas, pavillon fastback, ligne de caractère marquée,
+phares fins, feux arrière en C, calandre noire, jantes à 5 branches.
+
+Pour rouler avec un vrai modèle : déposer un fichier `mtl/models/civic.glb`
+(glTF **binaire**, sans Draco — `mtl/vendor` n'a pas le décodeur, seul
+`hop/vendor` l'a — idéalement sous 5 Mo, par exemple exporté depuis Blender en
+`.glb` sans cocher la compression Draco). Au chargement, `game/gltf-car.js`
+sonde ce chemin ; s'il est absent, la voiture générée reste en place, sans
+message dans la console. `?car=<url>` pointe vers un autre fichier.
+
+`hop/tools/prepare-model.mjs` (réduction de texture + Draco) n'est **pas**
+directement utilisable ici : il compresse toujours la géométrie en Draco, que
+`mtl/vendor` ne sait pas décoder. Pour un modèle déjà lourd, réduire les
+textures à la main (2048 px ou moins, WebP ou JPEG) et exporter sans Draco est
+la voie la plus sûre tant que `mtl/vendor` n'a pas son propre décodeur.
+
+Le modèle est mis à l'échelle sur la longueur de la voiture générée (4,30 m),
+recentré, posé au sol, et ses roues sont retrouvées par leur nom
+(`wheel`/`tire`/`roue`/`pneu`…, avant/arrière par `front`/`avant` ou
+`rear`/`arrière`) pour le braquage et la rotation. Sans nœud reconnu comme
+roue, le modèle reste statique plutôt que de planter.
+
 ## Unity
 
 Voir [`unity/README.md`](unity/README.md).
