@@ -23,6 +23,13 @@ import OVERLAY from './montreal.js';
 const LEVEL_Y = { 1: 7.6, 2: 14.2, 3: 20.8, 4: 27.4, [-1]: -8, [-2]: -13, [-3]: -18, [-4]: -22 };
 const TUNNEL_Y = -8;
 const GRADE = { highway: 0.05, ramp: 0.065, bridge: 0.05, road: 0.07 };
+// A highway sunk under a street that OpenStreetMap puts on a bridge: headroom
+// for a truck plus the street's deck (real metres, not scaled).
+const SINK = 7.4;
+// Level stretch a structure keeps between two of its lifts (or dips) before it
+// is allowed back to the ground, per class, real metres: a highway does not
+// dive between two overpasses 200 m apart, it stays on its embankment.
+const HOLD = { highway: 400, bridge: 400, ramp: 90, road: 30 };
 
 /** Street widths in real metres: [two-way, one-way]. */
 const WIDTH = {
@@ -84,12 +91,14 @@ export function buildMap(src, settings) {
   // --- the road network --------------------------------------------------------
   const streets = [], roads = [];
   const special = OVERLAY.bridges || {};
-  for (const r of src.roads) {
+  const sunk = sinkHighways(src.roads, special);
+  for (const r0 of src.roads) {
+    const r = sunk.patch.get(r0) || r0;
     // A motorway is one way unless tagged otherwise (OpenStreetMap's implied
     // rule); the data only says so when someone wrote it down.
     const oneway = r.oneway || r.cls === 'motorway';
     for (const piece of clipRoad(r, zone.box)) {
-      const highway = r.cls === 'motorway' || (r.cls === 'trunk' && (r.kind === 'link' || /^Autoroute/.test(r.name)));
+      const highway = isHighway(r);
       const width = S(r.kind === 'link' && highway ? LINK_WIDTH : r.kind === 'alley' ? WIDTH.alley[0]
         : (WIDTH[r.cls] || WIDTH.residential)[oneway ? 1 : 0]);
       const pts = piece.pts.map(P);
@@ -116,6 +125,7 @@ export function buildMap(src, settings) {
           width, median: false, pts, levels: piece.levels, flags: piece.flags, wet: lifted.map((_, i) => wet(i)),
           priority: (PRIORITY[r.cls] || 0) + (r.kind === 'link' ? 0 : 1),
           structure: special[name] ? special[name].structure : null,
+          sinks: (sunk.sinks.get(r0) || []).map(P),
         });
         continue;
       }
@@ -224,6 +234,115 @@ export function buildMap(src, settings) {
   };
 }
 
+// -------------------------------------------------------------- trenches --
+
+function isHighway(r) {
+  return r.cls === 'motorway' || (r.cls === 'trunk' && (r.kind === 'link' || /^Autoroute/.test(r.name)));
+}
+
+/**
+ * OpenStreetMap draws a street crossing a highway as a bridge one layer up,
+ * the highway staying on layer 0. Taken literally, every street of the grid
+ * climbs 7.6 m over Décarie or Ville-Marie on ramps a hundred metres long, and
+ * the highway runs at street level: the city built it the other way round.
+ * Where a street's bridge crosses an at-grade stretch of highway, the bridge
+ * comes down to the ground and the highway goes under it (profile() sinks it
+ * and holds it down between close crossings, which makes the trench).
+ *
+ * Returns `patch` (road → copy with the bridge edges put back on layer 0) and
+ * `sinks` (highway → points where it must pass under a street).
+ */
+function sinkHighways(roads, special) {
+  const grid = new G.Grid(100);
+  for (const r of roads) {
+    if (!isHighway(r) || special[r.name]) continue;
+    for (let i = 0; i + 1 < r.pts.length; i++) {
+      // At grade or already below it (an underpass OSM put on layer −1).
+      const lv = r.levels ? r.levels[i] : 0;
+      if (lv > 0 || (r.flags && r.flags[i] & 1)) continue;
+      const a = r.pts[i], b = r.pts[i + 1];
+      grid.insert({ r, a, b, sink: lv === 0 && !(r.flags && r.flags[i] & 2) }, Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1]));
+    }
+  }
+  const patch = new Map(), sinks = new Map();
+  const tmp = [];
+  for (const r of roads) {
+    if (isHighway(r) || special[r.name] || !r.levels) continue;
+    let levels = null, flags = null;
+    for (let i = 0; i + 1 < r.pts.length; i++) {
+      if (r.levels[i] !== 1 || (levels && levels[i] === 0)) continue;
+      const a = r.pts[i], b = r.pts[i + 1];
+      const mx = (a[0] + b[0]) / 2, mn = (a[1] + b[1]) / 2;
+      const reach = Math.hypot(b[0] - a[0], b[1] - a[1]) / 2;
+      const hits = [];
+      for (const h of grid.query(mx, mn, reach, tmp)) {
+        const x = segCross(a, b, h.a, h.b);
+        if (x && !hits.some((o) => o.r === h.r && Math.hypot(o.p[0] - x[0], o.p[1] - x[1]) < 1)) hits.push({ r: h.r, p: x, sink: h.sink });
+      }
+      if (!hits.length) continue;
+      // The whole bridge comes down, not only the edge over the highway.
+      levels ||= r.levels.slice();
+      flags ||= r.flags ? r.flags.slice() : null;
+      let i0 = i, i1 = i;
+      while (i0 > 0 && r.levels[i0 - 1] === 1) i0--;
+      while (i1 + 1 < r.levels.length && r.levels[i1 + 1] === 1) i1++;
+      for (let k = i0; k <= i1; k++) {
+        levels[k] = 0;
+        if (flags) flags[k] &= ~1;
+      }
+      for (const h of hits) {
+        if (!h.sink) continue;
+        if (!sinks.has(h.r)) sinks.set(h.r, []);
+        sinks.get(h.r).push(h.p);
+      }
+    }
+    if (levels) patch.set(r, { ...r, levels, flags });
+  }
+  // A bridge drawn as several ways: the pieces that did not themselves cross
+  // the highway come down with the one that did, or they are left up in the
+  // air with nothing to climb to.
+  const ends = new Map();
+  const key = (p) => `${Math.round(p[0] * 2)}:${Math.round(p[1] * 2)}`;
+  const lowered = (q) => patch.get(q) || q;
+  for (let changed = true; changed;) {
+    changed = false;
+    ends.clear();
+    for (const [, q] of patch) {
+      const last = q.levels.length - 1;
+      if (q.levels[0] === 0) ends.set(key(q.pts[0]), q.name);
+      if (q.levels[last] === 0) ends.set(key(q.pts[q.pts.length - 1]), q.name);
+    }
+    for (const r of roads) {
+      const q = lowered(r);
+      if (isHighway(r) || special[r.name] || !q.levels) continue;
+      const last = q.levels.length - 1;
+      for (const [edge, dir, p] of [[0, 1, q.pts[0]], [last, -1, q.pts[q.pts.length - 1]]]) {
+        if (q.levels[edge] !== 1 || ends.get(key(p)) !== r.name) continue;
+        const levels = q.levels.slice(), flags = q.flags ? q.flags.slice() : null;
+        for (let k = edge; k >= 0 && k <= last && levels[k] === 1; k += dir) {
+          levels[k] = 0;
+          if (flags) flags[k] &= ~1;
+        }
+        patch.set(r, { ...q, levels, flags });
+        changed = true;
+        break;
+      }
+    }
+  }
+  return { patch, sinks };
+}
+
+/** Intersection point of segments ab and cd, or null. */
+function segCross(a, b, c, d) {
+  const rx = b[0] - a[0], rn = b[1] - a[1], sx = d[0] - c[0], sn = d[1] - c[1];
+  const den = rx * sn - rn * sx;
+  if (Math.abs(den) < 1e-9) return null;
+  const qx = c[0] - a[0], qn = c[1] - a[1];
+  const t = (qx * sn - qn * sx) / den, u = (qx * rn - qn * rx) / den;
+  if (t < 0 || t > 1 || u < 0 || u > 1) return null;
+  return [a[0] + rx * t, a[1] + rn * t];
+}
+
 // ------------------------------------------------------------------ profile --
 
 function offsetOf(level, flag, highway = true) {
@@ -299,6 +418,38 @@ function profile(r, terrain, waterAt, s, done, spec) {
       }
     }
   }
+  // A street tagged to pass under a highway that has since gone into its
+  // trench (see sinkHighways) crosses over it on the level instead: the
+  // whole underpass comes back up to the ground.
+  if (r.street) {
+    for (let i = 0; i < m;) {
+      if (target[i] === null || target[i] >= g[i] - 1) { i++; continue; }
+      let j = i;
+      while (j + 1 < m && target[j + 1] !== null && target[j + 1] < g[j + 1] - 1) j++;
+      let over = false;
+      for (let k = i; k <= j && !over; k++) {
+        for (const o of done) {
+          if (o.street) continue;
+          const hit = nearestOnPath(o.path, pts[k][0], pts[k][1], o.width / 2 + 2 * s);
+          if (hit && hit.y < g[k] - 4) { over = true; break; }
+        }
+      }
+      if (over) for (let k = i; k <= j; k++) target[k] = null;
+      i = j + 1;
+    }
+  }
+
+  // Under a street that crosses on the level: sunk a full headroom.
+  if (r.sinks && r.sinks.length) {
+    // Wide enough for the vertical curve (layout.js) to keep the full depth.
+    const reach = r.width / 2 + 34 * s;
+    for (let k = 0; k < m; k++) {
+      if (target[k] !== null) continue;
+      if (r.sinks.some(([x, n]) => Math.hypot(pts[k][0] - x, pts[k][1] - n) < reach)) target[k] = g[k] - SINK;
+    }
+  }
+  hold(target, g, cum, GRADE[r.cls] || GRADE.road, (HOLD[r.cls] || HOLD.road) * s);
+
   // Pin the ends onto a road already profiled, when they land on one — and
   // when it can be reached at all: a short ramp up to a deck forty metres
   // over the island cannot, and is closed off where it ends instead.
@@ -308,6 +459,9 @@ function profile(r, terrain, waterAt, s, done, spec) {
     const [x, n] = pts[k];
     let best = null;
     for (const o of done) {
+      // A street's lifted piece continues as the street at both ends: it
+      // lands on the next piece of a street, never on a highway it crosses.
+      if (r.street && !o.street) continue;
       const hit = nearestOnPath(o.path, x, n, 1.2 * s + o.width / 2);
       if (hit && (!best || hit.d < best.d)) best = hit;
     }
@@ -353,6 +507,31 @@ function profile(r, terrain, waterAt, s, done, spec) {
   r.edgeLevels = lv;
   r.cum = cum;
   return out;
+}
+
+/**
+ * Between two lifted (or two sunk) stretches too close for the road to come
+ * back to the ground and stay there a while, it keeps its height: the offset
+ * from the ground is carried across, blending from one end's to the other's.
+ */
+function hold(target, g, cum, grade, flat) {
+  const m = target.length;
+  let i = -1;
+  for (let j = 0; j < m; j++) {
+    if (target[j] === null) continue;
+    if (i >= 0 && j > i + 1) {
+      const oi = target[i] - g[i], oj = target[j] - g[j];
+      const gap = cum[j] - cum[i];
+      if (Math.sign(oi) === Math.sign(oj) && Math.min(Math.abs(oi), Math.abs(oj)) >= 3
+        && gap <= (Math.abs(oi) + Math.abs(oj)) / grade + flat) {
+        for (let k = i + 1; k < j; k++) {
+          const t = (cum[k] - cum[i]) / gap;
+          target[k] = g[k] + oi + (oj - oi) * t;
+        }
+      }
+    }
+    i = j;
+  }
 }
 
 /**

@@ -39,18 +39,28 @@ export function createTerrain(relief, { scale = 1, base = 0 } = {}) {
    * (i, j) corner to (i + 1, j + 1); the mesh builder uses the same split.
    */
   function height(x, n) {
+    return sample(h, x, n);
+  }
+
+  function sample(buf, x, n) {
     let u = (x - x0) / cell, v = (n - n0) / cell;
     let i = Math.floor(u), j = Math.floor(v);
     if (i < 0) { i = 0; u = 0; } else if (i >= cols - 1) { i = cols - 2; u = cols - 1; }
     if (j < 0) { j = 0; v = 0; } else if (j >= rows - 1) { j = rows - 2; v = rows - 1; }
     const fu = u - i, fv = v - j;
-    const h00 = h[j * cols + i], h11 = h[(j + 1) * cols + i + 1];
+    const h00 = buf[j * cols + i], h11 = buf[(j + 1) * cols + i + 1];
     if (fu >= fv) {
-      const h10 = h[j * cols + i + 1];
+      const h10 = buf[j * cols + i + 1];
       return h00 + (h10 - h00) * fu + (h11 - h10) * fv;
     }
-    const h01 = h[(j + 1) * cols + i];
+    const h01 = buf[(j + 1) * cols + i];
     return h00 + (h01 - h00) * fv + (h11 - h01) * fu;
+  }
+
+  /** The height function as the ground is now, unaffected by later edits. */
+  function frozen() {
+    const copy = Float32Array.from(h);
+    return (x, n) => sample(copy, x, n);
   }
 
   function inside(x, n) {
@@ -91,7 +101,7 @@ export function createTerrain(relief, { scale = 1, base = 0 } = {}) {
   }
 
   return {
-    height, inside, grade, flatten, at, pads,
+    height, frozen, inside, grade, flatten, at, pads,
     grid: { x0, n0, cell, cols, rows, h },
     bbox: { x0, n0, x1, n1 },
     scale,

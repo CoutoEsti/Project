@@ -107,6 +107,17 @@ tools/extract.py  →  data/*  →  map/source.js  →  map/real.js  →  map/la
   sont déduites (couche 1 ≈ 7,6 m, tunnel ≈ −8 m), puis limitées en pente,
   raccordées aux routes qu'elles rejoignent, et écartées d'un gabarit complet
   (ou ramenées au même niveau) là où deux routes se croisent de trop près.
+  Deux règles corrigent la lecture littérale des couches :
+  - **La rue reste au niveau, l'autoroute passe dessous.** OSM met la rue en
+    pont (couche 1) au-dessus d'une autoroute restée en couche 0. Lu tel quel,
+    chaque rue du quadrillage montait de 7,6 m au-dessus de Décarie. Le pont
+    de la rue redescend donc au sol (avec les autres morceaux du même pont),
+    et l'autoroute descend de 7,4 m sous elle.
+  - **Pas de montagnes russes.** Entre deux ponts (ou deux passages
+    inférieurs) trop proches pour redescendre et rester au sol un moment
+    (≈ 400 m de palier pour une autoroute), la route garde sa hauteur :
+    remblai ou viaduc continu, tranchée continue. C'est ce qui donne la
+    tranchée Décarie et le viaduc de la Métropolitaine.
 - **Ouvrages** : murs de tranchée, tunnels, glissières, piliers, clôtures sont
   *déduits* de ce qu'il y a de chaque côté de chaque route. Rien n'est posé à
   la main ; ce qu'on voit et ce qu'on percute sont les mêmes données.
@@ -157,12 +168,9 @@ Voir [`unity/README.md`](unity/README.md).
 - **Les hauteurs sont déduites, pas mesurées.** Les autoroutes testées se
   conduisent sans choc, mais `check.mjs` liste encore quelques centaines de
   croisements « à revoir » : un pont bas au-dessus d'une rue (3,5 à 6 m), une
-  rue qui passe sous un tablier sans vrai tunnel. Ça ne bloque pas la voiture,
-  ça se voit.
-- **Décarie** n'est pas une tranchée continue : OSM ne marque « sous le sol »
-  que les passages sous les rues transversales, et le relief réel contient
-  déjà une partie de la tranchée. Elle est donc surtout au niveau de ses voies
-  de service.
+  rue qui passe sous un tablier sans vrai tunnel, souvent à 5-6 m au lieu de
+  6,2. Ça ne bloque pas la voiture ; les pires (routes en escalier, rues qui
+  plongeaient dans la tranchée) sont corrigés.
 - Les bretelles de l'île Sainte-Hélène qui montent au pont Jacques-Cartier
   sont trop courtes dans les données pour atteindre le tablier : elles
   finissent sur une barrière « Fermé ».

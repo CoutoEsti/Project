@@ -318,9 +318,25 @@ function pinJunctions(roads, grid) {
  */
 function relaxSamples(roads) {
   for (const r of roads) {
+    relaxRoad(r, r.hard || new Set());
+    // Standing on two roads whose heights no grade can join (a street
+    // crossing a highway deep in its trench right beside a ramp still on
+    // its way down): let go of them rather than keep a wall in the asphalt.
+    if (r.hard && r.hard.size && steepest(r) > r.rules.maxGrade * 2) relaxRoad(r, new Set());
+  }
+}
+
+function steepest(r) {
+  const S = r.samples;
+  let worst = 0;
+  for (let i = 1; i < S.length; i++) worst = Math.max(worst, Math.abs(S[i].y - S[i - 1].y) / Math.max(0.1, S[i].s - S[i - 1].s));
+  return worst;
+}
+
+function relaxRoad(r, hard) {
+  {
     const S = r.samples;
     const lim = r.rules.maxGrade;
-    const hard = r.hard || new Set();
     for (let iter = 0; iter < 3000; iter++) {
       let worst = 0;
       for (let i = 1; i < S.length; i++) {
@@ -482,11 +498,15 @@ function meetStreets(terrain, roads, streetsAt) {
  */
 function carve(terrain, roads) {
   const g = terrain.grid;
+  // Measured from the relief as it was: read back after each cut, a road
+  // easing into a trench drags the ground down with it, metre by metre, and
+  // the streets over the trench sink into the pit.
+  const before = terrain.frozen();
   for (const r of roads) {
     const S = r.samples;
     for (let k = 0; k < S.length; k += 2) {
       const p = S[k];
-      const ground = terrain.height(p.x, p.n);
+      const ground = before(p.x, p.n);
       if (Math.abs(p.y - ground) > 1.2) continue;
       // Every vertex of a cell the footprint touches: with 20 m cells, the
       // ones strictly under a 12 m carriageway are too few to hold it clear.
