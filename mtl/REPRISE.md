@@ -13,7 +13,7 @@ stables, `map.json` pour la logique de jeu.
 
 ```bash
 cd mtl && python3 -m http.server 8080     # jouer
-node mtl/tools/check.mjs                  # 16 contrôles, ~4 min — doit passer avant de commiter
+node mtl/tools/check.mjs                  # 18 contrôles, ~4 min — doit passer avant de commiter
 node mtl/tools/shots.mjs --day            # captures (SwiftShader, lent)
 node mtl/tools/export.mjs                 # export Unity
 ```
@@ -88,10 +88,15 @@ puis à la main), en premier `textures.mjs` et les trois bétons.
    redeviendraient de vrais ponts.
 4. **Poids de l'export Unity** : ~385 Mo en tout (bâtiments par quartier
    surtout) ; budget 150 Mo chargé à la demande. Simplifier / instancier.
-5. `check.mjs` signale encore, sans échouer : 37 croisements juste sous le
-   gabarit, 9 chevauchements, 146 routes ni au niveau ni au-dessus d'une rue
+5. `check.mjs` signale encore, sans échouer : 41 croisements juste sous le
+   gabarit, 10 chevauchements, 133 routes ni au niveau ni au-dessus d'une rue
    (surtout Turcot et l'échangeur Décarie). À faire baisser. Le pont Victoria
    « perd » la voiture vers (1267, −3740) : défaut existant, à regarder.
+6. 10 bouts de route arrivent encore sur une rue avec plus de 3 m d'écart
+   (contrôle « les routes se posent sur les rues », 54 au départ) : des
+   bretelles d'échangeur (l'Acadie, Décarie, Turcot) laissées en l'air parce
+   qu'une autoroute les croise juste avant. Il faudrait les faire descendre
+   sous l'autoroute avec assez de hauteur, ou les raccorder à une autre route.
 
 ## Git
 

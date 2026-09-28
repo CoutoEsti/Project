@@ -24,6 +24,8 @@ import OVERLAY from './montreal.js';
 /** Real metres above (below) the ground for an OSM layer. */
 const LEVEL_Y = { 1: 7.6, 2: 14.2, 3: 20.8, 4: 27.4, [-1]: -8, [-2]: -13, [-3]: -18, [-4]: -22 };
 const GRADE = { highway: 0.05, ramp: 0.065, bridge: 0.05, road: 0.07 };
+// layout.js's limit for a lifted piece of street; steeper, it carries its own.
+const STREET_GRADE = 0.08;
 // A highway sunk under a street that OpenStreetMap puts on a bridge: headroom
 // for a truck plus the street's deck (real metres, not scaled).
 const SINK = 7.4;
@@ -93,8 +95,11 @@ export function buildMap(src, settings) {
   const streets = [], roads = [];
   const special = OVERLAY.bridges || {};
   const sunk = sinkHighways(src.roads, special);
+  const chains = chainStreets(src.roads.map((r0) => sunk.patch.get(r0) || r0), special);
   for (const r0 of src.roads) {
-    const r = sunk.patch.get(r0) || r0;
+    const rp = sunk.patch.get(r0) || r0;
+    if (chains.consumed.has(rp)) continue;
+    const r = chains.merged.get(rp) || rp;
     // A motorway is one way unless tagged otherwise (OpenStreetMap's implied
     // rule); the data only says so when someone wrote it down.
     const oneway = r.oneway || r.cls === 'motorway';
@@ -180,9 +185,18 @@ export function buildMap(src, settings) {
   // Heights of the roads, majors first so minor roads can meet them.
   roads.sort((a, b) => b.priority - a.priority);
   const done = [];
+  const onStreet = streetFinder(streets);
+  const highways = new G.Grid(64);     // edges of the roads done, streets aside
+  const onRoad = streetFinder(roads.map((r) => ({ path: r.pts, half: r.width / 2, r })));
   for (const r of roads) {
-    r.path = profile(r, terrain, waterAt, s, done, special[r.name]);
+    r.path = profile(r, terrain, waterAt, s, done, special[r.name], (x, n) => onStreet(x, n) && !onRoad(x, n, r), highways);
     done.push(r);
+    if (!r.street) {
+      for (let i = 0; i + 1 < r.path.length; i++) {
+        const a = r.path[i], b = r.path[i + 1];
+        highways.insert({ a, b }, Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1]));
+      }
+    }
   }
 
   // --- buildings, trees, street furniture --------------------------------------
@@ -234,6 +248,122 @@ export function buildMap(src, settings) {
     buildings, trees: { xs: Float32Array.from(tx), ns: Float32Array.from(tn), count: tx.length }, furniture, quartiers, styleNear,
     landmarks, spawns, signs, races,
   };
+}
+
+// ---------------------------------------------------------------- chains --
+
+/**
+ * OpenStreetMap cuts a street at its bridge: the overpass is a way of its
+ * own, and the approaches that climb to it belong to the ways on either side
+ * (Chemin Rockland: 342 m on layer 2, the ground at both ends). Profiled way
+ * by way, the deck had no room for its ramps and ended ten metres up, facing
+ * a street on the ground. A lifted street way is joined here with the ways
+ * that continue it straight on, until there is room for its ramps at both
+ * ends, and the whole is profiled as one. Of the outermost ways it takes only
+ * what the ramps need; the rest stays a street of its own, with its own width.
+ *
+ * `list` holds the roads as the rest of buildMap sees them (sinkHighways'
+ * patches applied). Returns `merged` (a way → what to build in its place: a
+ * joined copy for the lifted way, the untouched remainder for an outer one)
+ * and `consumed` (ways now entirely inside a copy).
+ */
+function chainStreets(list, special) {
+  const street = (r) => !isHighway(r) && !special[r.name] && r.kind !== 'alley' && r.kind !== 'link';
+  const ends = new Map();
+  const link = (c, r) => { if (c >= 0) { if (!ends.has(c)) ends.set(c, []); ends.get(c).push(r); } };
+  for (const r of list) if (street(r)) { link(r.a, r); link(r.b, r); }
+  const unit = (p, q) => { const dx = q[0] - p[0], dn = q[1] - p[1], l = Math.hypot(dx, dn) || 1; return [dx / l, dn / l]; };
+  // Direction of a way's edge at connector c: arriving there, leaving from there.
+  const into = (o, c) => { const P = o.pts, k = P.length - 1; return o.b === c ? unit(P[k - 1], P[k]) : unit(P[1], P[0]); };
+  const away = (o, c) => { const P = o.pts, k = P.length - 1; return o.a === c ? unit(P[0], P[1]) : unit(P[k], P[k - 1]); };
+  const length = (pts) => { let l = 0; for (let i = 1; i < pts.length; i++) l += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]); return l; };
+  // Real metres of ramp the highest lifted edge needs at the street grade.
+  const rampFor = (r) => {
+    let o = 0;
+    for (let i = 0; r.levels && i < r.levels.length; i++) o = Math.max(o, r.levels[i] ? Math.abs(offsetOf(r.levels[i], false)) : 0);
+    return o ? o / GRADE.road + 40 : 0;
+  };
+  const merged = new Map(), consumed = new Set(), used = new Set();
+  for (const r of list) {
+    if (!street(r) || used.has(r) || !rampFor(r)) continue;
+    used.add(r);
+    const chain = [{ r, rev: false }];     // rev: the way runs against the chain
+    let need = rampFor(r);
+    for (const forward of [true, false]) {
+      let room = 0;
+      let at = forward ? r.b : r.a;
+      while (room < need) {
+        // Forward, the next way starts where the chain ends; backward, the
+        // previous one ends where it starts. A one-way street cannot turn
+        // round. It goes straight on, its name may change there (Rockland's
+        // overpass lands as Avenue Davaar); at a fork, the branch that keeps
+        // the name, or else the clearly straighter one.
+        const dir = into((forward ? chain[chain.length - 1] : chain[0]).r, at);
+        const next = [];
+        for (const o of ends.get(at) || []) {
+          if (used.has(o) || o.a === o.b || o.oneway !== r.oneway) continue;
+          const rev = forward ? o.a !== at : o.b !== at;
+          if (rev && r.oneway) continue;
+          const d = away(o, at);
+          const dot = dir[0] * d[0] + dir[1] * d[1];
+          if (dot >= 0.7) next.push({ o, rev, dot, same: o.name === r.name });
+        }
+        next.sort((x, y) => y.dot - x.dot);
+        const same = next.filter((c) => c.same);
+        const pick = same.length === 1 ? same[0]
+          : next.length === 1 || (next.length > 1 && next[0].dot - next[1].dot > 0.1) ? next[0] : null;
+        if (!pick) break;
+        const { o, rev } = pick;
+        used.add(o);
+        if (forward) chain.push({ r: o, rev }); else chain.unshift({ r: o, rev });
+        at = forward ? (rev ? o.a : o.b) : (rev ? o.b : o.a);
+        const more = rampFor(o);
+        need = Math.max(need, more);
+        room = more ? 0 : room + length(o.pts);
+      }
+    }
+    if (chain.length === 1) continue;
+    // The joined line, edge data carried; `owner` is the chain piece of each edge.
+    const pts = [], levels = [], flags = [], owner = [];
+    chain.forEach(({ r: o, rev }, c) => {
+      const P = rev ? [...o.pts].reverse() : o.pts;
+      const n = o.pts.length - 1;
+      const edge = (arr, i) => (arr ? arr[rev ? n - 1 - i : i] : 0);
+      pts.push(...(pts.length ? P.slice(1) : P));
+      for (let i = 0; i < n; i++) { levels.push(edge(o.levels, i)); flags.push(edge(o.flags, i)); owner.push(c); }
+    });
+    // Keep `need` of ground beyond the outermost lifted edges; what lies
+    // further out in the first and last ways goes back to them.
+    const cum = [0];
+    for (let i = 1; i < pts.length; i++) cum.push(cum[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+    const up = (i) => levels[i] || (flags[i] & 1);
+    let e0 = 0, e1 = levels.length - 1;
+    while (e0 < levels.length && !up(e0)) e0++;
+    while (e1 >= 0 && !up(e1)) e1--;
+    let k0 = 0, k1 = pts.length - 1;       // vertex range kept
+    // Only a neighbour gives back its far end, never the lifted way itself.
+    const trimStart = chain[0].r !== r, trimEnd = chain[chain.length - 1].r !== r;
+    while (trimStart && k0 + 1 < e0 && owner[k0] === 0 && cum[e0] - cum[k0 + 1] >= need) k0++;
+    while (trimEnd && k1 - 1 > e1 + 1 && owner[k1 - 1] === chain.length - 1 && cum[k1 - 1] - cum[e1 + 1] >= need) k1--;
+    const rest = (piece, from, to) => {
+      const o = piece.r;
+      const P = pts.slice(from, to + 1);
+      if (P.length < 2) return null;
+      const lv = levels.slice(from, to), fl = flags.slice(from, to);
+      return { ...o, pts: P, levels: lv.some((v) => v) ? lv : null, flags: fl.some((v) => v) ? fl : null };
+    };
+    merged.set(r, {
+      ...r, pts: pts.slice(k0, k1 + 1),
+      levels: levels.slice(k0, k1).some((v) => v) ? levels.slice(k0, k1) : null,
+      flags: flags.slice(k0, k1).some((v) => v) ? flags.slice(k0, k1) : null,
+    });
+    chain.forEach(({ r: o }, c) => {
+      if (o === r) return;
+      const left = c === 0 && k0 > 0 ? rest(chain[0], 0, k0) : c === chain.length - 1 && k1 < pts.length - 1 ? rest(chain[c], k1, pts.length - 1) : null;
+      if (left) merged.set(o, left); else consumed.add(o);
+    });
+  }
+  return { merged, consumed };
 }
 
 // -------------------------------------------------------------- trenches --
@@ -361,7 +491,7 @@ function offsetOf(level, highway = true) {
  * class allows. The ground under a bridge or a tunnel is read at its two ends
  * and interpolated — a bridge spans its gap, it does not dip into the river.
  */
-function profile(r, terrain, waterAt, s, done, spec) {
+function profile(r, terrain, waterAt, s, done, spec, onStreet, highways) {
   const grade = GRADE[r.cls] || GRADE.road;
   const src = densify(r.pts, r.levels, r.flags, r.wet, 12 * s);
   const { pts, lv, fl, wt } = src;
@@ -518,6 +648,24 @@ function profile(r, terrain, waterAt, s, done, spec) {
     }
   }
 
+  // A piece of street that lands on neither another road nor the zone's edge
+  // lands on its street, on the ground: steeper than the grade if the data
+  // leaves it no room (a bridge way whose street forks right after it), but
+  // never a deck ending in the air.
+  // So does a ramp or a named bridge whose end the data puts on a street
+  // (Jacques-Cartier coming down onto De Lorimier, a Ville-Marie exit) —
+  // unless a highway or a ramp already profiled crosses its last stretch: in
+  // the knot of an interchange, coming down would take it under a deck
+  // without headroom. (Another piece of street crossing it meets it.)
+  const lands = r.street || ((r.cls === 'ramp' || spec) && !r.loop);
+  if (lands) {
+    for (const k of [0, m - 1]) {
+      if (fixed[k] || (k === 0 ? r.cutStart : r.cutEnd)) continue;
+      if (!r.street && (!onStreet || !onStreet(pts[k][0], pts[k][1]))) continue;
+      if (crossedNear(pts, cum, k, 250 * s, highways)) continue;
+      target[k] = g[k]; fixed[k] = 1;
+    }
+  }
   const up = new Float64Array(m).fill(-Infinity), dn = new Float64Array(m).fill(Infinity);
   for (let i = 0; i < m; i++) {
     if (target[i] === null) continue;
@@ -544,6 +692,12 @@ function profile(r, terrain, waterAt, s, done, spec) {
     out.push([pts[i][0], pts[i][1], y]);
   }
   relax(out, cum, grade, fixed);
+  if (r.street) {
+    // As steep as the street it belongs to, then: layout.js holds it to that.
+    let steep = 0;
+    for (let i = 1; i < m; i++) steep = Math.max(steep, Math.abs(out[i][2] - out[i - 1][2]) / ((cum[i] - cum[i - 1]) || 1));
+    if (steep > STREET_GRADE) r.maxGrade = steep + 0.01;
+  }
   r.edgeFlags = fl;
   r.edgeLevels = lv;
   r.cum = cum;
@@ -602,6 +756,38 @@ function relax(out, cum, grade, fixed) {
     }
     if (worst < 0.01) break;
   }
+}
+
+/** Whether an edge of `grid` ({ a, b }) crosses `pts` within `reach` of vertex k (an end). */
+const crossTmp = [];
+function crossedNear(pts, cum, k, reach, grid) {
+  const from = cum[k];
+  for (let i = 0; i + 1 < pts.length; i++) {
+    if (Math.min(Math.abs(cum[i] - from), Math.abs(cum[i + 1] - from)) > reach) continue;
+    const a = pts[i], b = pts[i + 1];
+    const mx = (a[0] + b[0]) / 2, mn = (a[1] + b[1]) / 2;
+    for (const e of grid.query(mx, mn, Math.hypot(b[0] - a[0], b[1] - a[1]) / 2, crossTmp)) {
+      if (segCross(a, b, e.a, e.b)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Whether a point lies on one of these carriageways ({ path, half }), other
+ * than the one whose `r` is `self`.
+ */
+function streetFinder(streets) {
+  const grid = new G.Grid(48);
+  for (const st of streets) {
+    for (let i = 0; i + 1 < st.path.length; i++) {
+      const a = st.path[i], b = st.path[i + 1], h = st.half;
+      grid.insert({ a, b, h, r: st.r }, Math.min(a[0], b[0]) - h, Math.min(a[1], b[1]) - h, Math.max(a[0], b[0]) + h, Math.max(a[1], b[1]) + h);
+    }
+  }
+  const tmp = [];
+  return (x, n, self = null) => grid.query(x, n, 0, tmp)
+    .some((c) => (!self || c.r !== self) && G.segDist2(x, n, c.a[0], c.a[1], c.b[0], c.b[1]).d2 <= c.h * c.h);
 }
 
 /** Split long edges so heights have somewhere to change; edge data carried. */

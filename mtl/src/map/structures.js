@@ -27,6 +27,8 @@ const TWIN = 6;             // twin columns stand this far either side
 const HEADROOM = 6.2;       // a road this far below drives under the deck
 const MERGE = 2.0;          // closer than this in height, two roads merge
 const MEDIAN_GAP = 9;       // two carriageways closer than this share one deck
+// Kinds that line the road's edge with a wall or a barrier.
+const EDGED = new Set(['viaduct', 'water', 'embankment', 'over', 'void', 'sunken', 'covered', 'tunnel', 'twin-gap']);
 
 export function buildStructures(layout) {
   const { roads, map } = layout;
@@ -158,18 +160,35 @@ function roadStructures(r, index, ground, layout, out) {
 
   for (const side of [1, -1]) {
     const kinds = S.map((p) => classify(r, p, side, index, ground));
-    // Smooth out single-sample flickers so walls do not stutter.
+    // Smooth out flickers of one or two samples so walls do not stutter —
+    // also a lone wall-less sample between two different walls, a 2 m slot.
     for (let i = 1; i + 1 < kinds.length; i++) {
-      if (kinds[i - 1].kind === kinds[i + 1].kind && kinds[i].kind !== kinds[i - 1].kind) {
+      const a = kinds[i - 1].kind, b = kinds[i + 1].kind, k = kinds[i].kind;
+      if ((a === b && k !== a) || (!EDGED.has(k) && EDGED.has(a) && EDGED.has(b))) {
         kinds[i] = { ...kinds[i - 1] };
+      }
+    }
+    for (let i = 1; i + 2 < kinds.length; i++) {
+      const a = kinds[i - 1].kind;
+      if (kinds[i + 2].kind === a && kinds[i].kind !== a && kinds[i + 1].kind === kinds[i].kind) {
+        kinds[i] = { ...kinds[i - 1] };
+        kinds[i + 1] = { ...kinds[i - 1] };
       }
     }
     const at = (p, off) => [p.x + side * p.lx * off, p.n + side * p.ln * off];
 
     runsOf(kinds, (k) => (k.road ? `${k.kind}:${k.road.id}` : k.kind), (key, i0, i1) => {
       const kind = key.split(':')[0];
-      const seg = S.slice(i0, i1 + 1);
+      // A run ends on its last sample and the next begins on the one after:
+      // where a retaining wall hands over to a tunnel wall under a street,
+      // that left a 2 m slot on either side of the bridge. Walls and barriers
+      // reach one sample into a neighbour that has its own, so they overlap.
+      const reach = (j) => j >= 0 && j < S.length && EDGED.has(kind) && EDGED.has(kinds[j].kind);
+      const a = reach(i0 - 1) ? 1 : 0, b = reach(i1 + 1) ? 1 : 0;
+      const seg = S.slice(i0 - a, i1 + 1 + b);
       const ks = kinds.slice(i0, i1 + 1);
+      if (a) ks.unshift(ks[0]);
+      if (b) ks.push(ks[ks.length - 1]);
       if (seg.length < 2) return;
       const barrier = rules.barriers && ['viaduct', 'water', 'embankment', 'over', 'void'].includes(kind);
       if (kind === 'twin' || kind === 'twin-gap') {

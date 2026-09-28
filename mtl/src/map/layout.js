@@ -322,7 +322,7 @@ function relaxSamples(roads) {
     // Standing on two roads whose heights no grade can join (a street
     // crossing a highway deep in its trench right beside a ramp still on
     // its way down): let go of them rather than keep a wall in the asphalt.
-    if (r.hard && r.hard.size && steepest(r) > r.rules.maxGrade * 2) relaxRoad(r, new Set());
+    if (r.hard && r.hard.size && steepest(r) > (r.maxGrade || r.rules.maxGrade) * 2) relaxRoad(r, new Set());
   }
 }
 
@@ -336,7 +336,7 @@ function steepest(r) {
 function relaxRoad(r, hard) {
   {
     const S = r.samples;
-    const lim = r.rules.maxGrade;
+    const lim = r.maxGrade || r.rules.maxGrade;
     for (let iter = 0; iter < 3000; iter++) {
       let worst = 0;
       for (let i = 1; i < S.length; i++) {

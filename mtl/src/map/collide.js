@@ -45,7 +45,7 @@ export function buildSolids(layout, structures, buildings, extras = {}) {
   for (const w of structures.walls) {
     S.polyline(simplifyN(w.pts, tol), (p) => p[2], (p) => p[3], w.thickness / 2);
   }
-  const H = { jersey: 0.81, median: 0.81, parapet: 1.1, circuit: 1.2, guardrail: 0.8 };
+  const H = { jersey: 1.07, median: 1.07, parapet: 1.1, circuit: 1.2, guardrail: 0.8 };
   for (const b of structures.barriers) {
     const h = H[b.kind] || 0.9;
     S.polyline(simplifyN(b.pts, tol), (p) => p[2] - 0.2, (p) => p[2] + h, 0.25);

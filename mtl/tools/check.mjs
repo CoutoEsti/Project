@@ -22,7 +22,7 @@ import { createSurface } from '../src/map/surface.js';
 import { buildSolids } from '../src/map/collide.js';
 import { projectOnRoad, SPACING } from '../src/map/layout.js';
 import { resolveSpawn } from '../src/game/spawn.js';
-import { pointInRing, ringBBox, hash01 } from '../src/map/geom.js';
+import { pointInRing, ringBBox, hash01, segDist2 } from '../src/map/geom.js';
 import { Driver } from '../src/game/drive.js';
 import { loadSourceNode } from './lib/source-node.mjs';
 import { serve } from './lib/serve.mjs';
@@ -78,6 +78,72 @@ console.log(`zone ${settings.zone} à ${settings.echelle} % construite en ${((pe
   check('profils des routes', !nan.length && worst.g < 0.25,
     `${nan.length ? `${nan.length} routes sans hauteur — ` : ''}pente max ${(worst.g * 100).toFixed(0)} %${worst.r ? ` (${worst.r.name || worst.r.id}, ${Math.round(worst.p.x)}, ${Math.round(worst.p.n)})` : ''} ; `
     + `à revoir : ${Object.entries(by).map(([k, v]) => `${v} ${k}`).join(', ') || 'rien'}`);
+}
+
+{
+  // Where a road ends on a street, not on another road nor at the zone's
+  // edge, it ends at the street's height: a deck stopping in the air over the
+  // street it joins is a wall to drive into. OpenStreetMap gives a bridge's
+  // ramps to the ways beside it; map/real.js joins them back. A few remain
+  // where the data's street forks right after the bridge, or where coming
+  // down would pass under a highway too low.
+  const high = [];
+  let ends = 0;
+  for (const r of layout.roads) {
+    if (r.loop) continue;
+    for (const [k, closed] of [[0, r.closedStart], [r.samples.length - 1, r.closedEnd]]) {
+      const p = r.samples[k];
+      if (closed || !layout.streetsAt(p.x, p.n, 0, []).length) continue;
+      if (layout.roads.some((o) => o !== r && (projectOnRoad(o, p.x, p.n)?.d ?? Infinity) <= o.half + r.half * 0.6)) continue;
+      ends++;
+      const step = p.y - layout.terrain.height(p.x, p.n);
+      if (Math.abs(step) > 3) high.push(`${r.name || r.id} ${step > 0 ? '+' : ''}${step.toFixed(1)} m (${Math.round(p.x)}, ${Math.round(p.n)})`);
+    }
+  }
+  check('les routes se posent sur les rues', high.length <= 20,
+    `${ends - high.length}/${ends} bouts au niveau de la rue à 3 m près${high.length ? ` — ${high.slice(0, 4).join(' ; ')}` : ''}`);
+}
+
+{
+  // Along one side of a road, one wall hands over to the next (retaining
+  // wall, tunnel wall under a street, skirt, fascia): they must overlap, not
+  // stop a metre or two short of each other — through that slot, under a
+  // street crossing Décarie, one saw the city.
+  const bySide = new Map();
+  for (const w of structures.walls) {
+    if (!w.road) continue;
+    const key = `${w.road}:${w.side}`;
+    if (!bySide.has(key)) bySide.set(key, []);
+    bySide.get(key).push(w.pts);
+  }
+  // Measured along the wall that follows, ahead of the end: side by side (a
+  // retaining wall giving way to a skirt a metre further out) is an
+  // overlap, and a wall behind the end is not the next one.
+  let slots = 0;
+  const where = [];
+  for (const list of bySide.values()) {
+    for (const pts of list) {
+      for (const [e, f] of [[pts[0], pts[1]], [pts[pts.length - 1], pts[pts.length - 2]]]) {
+        let best = null;
+        for (const other of list) {
+          if (other === pts) continue;
+          for (let i = 0; i + 1 < other.length; i++) {
+            const a = other[i], b = other[i + 1];
+            const { d2 } = segDist2(e[0], e[1], a[0], a[1], b[0], b[1]);
+            if (!best || d2 < best.d2) best = { d2, a, b };
+          }
+        }
+        if (!best || best.d2 > 16) continue;
+        const { a, b } = best;
+        const mx = (a[0] + b[0]) / 2 - e[0], mn = (a[1] + b[1]) / 2 - e[1];
+        if (mx * (e[0] - f[0]) + mn * (e[1] - f[1]) <= 0) continue;
+        const len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+        const u = ((e[0] - a[0]) * (b[0] - a[0]) + (e[1] - a[1]) * (b[1] - a[1])) / len;
+        if (Math.max(-u, u - len) > 0.3) { slots++; if (where.length < 4) where.push(`(${Math.round(e[0])}, ${Math.round(e[1])})`); }
+      }
+    }
+  }
+  check('murs sans fente', slots === 0, `${slots} fentes entre deux murs d'une même route${where.length ? ` — ${where.join(' ')}` : ''}`);
 }
 
 {

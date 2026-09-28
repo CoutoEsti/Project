@@ -139,7 +139,18 @@ tools/extract.py  →  data/*  →  map/source.js  →  map/real.js  →  map/la
   Les deux chaussées d'une autoroute sont deux voies à sens unique dans OSM :
   là où elles se touchent, elles partagent un muret New Jersey central ; là
   où elles s'écartent de moins de 9 m, chacune garde son muret et une dalle
-  ferme l'espace (le tablier unique de la Métropolitaine).
+  ferme l'espace (le tablier unique de la Métropolitaine). Murets et
+  glissières en béton font 1,07 m (le « mur haut » des autoroutes du
+  Québec), les trois quarts de la hauteur d'une auto. D'un genre de mur au
+  suivant (soutènement, mur de tunnel sous une rue, jupe, rive), les murs se
+  chevauchent : `check.mjs` compte les fentes, il n'en faut aucune.
+- **Ponts de rue** : OSM découpe une rue à son pont, et les rampes d'accès
+  appartiennent aux tronçons voisins. `map/real.js` (`chainStreets`) les
+  recoud : le pont prend aux voisins qui le prolongent tout droit la longueur
+  qu'il faut pour ses rampes. Un bout de route qui arrive sur une rue se pose
+  à sa hauteur, plus raide que la pente normale s'il le faut, sauf si une
+  autoroute croise son dernier tronçon (dans un échangeur, redescendre le
+  ferait passer sous un tablier trop bas).
 - **Portiques de sortie** (`map/exits.js`) : un panneau vert au-dessus de la
   chaussée 250 m avant chaque bretelle, au nom de l'autoroute qu'elle
   rejoint ou de la rue où elle mène — la première transversale quand elle

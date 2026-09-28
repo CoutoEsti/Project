@@ -9,10 +9,12 @@ import { pillarColumns } from '../map/structures.js';
 
 const TOL = 0.04;   // metres: invisible, and a straight wall costs two quads
 
-// Barrier cross-sections: [half-width, height] from the base up.
+// Barrier cross-sections: [half-width, height] from the base up. The concrete
+// ones are the tall wall of Québec's highways, 1.07 m: three quarters of a
+// car's height, so it reads as a wall and not a kerb.
 const PROFILES = {
-  jersey: [[0.3, 0], [0.28, 0.075], [0.1, 0.33], [0.08, 0.81]],
-  median: [[0.3, 0], [0.28, 0.075], [0.1, 0.33], [0.08, 0.81]],
+  jersey: [[0.3, 0], [0.28, 0.075], [0.12, 0.33], [0.1, 1.07]],
+  median: [[0.3, 0], [0.28, 0.075], [0.12, 0.33], [0.1, 1.07]],
   parapet: [[0.22, 0], [0.22, 0.98], [0.16, 1.04]],
   circuit: [[0.25, 0], [0.25, 1.15], [0.2, 1.2]],
 };
