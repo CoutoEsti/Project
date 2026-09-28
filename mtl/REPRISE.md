@@ -97,6 +97,19 @@ puis à la main), en premier `textures.mjs` et les trois bétons.
    bretelles d'échangeur (l'Acadie, Décarie, Turcot) laissées en l'air parce
    qu'une autoroute les croise juste avant. Il faudrait les faire descendre
    sous l'autoroute avec assez de hauteur, ou les raccorder à une autre route.
+7. **Bretelles qui arrivent sur un boulevard** (au sol, ex. voies de service de
+   Décarie) : leur ruban chevauche encore la rue en biais. Appliquer le même
+   principe que `map/junctions.js` (une seule surface, bretelle découpée contre
+   le bord de la rue), mais contre les rues (`layout.streets`) plutôt que
+   contre les routes. Ne pas poser de maillage par-dessus la chaussée d'une rue.
+8. **Nombre de voies réel** : Overture n'a pas la balise OSM `lanes`, le jeu
+   le devine d'après la largeur (`real.js`, `lanes:`). L'utilisateur va fournir
+   un export Overpass (`lanes`, `width`, `turn:lanes` des `motorway`, `trunk`,
+   `primary` et bretelles de la zone). À faire : un fichier `data/voies.json`
+   (id de voie OSM → voies), le lire dans `tools/extract.py` ou `map/real.js`,
+   largeur = voies × 3,7 m + accotements, et le marquage suit.
+9. Fourche r1147 (échangeur Décarie/40) : pente de 8,9 % juste après le nez
+   (limite 7,9 %), le seul avertissement ajouté par le raccord des fourches.
 
 ## Git
 
