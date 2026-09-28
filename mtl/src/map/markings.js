@@ -9,6 +9,7 @@
 const W = 0.13;                   // line width, metres
 const DASH = [3, 6];              // lane lines: 3 m painted, 6 m gap
 const DASH_CENTRE = [3, 3];
+const DASH_JOIN = [1.5, 1.5];      // edge line across the mouth of an exit or entrance lane
 const STOP = 3.5;                 // clear distance before a crossing street
 
 export function streetMarkings(layout, structures) {
@@ -111,25 +112,43 @@ function linesFor(st, w, h) {
   return L;
 }
 
-/** Lines along the roads that carry their own surface. */
+/**
+ * Lines along the roads that carry their own surface. Where a ramp joins at
+ * the side (map/junctions.js), its lines start at the nose, and the
+ * carriageway's edge line turns to dashes across the mouth of the taper.
+ */
 export function roadMarkings(layout) {
   const out = [];
+  const joins = layout.joins || [];
   for (const r of layout.roads) {
     const lines = roadLines(r);
     const S = r.samples;
     // Skip the junction overlaps of mountain roads.
     let i0 = 0, i1 = S.length - 1;
     for (const j of r.junctions || []) {
-      if (j.end === 'start') while (i0 < i1 && S[i0].s < j.sEdge + 2) i0++;
-      else while (i1 > i0 && S[i1].s > j.sEdge - 2) i1--;
+      const side = joins.find((k) => k.road === r.id && k.end === j.end);
+      if (j.end === 'start') { if (side) i0 = Math.max(i0, side.nose); else while (i0 < i1 && S[i0].s < j.sEdge + 2) i0++; }
+      else if (side) i1 = Math.min(i1, side.nose); else while (i1 > i0 && S[i1].s > j.sEdge - 2) i1--;
     }
+    // Stretches of this road's edges that a ramp opens: [side, s0, s1].
+    const mouths = joins.filter((k) => k.major === r.id).map((k) => [k.side, k.majorFrom - 4, k.majorTo + 4]);
     for (const L of lines) {
-      const pts = [];
+      const edge = !L.dash && Math.abs(L.off) > r.half * 0.6 ? Math.sign(L.off) : 0;
+      const open = (p) => edge && mouths.some(([side, a, b]) => side === edge && p.s >= a && p.s <= b);
+      let pts = [], dashed = [];
+      const flush = () => {
+        if (pts.length >= 2) out.push({ pts, w: L.w || W, color: L.color, dash: L.dash || null, road: r.id });
+        if (dashed.length >= 2) out.push({ pts: dashed, w: L.w || W, color: L.color, dash: DASH_JOIN, road: r.id });
+        pts = []; dashed = [];
+      };
       for (let i = i0; i <= i1; i += 1) {
         const p = S[i];
-        pts.push([p.x + p.lx * L.off, p.n + p.ln * L.off, p.y + 0.02]);
+        const q = [p.x + p.lx * L.off, p.n + p.ln * L.off, p.y + 0.02];
+        const o = open(p);
+        if (o ? pts.length : dashed.length) { (o ? pts : dashed).push(q); flush(); }
+        (o ? dashed : pts).push(q);
       }
-      if (pts.length >= 2) out.push({ pts, w: L.w || W, color: L.color, dash: L.dash || null, road: r.id });
+      flush();
     }
   }
   return out;

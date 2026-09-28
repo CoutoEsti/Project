@@ -5,6 +5,7 @@
 
 import { buildMap } from '../map/real.js';
 import { compile } from '../map/layout.js';
+import { junctionPatches } from '../map/junctions.js';
 import { buildStructures } from '../map/structures.js';
 import { tiling, byTile } from '../map/tiles.js';
 import { prepareBuildings } from '../map/buildings.js';
@@ -45,6 +46,7 @@ export async function buildWorld(THREE, source, opts = {}) {
   const settings = opts.settings || { zone: 'centre', echelle: 100 };
   const map = await step('carte', () => buildMap(source, settings));
   const layout = await step('plan', () => compile(map));
+  layout.joins = junctionPatches(layout);
   const structures = await step('structures', () => buildStructures(layout));
   map.signs = (map.signs || []).concat(exitSigns(layout));
   const tiles = tiling(map);

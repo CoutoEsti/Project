@@ -24,8 +24,9 @@ export function buildRoads(THREE, layout, S, M) {
   const top = new GeoBuilder();
   const under = new GeoBuilder();
   const circuit = new GeoBuilder();
+  const joins = layout.joins || [];
   for (const r of layout.roads) {
-    const [i0, i1] = drawRange(r);
+    const [i0, i1] = drawRange(r, joins);
     const b = r.cls === 'circuit' ? circuit : top;
     ribbon(b, r.samples, i0, i1, (p) => p.y, r.half, false);
     // Undersides where the deck is carried on pillars.
@@ -39,20 +40,50 @@ export function buildRoads(THREE, layout, S, M) {
     }
     flush();
   }
+  for (const j of joins) joinSurface(top, j);
   push(out, meshOf(THREE, top, M.Asphalt, 'Routes'), 'routes');
   push(out, meshOf(THREE, circuit, M.Asphalt, 'Circuit'), 'ile-notre-dame');
   push(out, meshOf(THREE, under, M.Concrete_Dark, 'Dessous_tabliers'), 'routes');
   return out;
 }
 
-/** Terrain roads are trimmed where they run into their major road. */
-function drawRange(r) {
+/**
+ * Terrain roads are trimmed where they run into their major road; a ramp
+ * joined at the side (map/junctions.js) starts at its nose, the taper before
+ * it being part of the carriageway.
+ */
+function drawRange(r, joins) {
   let i0 = 0, i1 = r.samples.length - 1;
-  for (const j of r.junctions || []) {
-    if (j.end === 'start') while (i0 < i1 && r.samples[i0].s < j.sTrim) i0++;
-    else while (i1 > i0 && r.samples[i1].s > j.sTrim) i1--;
+  let n0 = -1, n1 = -1;
+  for (const j of joins) {
+    if (j.road !== r.id) continue;
+    if (j.end === 'start') n0 = j.nose; else n1 = j.nose;
   }
+  for (const j of r.junctions || []) {
+    if (j.end === 'start' && n0 < 0) while (i0 < i1 && r.samples[i0].s < j.sTrim) i0++;
+    else if (j.end === 'end' && n1 < 0) while (i1 > i0 && r.samples[i1].s > j.sTrim) i1--;
+  }
+  if (n0 >= 0) return [n0, n1 >= 0 ? n1 : Math.min(r.samples.length - 1, i1 + 1)];
+  if (n1 >= 0) return [Math.max(0, i0 - 1), n1];
   return [Math.max(0, i0 - 1), Math.min(r.samples.length - 1, i1 + 1)];
+}
+
+/** The taper of a side join: strips from the carriageway's edge to the ramp's outer edge. */
+function joinSurface(b, j) {
+  const R = j.rows;
+  for (let i = 0; i + 1 < R.length; i++) {
+    const [e0x, e0n, e0y, o0x, o0n, o0y] = R[i];
+    const [e1x, e1n, e1y, o1x, o1n, o1y] = R[i + 1];
+    // Both rows collapsed on the carriageway's edge: nothing to fill yet.
+    if (Math.hypot(o0x - e0x, o0n - e0n) < 0.02 && Math.hypot(o1x - e1x, o1n - e1n) < 0.02) continue;
+    const P = [[e0x, e0n, e0y], [o0x, o0n, o0y], [o1x, o1n, o1y], [e1x, e1n, e1y]];
+    // Front faces run counter-clockwise seen from above, as ribbon() lays them.
+    let area = 0;
+    for (let k = 0; k < 4; k++) { const p = P[k], q = P[(k + 1) % 4]; area += p[0] * q[1] - q[0] * p[1]; }
+    if (area < 0) P.reverse();
+    const ids = P.map(([x, n, y]) => b.v(x, n, y, 0, 0, 1, x, n));
+    b.quad(ids[0], ids[1], ids[2], ids[3]);
+  }
 }
 
 function ribbon(b, S, i0, i1, yOf, half, down) {
