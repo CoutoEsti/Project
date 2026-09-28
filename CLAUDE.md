@@ -5,8 +5,11 @@ Le jeu est dans `hop/`. Carte des fichiers et détails d'architecture : `hop/REA
 
 `mtl/` est un projet distinct : la vraie Montréal (OpenStreetMap via Overture,
 relief réel) pour un jeu de course, avec zone et échelle réglables et un export
-Unity. Voir `mtl/README.md`. Même conventions ; `node mtl/tools/check.mjs`
-doit passer.
+Unity. Voir `mtl/README.md` et `mtl/REPRISE.md`. Même conventions ;
+`node mtl/tools/check.mjs` doit passer.
+
+**Le site publié sert `mtl/` à la racine** ; Ruelle reste accessible à
+`/hop/` (voir `vercel.json`).
 
 ## Commandes
 
