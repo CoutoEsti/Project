@@ -105,6 +105,24 @@ export function buildStructureMeshes(THREE, layout, S, M) {
     if (bar.kind === 'parapet') railOnTop(metal, pts, 1.18);
   }
 
+  // The deck between twin carriageways: a concrete top between their two
+  // barriers and, where they are up on pillars, an underside.
+  for (const md of S.medians || []) {
+    for (let i = 0; i + 1 < md.pts.length; i++) {
+      const p = md.pts[i], q = md.pts[i + 1];
+      const quad = (b, dy, down) => {
+        const ny = down ? -1 : 1;
+        const a = b.v(p[0], p[1], p[4] + dy, 0, 0, ny, p[0], p[1]);
+        const c = b.v(p[2], p[3], p[4] + dy, 0, 0, ny, p[2], p[3]);
+        const d = b.v(q[2], q[3], q[4] + dy, 0, 0, ny, q[2], q[3]);
+        const e = b.v(q[0], q[1], q[4] + dy, 0, 0, ny, q[0], q[1]);
+        orientedQuad(b, a, c, d, e, down);
+      };
+      quad(concrete, 0.03, false);
+      if (md.lifted[i] && md.lifted[i + 1]) quad(darkConcrete, -md.depth, true);
+    }
+  }
+
   // Pillars: a column and, under wide decks, a hammerhead cap.
   for (const p of S.pillars) {
     const ux = p.cap ? p.cap.tx : 1, un = p.cap ? p.cap.tn : 0;
@@ -222,13 +240,14 @@ function thickWall(b, pts, t, inner, side) {
 }
 
 /** Add a quad whose winding faces up (for the top of walls). */
-function orientedQuad(b, a, c, d, e) {
+function orientedQuad(b, a, c, d, e, down = false) {
   // Positions are stored as (x, y, -n): check the winding seen from above.
   const P = b.pos;
   const ax = P[a * 3], az = P[a * 3 + 2], cx = P[c * 3], cz = P[c * 3 + 2], dx = P[d * 3], dz = P[d * 3 + 2];
   const cross = (cx - ax) * (dz - az) - (cz - az) * (dx - ax);
   // In (x, z) with z = -n, counter-clockwise from above has a negative cross.
-  if (cross < 0) b.quad(a, c, d, e); else b.quad(a, e, d, c);
+  // `down` flips it, for an underside.
+  if ((cross < 0) !== down) b.quad(a, c, d, e); else b.quad(a, e, d, c);
 }
 
 /** Extrude a symmetric profile along a polyline of [x, n, y] points. */

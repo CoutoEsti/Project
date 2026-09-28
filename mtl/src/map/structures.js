@@ -26,6 +26,7 @@ const DEEP = -12;           // skirt bottom when there is nothing underneath
 const TWIN = 6;             // twin columns stand this far either side
 const HEADROOM = 6.2;       // a road this far below drives under the deck
 const MERGE = 2.0;          // closer than this in height, two roads merge
+const MEDIAN_GAP = 9;       // two carriageways closer than this share one deck
 
 export function buildStructures(layout) {
   const { roads, map } = layout;
@@ -41,6 +42,7 @@ export function buildStructures(layout) {
     closures: [],   // { x, n, y, tx, tn, width, text }
     lamps: [],      // { x, n, y, kind, tx, tn, side }
     decks: [],      // { poly: ring, y, depth } — street bridges over the canal
+    medians: [],    // { pts: [[xa, na, xb, nb, y]], depth, lifted } — deck between twin carriageways
   };
 
   for (const r of roads) annotate(r, ground);
@@ -63,7 +65,36 @@ function annotate(r, ground) {
   }
 }
 
+/**
+ * The other carriageway of a divided road, when it runs alongside at the same
+ * level on this side: the Métropolitaine is two one-way ways in the data, and
+ * one deck with a concrete median in the city. Returns { road, gap, D } — gap
+ * between the two edges, negative where the ribbons overlap; D between the
+ * centrelines — or null. A carriageway going the same way found first means
+ * this road merges into it, and the median is that one's business.
+ */
+function twinOf(r, p, side, index) {
+  if (!r.oneway || p.covered) return null;
+  for (const d of [-r.half * 0.5, PROBE, 3, 6, MEDIAN_GAP]) {
+    const qx = p.x + side * p.lx * (r.half + d), qn = p.n + side * p.ln * (r.half + d);
+    for (const o of index.surfacesAt(qx, qn, 0)) {
+      if (o.road === r || o.covered || !o.road.oneway || Math.abs(o.y - p.y) > 0.45) continue;
+      const q = o.road.samples[o.i], q1 = o.road.samples[Math.min(o.road.samples.length - 1, o.i + 1)];
+      if (q.tx * p.tx + q.tn * p.tn > -0.85) return null;
+      const cx = q.x + (q1.x - q.x) * o.t, cn = q.n + (q1.n - q.n) * o.t;
+      const D = Math.abs((cx - p.x) * p.lx + (cn - p.n) * p.ln);
+      return { road: o.road, gap: D - r.half - o.road.half, D };
+    }
+  }
+  return null;
+}
+
 function classify(r, p, side, index, ground) {
+  // Twin carriageways touching: one median barrier between them. Further
+  // apart: each keeps its barrier on the inside and a slab closes the gap,
+  // or the car would find a slot to fall through.
+  const twin = twinOf(r, p, side, index);
+  if (twin && twin.gap < MEDIAN_GAP) return { kind: twin.gap <= 1.2 ? 'twin' : 'twin-gap', ...twin };
   const qx = p.x + side * p.lx * (r.half + PROBE);
   const qn = p.n + side * p.ln * (r.half + PROBE);
   let merge = false, lower = null, higher = null, aboveInTunnel = false;
@@ -135,12 +166,25 @@ function roadStructures(r, index, ground, layout, out) {
     }
     const at = (p, off) => [p.x + side * p.lx * off, p.n + side * p.ln * off];
 
-    runsOf(kinds, (k) => k.kind, (kind, i0, i1) => {
+    runsOf(kinds, (k) => (k.road ? `${k.kind}:${k.road.id}` : k.kind), (key, i0, i1) => {
+      const kind = key.split(':')[0];
       const seg = S.slice(i0, i1 + 1);
       const ks = kinds.slice(i0, i1 + 1);
       if (seg.length < 2) return;
       const barrier = rules.barriers && ['viaduct', 'water', 'embankment', 'over', 'void'].includes(kind);
-      if (kind === 'viaduct' || kind === 'water') {
+      if (kind === 'twin' || kind === 'twin-gap') {
+        // Built once per pair, by the carriageway with the smaller id.
+        const mine = r.id < ks[0].road.id;
+        if (kind === 'twin') {
+          if (mine) out.barriers.push({ kind: 'median', road: r.id, pts: seg.map((p, j) => [...at(p, ks[j].D / 2), p.y]) });
+        } else {
+          out.barriers.push({ kind: 'jersey', road: r.id, pts: seg.map((p) => [...at(p, r.half - 0.35), p.y]) });
+          if (mine) {
+            out.medians.push({ road: r.id, depth: deck, lifted: seg.map((p) => p.carry !== 'none'), pts: seg.map((p, j) =>
+              [...at(p, r.half - 0.05), ...at(p, r.half + ks[j].gap + 0.05), p.y]) });
+          }
+        }
+      } else if (kind === 'viaduct' || kind === 'water') {
         out.walls.push({ kind: 'fascia', road: r.id, side, thickness: 0.35,
           pts: seg.map((p) => [...at(p, r.half - 0.17), p.y - deck, p.y + 0.02]) });
       } else if (kind === 'embankment') {

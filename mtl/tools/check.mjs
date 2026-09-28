@@ -366,6 +366,65 @@ drive('Camillien-Houde', ['Voie Camillien-Houde', 620, 1960, 270, 2000], { vmax:
 drive('circuit Gilles-Villeneuve', ['Circuit Gilles-Villeneuve', 2300, -3200, 180, 4000], { vmax: 30, aLat: 8 });
 
 {
+  // Streets under the viaduct: every named street crossing the
+  // Métropolitaine where it is up, followed by the autopilot 60 m either
+  // side. The car stays on the street and hits nothing; the deck clears it.
+  const T = layout.terrain;
+  const viaduct = layout.roads.filter((r) => r.name === 'Autoroute Métropolitaine');
+  const W = layout.map.world;
+  const inside = (x, n) => x - W.x0 > 80 && W.x1 - x > 80 && n - W.n0 > 80 && W.n1 - n > 80;
+  const cut = (a, b, c, d) => {
+    const rx = b[0] - a[0], rn = b[1] - a[1], sx = d[0] - c[0], sn = d[1] - c[1];
+    const den = rx * sn - rn * sx;
+    if (Math.abs(den) < 1e-9) return null;
+    const t = ((c[0] - a[0]) * sn - (c[1] - a[1]) * sx) / den, u = ((c[0] - a[0]) * rn - (c[1] - a[1]) * rx) / den;
+    return t >= 0 && t <= 1 && u >= 0 && u <= 1 ? t : null;
+  };
+  let tried = 0, low = 0;
+  const bad = [];
+  for (const st of layout.streets) {
+    if (!st.name || st.cls === 'alley' || st.cls === 'plaza') continue;
+    const P = st.path;
+    for (let i = 0; i + 1 < P.length; i++) {
+      for (const r of viaduct) {
+        const S = r.samples;
+        for (let k = 0; k + 1 < S.length; k++) {
+          const t = cut(P[i], P[i + 1], [S[k].x, S[k].n], [S[k + 1].x, S[k + 1].n]);
+          if (t === null) continue;
+          const x = P[i][0] + (P[i + 1][0] - P[i][0]) * t, n = P[i][1] + (P[i + 1][1] - P[i][1]) * t;
+          const deck = S[k].y - T.height(x, n);
+          if (deck < 4 || !inside(x, n)) continue;
+          if (deck < 5.2 + 1.6) low++;
+          // The street as a route, 60 m before the crossing to 60 m after.
+          const pts = [];
+          let acc = 0;
+          for (let j = i; j >= 0 && acc < 60; j--) { pts.unshift(P[j]); if (j < i) acc += Math.hypot(P[j + 1][0] - P[j][0], P[j + 1][1] - P[j][1]); }
+          acc = 0;
+          for (let j = i + 1; j < P.length && acc < 60; j++) { pts.push(P[j]); acc += Math.hypot(P[j][0] - P[j - 1][0], P[j][1] - P[j - 1][1]); }
+          const samples = [];
+          for (let q = 0; q + 1 < pts.length; q++) {
+            const a = pts[q], b = pts[q + 1], L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+            if (L < 1e-3) continue;
+            const tx = (b[0] - a[0]) / L, tn = (b[1] - a[1]) / L;
+            for (let d = 0; d < L; d += SPACING) {
+              const px = a[0] + tx * d, pn = a[1] + tn * d, last = samples[samples.length - 1];
+              samples.push({ x: px, n: pn, y: T.height(px, pn), tx, tn, lx: -tn, ln: tx, s: last ? last.s + Math.hypot(px - last.x, pn - last.n) : 0 });
+            }
+          }
+          if (samples.length < 20) continue;
+          tried++;
+          const route = { name: st.name, samples, length: samples[samples.length - 1].s, width: st.width, half: st.width / 2, legs: 1 };
+          const res = autopilot(route, { vmax: 12, maxTime: 60 });
+          if (!res.done || res.impact > 1) bad.push(`${st.name} (${Math.round(x)}, ${Math.round(n)}) choc ${res.impact.toFixed(1)}${res.done ? '' : ' arrêtée'}`);
+        }
+      }
+    }
+  }
+  check('les rues passent sous la 40', tried > 10 && low === 0 && bad.length === 0,
+    `${tried} rues sous le viaduc, ${low} avec moins de 6,8 m sous le tablier${bad.length ? ` ; ${bad.length} accrochent : ${bad.slice(0, 4).join(' ; ')}` : ''}`);
+}
+
+{
   // Ordinary streets, picked at random (always the same ones): put the car
   // down in the right-hand lane, leave it two seconds, then drive 60 m
   // straight on at 30 km/h. Nothing solid may stand on the carriageway.

@@ -136,6 +136,14 @@ tools/extract.py  →  data/*  →  map/source.js  →  map/real.js  →  map/la
 - **Ouvrages** : murs de tranchée, tunnels, glissières, piliers, clôtures sont
   *déduits* de ce qu'il y a de chaque côté de chaque route. Rien n'est posé à
   la main ; ce qu'on voit et ce qu'on percute sont les mêmes données.
+  Les deux chaussées d'une autoroute sont deux voies à sens unique dans OSM :
+  là où elles se touchent, elles partagent un muret New Jersey central ; là
+  où elles s'écartent de moins de 9 m, chacune garde son muret et une dalle
+  ferme l'espace (le tablier unique de la Métropolitaine).
+- **Portiques de sortie** (`map/exits.js`) : un panneau vert au-dessus de la
+  chaussée 250 m avant chaque bretelle, au nom de l'autoroute qu'elle
+  rejoint ou de la rue où elle mène — la première transversale quand elle
+  arrive sur une voie de service comme Crémazie.
 - **Bâtiments** : les 130 000 empreintes réelles, hauteur d'OSM quand elle
   existe, sinon estimée (étages, type, quartier). Façades selon le style du
   quartier (`map/montreal.js`).
@@ -170,7 +178,8 @@ node mtl/tools/export.mjs                        # export Unity → mtl/export/
 dans les deux sens, la Métropolitaine dans les deux sens, le tunnel
 Ville-Marie dans les deux sens, le pont Jacques-Cartier, Camillien-Houde et le
 circuit Gilles-Villeneuve, et pose la voiture sur une centaine de rues prises
-au hasard. Il compte chaque choc, chaque saut et chaque écart vertical, mesure
+au hasard, et fait passer une voiture sous le viaduc de la 40 sur chaque rue
+qui le croise. Il compte chaque choc, chaque saut et chaque écart vertical, mesure
 le 0-100 et le freinage, et vérifie qu'aucun repère n'est sur une rue. Passe
 aux zones `anneau` 100 % et 70 %, et `centre` 100 % et 85 %.
 

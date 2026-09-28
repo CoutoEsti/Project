@@ -20,6 +20,7 @@ import { buildLamps, buildTrees } from './props.js';
 import { buildMarkings } from './markings.js';
 import { buildLandmarks, buildJacquesCartier, landmarkFootprints } from './landmarks.js';
 import { buildSigns } from './signs.js';
+import { exitSigns } from '../map/exits.js';
 import { placeNeon } from '../map/neon.js';
 import { buildNeon } from './neon.js';
 
@@ -45,6 +46,7 @@ export async function buildWorld(THREE, source, opts = {}) {
   const map = await step('carte', () => buildMap(source, settings));
   const layout = await step('plan', () => compile(map));
   const structures = await step('structures', () => buildStructures(layout));
+  map.signs = (map.signs || []).concat(exitSigns(layout));
   const tiles = tiling(map);
   const styleAt = (x, n) => map.styleNear(x, n);
   let buildings = await step('bâtiments', () => prepareBuildings(map, layout, tiles, styleAt));

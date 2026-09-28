@@ -12,7 +12,8 @@ export function buildSigns(THREE, map, layout, M) {
     const road = layout.roadById[sign.road];
     if (!road) continue;
     const p = nearest(road.samples, sign.at);
-    const [fx, fn] = HEADING[sign.facing] || [0, 1];
+    // Readers' heading: a vector (generated exits) or a compass word.
+    const [fx, fn] = sign.dir || HEADING[sign.facing] || [0, 1];
     // Readers drive towards `facing`: their carriageway is on their right.
     const along = p.tx * fx + p.tn * fn >= 0 ? 1 : -1;
     const tx = p.tx * along, tn = p.tn * along;
@@ -48,7 +49,9 @@ export function buildSigns(THREE, map, layout, M) {
       let mat = M.Metal_Green;
       if (hasCanvas()) {
         const tex = textPanel(THREE, panel.text.split('\n'), {
-          width: 768, height: 300, bg: panel.closed ? '#7a5a12' : '#0f5a2b', align: 'left', size: 54, top: 0.42,
+          // 512 × 200 reads fine at gantry distance and keeps ninety
+          // panels near 30 MB of texture on a phone.
+          width: 512, height: 200, bg: panel.closed ? '#7a5a12' : '#0f5a2b', align: 'left', size: 38, top: 0.42,
           draw: (c, W, H) => shield(c, W, H, panel.ref, panel.dir, panel.closed),
         });
         mat = new THREE.MeshBasicMaterial({ map: tex, name: 'Panneau_autoroute', color: new THREE.Color(0xffffff).multiplyScalar(0.9) });
