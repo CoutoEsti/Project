@@ -12,7 +12,9 @@
 // OpenStreetMap says *that* a way is a bridge on layer 1 or a tunnel on layer
 // −2, never how high. Heights come from the layer (LEVEL_Y), measured from the
 // ground under the abutments, and a grade limit spreads each change into
-// ramps (see profile()).
+// ramps (see profile()). The data's tunnel bit also carries `covered`: a
+// street under the Métropolitaine's viaduct is covered, not buried. Every real
+// tunnel has a negative layer, so the bit only counts below ground.
 
 import { ZONES } from './zones.js';
 import { createTerrain } from './terrain.js';
@@ -21,7 +23,6 @@ import OVERLAY from './montreal.js';
 
 /** Real metres above (below) the ground for an OSM layer. */
 const LEVEL_Y = { 1: 7.6, 2: 14.2, 3: 20.8, 4: 27.4, [-1]: -8, [-2]: -13, [-3]: -18, [-4]: -22 };
-const TUNNEL_Y = -8;
 const GRADE = { highway: 0.05, ramp: 0.065, bridge: 0.05, road: 0.07 };
 // A highway sunk under a street that OpenStreetMap puts on a bridge: headroom
 // for a truck plus the street's deck (real metres, not scaled).
@@ -98,6 +99,7 @@ export function buildMap(src, settings) {
     // rule); the data only says so when someone wrote it down.
     const oneway = r.oneway || r.cls === 'motorway';
     for (const piece of clipRoad(r, zone.box)) {
+      if (piece.flags) piece.flags = piece.flags.map((f, i) => ((f & 2) && !(piece.levels && piece.levels[i] < 0) ? f & ~2 : f));
       const highway = isHighway(r);
       const width = S(r.kind === 'link' && highway ? LINK_WIDTH : r.kind === 'alley' ? WIDTH.alley[0]
         : (WIDTH[r.cls] || WIDTH.residential)[oneway ? 1 : 0]);
@@ -132,7 +134,7 @@ export function buildMap(src, settings) {
       // An ordinary street: only its lifted stretches, plus their approaches,
       // become roads; the rest is draped on the ground.
       const need = (i) => {
-        const o = Math.abs(offsetOf(level(i), flag(i), false));
+        const o = Math.abs(offsetOf(level(i), false));
         return o > 0 ? o / GRADE.road + S(25) : S(30);
       };
       const cum = [0];
@@ -345,12 +347,11 @@ function segCross(a, b, c, d) {
 
 // ------------------------------------------------------------------ profile --
 
-function offsetOf(level, flag, highway = true) {
+function offsetOf(level, highway = true) {
   // A street under an at-grade highway needs 5 m of headroom and a deck, not
   // the 8 m of a motorway trench.
   if (level === -1 && !highway) return -6.5;
   if (level) return LEVEL_Y[Math.max(-4, Math.min(4, level))];
-  if (flag & 2) return TUNNEL_Y;
   return 0;
 }
 
@@ -361,6 +362,7 @@ function offsetOf(level, flag, highway = true) {
  * and interpolated — a bridge spans its gap, it does not dip into the river.
  */
 function profile(r, terrain, waterAt, s, done, spec) {
+  const grade = GRADE[r.cls] || GRADE.road;
   const src = densify(r.pts, r.levels, r.flags, r.wet, 12 * s);
   const { pts, lv, fl, wt } = src;
   const m = pts.length;
@@ -371,7 +373,7 @@ function profile(r, terrain, waterAt, s, done, spec) {
     const w = waterAt(x, n);
     return w ? w.level : terrain.height(x, n);
   });
-  const spans = (test) => {
+  const spans = (test, overland) => {
     for (let i = 0; i < m - 1;) {
       if (!test(i)) { i++; continue; }
       let j = i;
@@ -382,6 +384,7 @@ function profile(r, terrain, waterAt, s, done, spec) {
         const t = (cum[k] - cum[i]) / ((cum[j] - cum[i]) || 1);
         g[k] = ga + (gb - ga) * t;
       }
+      if (overland) overland(i, j);
       i = j;
     }
   };
@@ -389,14 +392,47 @@ function profile(r, terrain, waterAt, s, done, spec) {
     const [x, n] = pts[i];
     return waterAt(x, n) ? g[i] : terrain.height(x, n);
   }
-  spans((i) => (fl[i] & 1) || wt[i]);
+  const lift = new Float64Array(m);
+  spans((i) => (fl[i] & 1) || wt[i], (i, j) => overGround(i, j));
   spans((i) => fl[i] & 2);
+
+  /**
+   * A bridge spans a dip but must clear a rise: a long viaduct (the
+   * Métropolitaine, 5 km) climbs with the land under it. The reference under
+   * vertices i..j becomes the highest of the chord and the dry ground across
+   * the deck's width, lifted into an envelope no steeper than 2 % so the deck
+   * rides over the bumps instead of copying them. The abutments stay put:
+   * streets meet them there, and the deck leaves them no steeper than the
+   * class allows, down to the old chord at worst. `lift` keeps how much each
+   * vertex rose.
+   */
+  function overGround(i, j) {
+    if (j - i < 2) return;
+    const G = 0.02, half = r.width / 2;
+    const chord = g.slice();
+    for (let k = i + 1; k < j; k++) {
+      const a = pts[k - 1], b = pts[k + 1];
+      const len = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+      const lx = -(b[1] - a[1]) / len, ln = (b[0] - a[0]) / len;
+      for (const o of [0, half, -half]) {
+        const x = pts[k][0] + lx * o, n = pts[k][1] + ln * o;
+        if (!waterAt(x, n)) g[k] = Math.max(g[k], terrain.height(x, n));
+      }
+    }
+    for (let k = i + 2; k < j; k++) g[k] = Math.max(g[k], g[k - 1] - (cum[k] - cum[k - 1]) * G);
+    for (let k = j - 2; k > i; k--) g[k] = Math.max(g[k], g[k + 1] - (cum[k + 1] - cum[k]) * G);
+    for (let k = i + 1; k < j; k++) {
+      const reach = Math.min(g[i] + (cum[k] - cum[i]) * grade, g[j] + (cum[j] - cum[k]) * grade);
+      g[k] = Math.max(chord[k], Math.min(g[k], reach));
+      lift[k] = g[k] - chord[k];
+    }
+  }
 
   // Hard targets on vertices touching a lifted edge.
   const target = new Array(m).fill(null);
   for (let i = 0; i < m - 1; i++) {
     // Headroom is for the car, which keeps its size: not scaled.
-    const o = offsetOf(lv[i], fl[i], !r.street);
+    const o = offsetOf(lv[i], !r.street);
     const bridgeFlat = !o && ((fl[i] & 1) || wt[i]);
     if (!o && !bridgeFlat) continue;
     for (const k of [i, i + 1]) {
@@ -454,7 +490,6 @@ function profile(r, terrain, waterAt, s, done, spec) {
   // when it can be reached at all: a short ramp up to a deck forty metres
   // over the island cannot, and is closed off where it ends instead.
   const fixed = new Uint8Array(m);
-  const grade0 = GRADE[r.cls] || GRADE.road;
   for (const k of [0, m - 1]) {
     const [x, n] = pts[k];
     let best = null;
@@ -468,15 +503,21 @@ function profile(r, terrain, waterAt, s, done, spec) {
     if (!best) continue;
     const other = k === 0 ? m - 1 : 0;
     const base = target[other] ?? g[other];
-    if (Math.abs(best.y - base) > cum[m - 1] * grade0 * 1.6 + 1) {
+    if (Math.abs(best.y - base) > cum[m - 1] * grade * 1.6 + 1) {
       if (k === 0) r.cutStart = true; else r.cutEnd = true;
       r.closure = 'Fermé';
       continue;
     }
     target[k] = best.y; fixed[k] = 1;
+    // Near a pin the ground's lift gives way to the grade: the Concorde
+    // leaves land 9 m above the river but meets Pierre-Dupuy over the water.
+    for (let i = 1; i < m - 1; i++) {
+      if (target[i] === null || !lift[i]) continue;
+      const cap = best.y + Math.abs(cum[i] - cum[k]) * grade;
+      if (target[i] > cap) target[i] = Math.max(target[i] - lift[i], cap);
+    }
   }
 
-  const grade = GRADE[r.cls] || GRADE.road;
   const up = new Float64Array(m).fill(-Infinity), dn = new Float64Array(m).fill(Infinity);
   for (let i = 0; i < m; i++) {
     if (target[i] === null) continue;

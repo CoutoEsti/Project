@@ -88,9 +88,10 @@ puis à la main), en premier `textures.mjs` et les trois bétons.
    redeviendraient de vrais ponts.
 4. **Poids de l'export Unity** : ~385 Mo en tout (bâtiments par quartier
    surtout) ; budget 150 Mo chargé à la demande. Simplifier / instancier.
-5. `check.mjs` signale encore, sans échouer : 45 croisements juste sous le
-   gabarit, 10 chevauchements, 185 routes ni au niveau ni au-dessus d'une rue
-   (surtout Turcot et l'échangeur Décarie). À faire baisser.
+5. `check.mjs` signale encore, sans échouer : 37 croisements juste sous le
+   gabarit, 9 chevauchements, 146 routes ni au niveau ni au-dessus d'une rue
+   (surtout Turcot et l'échangeur Décarie). À faire baisser. Le pont Victoria
+   « perd » la voiture vers (1267, −3740) : défaut existant, à regarder.
 
 ## Git
 

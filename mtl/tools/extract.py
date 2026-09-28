@@ -232,7 +232,9 @@ def sample(H, x, n):
 
 ROAD_CLASSES = {'motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'residential',
                 'unclassified', 'living_street', 'service', 'pedestrian'}
-FLAG_BITS = {'is_bridge': 1, 'is_tunnel': 2, 'is_covered': 2}
+# Covered is not a tunnel: the streets under the Métropolitaine's viaduct are
+# covered and stay on the ground.
+FLAG_BITS = {'is_bridge': 1, 'is_tunnel': 2}
 
 
 def ranges(rules, key):
