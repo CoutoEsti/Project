@@ -26,7 +26,7 @@ export function junctionPatches(layout) {
   for (const r of layout.roads) {
     for (const j of r.junctions || []) {
       const M = layout.roadById[j.major];
-      if (!M || M === r || r.loop) continue;
+      if (!M || M === r || r.loop || j.through) continue;
       const patch = sideJoin(r, M, j.end);
       if (patch) out.push(patch);
     }
@@ -47,20 +47,28 @@ function sideJoin(r, M, end) {
     const a = M.samples[hit.i], b = M.samples[Math.min(M.samples.length - 1, hit.i + 1)];
     const qx = a.x + (b.x - a.x) * hit.t, qn = a.n + (b.n - a.n) * hit.t;
     const lat = (p.x - qx) * a.lx + (p.n - qn) * a.ln;
+    // The carriageway's half-width there: it tapers where it forks (layout.js).
+    const hM = (a.h ?? M.half) + ((b.h ?? M.half) - (a.h ?? M.half)) * hit.t, hr = p.h ?? r.half;
     if (!side && Math.abs(lat) > 1) side = Math.sign(lat);
     // Both ramp edges, measured across the carriageway.
-    const e1 = [p.x + p.lx * r.half, p.n + p.ln * r.half], e2 = [p.x - p.lx * r.half, p.n - p.ln * r.half];
+    const e1 = [p.x + p.lx * hr, p.n + p.ln * hr], e2 = [p.x - p.lx * hr, p.n - p.ln * hr];
     const across = (e) => ((e[0] - qx) * a.lx + (e[1] - qn) * a.ln) * (side || Math.sign(lat) || 1);
     const [inner, outer] = across(e1) < across(e2) ? [e1, e2] : [e2, e1];
     const sgn = side || Math.sign(lat) || 1;
-    const E = [qx + a.lx * M.half * sgn, qn + a.ln * M.half * sgn, hit.y];
+    const E = [qx + a.lx * hM * sgn, qn + a.ln * hM * sgn, hit.y];
     const reachOut = across(outer);
     // Outer edge still inside the carriageway: nothing to widen yet.
-    const O = reachOut > M.half ? [outer[0], outer[1], p.y] : [E[0], E[1], hit.y];
+    const O = reachOut > hM ? [outer[0], outer[1], p.y] : [E[0], E[1], hit.y];
     rows.push([E[0], E[1], E[2], O[0], O[1], O[2]]);
     sFrom = Math.min(sFrom, hit.s); sTo = Math.max(sTo, hit.s);
     // The ramp has pulled away: stop at the nose.
-    if (side && across(inner) >= M.half + NOSE_GAP) { nose = k; break; }
+    if (side && across(inner) >= hM + NOSE_GAP) {
+      // The last row is the ramp's own first cross-section, so the taper
+      // closes on it exactly: square to the carriageway it left a sliver.
+      rows[rows.length - 1] = [inner[0], inner[1], p.y, outer[0], outer[1], p.y];
+      nose = k;
+      break;
+    }
     // Parted in height before it parted in plan (a ramp climbing away over
     // the shoulder): not a side join.
     if (Math.abs(p.y - hit.y) > 0.6) return null;

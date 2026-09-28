@@ -28,11 +28,11 @@ export function buildRoads(THREE, layout, S, M) {
   for (const r of layout.roads) {
     const [i0, i1] = drawRange(r, joins);
     const b = r.cls === 'circuit' ? circuit : top;
-    ribbon(b, r.samples, i0, i1, (p) => p.y, r.half, false);
+    ribbon(b, r.samples, i0, i1, (p) => p.y, halfOf(r), false);
     // Undersides where the deck is carried on pillars.
     let run = [];
     const flush = () => {
-      if (run.length >= 2) ribbon(under, run, 0, run.length - 1, (p) => p.y - r.rules.deck, r.half, true);
+      if (run.length >= 2) ribbon(under, run, 0, run.length - 1, (p) => p.y - r.rules.deck, halfOf(r), true);
       run = [];
     };
     for (let i = i0; i <= i1; i++) {
@@ -60,6 +60,7 @@ function drawRange(r, joins) {
     if (j.end === 'start') n0 = j.nose; else n1 = j.nose;
   }
   for (const j of r.junctions || []) {
+    if (j.through) continue;           // carries on from the other's end: whole
     if (j.end === 'start' && n0 < 0) while (i0 < i1 && r.samples[i0].s < j.sTrim) i0++;
     else if (j.end === 'end' && n1 < 0) while (i1 > i0 && r.samples[i1].s > j.sTrim) i1--;
   }
@@ -86,7 +87,12 @@ function joinSurface(b, j) {
   }
 }
 
-function ribbon(b, S, i0, i1, yOf, half, down) {
+/** Half-width of a road at a sample (it tapers at forks), plus `extra`. */
+function halfOf(r, extra = 0) {
+  return (p) => (p.h ?? r.half) + extra;
+}
+
+function ribbon(b, S, i0, i1, yOf, halfAt, down) {
   let prevL = -1, prevR = -1;
   for (let i = i0; i <= i1; i++) {
     const p = S[i];
@@ -98,6 +104,7 @@ function ribbon(b, S, i0, i1, yOf, half, down) {
     const l = Math.hypot(nx, nn, ny);
     nx /= l; nn /= l; ny /= l;
     if (down) { nx = -nx; nn = -nn; ny = -ny; }
+    const half = halfAt(p);
     const lx = p.x + p.lx * half, ln = p.n + p.ln * half;
     const rx = p.x - p.lx * half, rn = p.n - p.ln * half;
     const L = b.v(lx, ln, y, nx, nn, ny, lx, ln);
@@ -173,7 +180,7 @@ export function buildStructureMeshes(THREE, layout, S, M) {
     const r = layout.roadById[c.road];
     const seg = r.samples.slice(c.i0, c.i1 + 1);
     const ys = c.ys;
-    ribbon(darkConcrete, seg, 0, seg.length - 1, (p) => ys[p.i - c.i0] ?? ys[0], r.half + c.margin + 0.3, true);
+    ribbon(darkConcrete, seg, 0, seg.length - 1, (p) => ys[p.i - c.i0] ?? ys[0], halfOf(r, c.margin + 0.3), true);
   }
 
   // Cover faces where the trench opens again under a street.

@@ -133,6 +133,16 @@ tools/extract.py  →  data/*  →  map/source.js  →  map/real.js  →  map/la
     (≈ 400 m de palier pour une autoroute), la route garde sa hauteur :
     remblai ou viaduc continu, tranchée continue. C'est ce qui donne la
     tranchée Décarie et le viaduc de la Métropolitaine.
+- **Raccords** (comme les connexions d'EasyRoads3D, `map/junctions.js`) : une
+  bretelle qui quitte le flanc d'une chaussée n'est qu'une seule dalle avec
+  elle jusqu'au nez. Elle en garde la hauteur jusque-là, la chaussée s'élargit
+  en biseau le long de son bord extérieur, et son propre ruban ne commence
+  qu'au nez, exactement sur la dernière rangée du biseau. Une route qui en
+  *prolonge* une autre (un tronçon coupé en deux par les données, une branche
+  de fourche) n'est jamais rognée. Si les largeurs diffèrent (12,4 m qui se
+  sépare en deux bretelles de 6,8 m), elle passe de l'une à l'autre sur 30 m
+  au moins, et l'autre branche se détache de ce biseau : une fourche en Y
+  sans encoche.
 - **Ouvrages** : murs de tranchée, tunnels, glissières, piliers, clôtures sont
   *déduits* de ce qu'il y a de chaque côté de chaque route. Rien n'est posé à
   la main ; ce qu'on voit et ce qu'on percute sont les mêmes données.

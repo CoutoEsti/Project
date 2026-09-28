@@ -65,11 +65,13 @@ export function compile(map) {
   const roadGrid = indexRoads(roads);
   tl = lap('sample', tl);
   pinJunctions(roads, roadGrid);
+  taperJunctions(roads);
   tl = lap('pin', tl);
   separateCrossings(roads);
   tl = lap('cross', tl);
   settleEnds(roads, map.streets, terrain);
   relaxSamples(roads);
+  bindSideJoins(roads);
   tl = lap('relax', tl);
   carve(terrain, roads);
   tl = lap('carve', tl);
@@ -232,6 +234,45 @@ function indexRoads(roads) {
  * one takes its height sample by sample; beyond it the correction fades over
  * 60 m. The major road is the one with the higher priority, then the longer.
  */
+/** Whether a projection fell past either end of a road. */
+function beyondEnd(road, hit) {
+  const S = road.samples;
+  if (road.loop) return false;
+  const past = (hit.i === 0 && hit.t <= 0) || (hit.i === S.length - 2 && hit.t >= 1);
+  return past && hit.d > 0.5;
+}
+
+/**
+ * A road that carries on from the end of a wider or narrower one — a
+ * carriageway forking into two ramps, a motorway losing a lane — would meet
+ * it with a step at each edge. Its width runs from the other's to its own
+ * over a taper instead (EasyRoads3D's "I connector"); at a fork, the branch
+ * that leaves by the side joins that taper (map/junctions.js), so the two
+ * branches share the wide end between them. Every sample carries its own
+ * half-width `h` from here on.
+ */
+function taperJunctions(roads) {
+  const byId = new Map(roads.map((r) => [r.id, r]));
+  for (const r of roads) {
+    for (const p of r.samples) p.h = r.half;
+    for (const j of r.junctions || []) {
+      if (!j.through) continue;
+      const m = byId.get(j.major);
+      const dh = m.half - r.half;
+      if (Math.abs(dh) < 0.3) continue;
+      const len = Math.max(30, Math.abs(dh) * 12);
+      const s0 = j.end === 'start' ? 0 : r.length;
+      for (const p of r.samples) {
+        const u = Math.abs(p.s - s0) / len;
+        if (u < 1) p.h = r.half + dh * (1 - G.smoothstep(0, 1, u));
+      }
+    }
+    let max = r.half;
+    for (const p of r.samples) if (p.h > max) max = p.h;
+    r.maxHalf = max;
+  }
+}
+
 function pinJunctions(roads, grid) {
   const tmp = [];
   const rank = (r) => (r.priority || 0) * 1e6 + r.length;
@@ -283,7 +324,14 @@ function pinJunctions(roads, grid) {
       }
       const kk = Math.max(0, Math.min(S.length - 1, k));
       edges.push({ k: kk, s: S[kk].s, delta: lastDelta, dir });
-      r.junctions.push({ end: end === 0 ? 'start' : 'end', major: major.id, sEdge: S[kk].s, sTrim, samples: inside });
+      // A little way in: does it carry on from the major road's end (a
+      // carriageway cut in two by the data, one branch of a fork) or leave
+      // its side (a ramp)? Carried on, it is drawn whole — trimmed, it left
+      // a gap as wide as the major road.
+      const q6 = S[Math.max(0, Math.min(S.length - 1, end + dir * 6))];
+      const on = projectOnRoad(major, q6.x, q6.n);
+      const through = !on || beyondEnd(major, on);
+      r.junctions.push({ end: end === 0 ? 'start' : 'end', major: major.id, sEdge: S[kk].s, sTrim, samples: inside, through });
     }
     if (!edges.length) continue;
     // Ease the rest of the road onto the pinned stretches: over 60 m from
@@ -316,6 +364,50 @@ function pinJunctions(roads, grid) {
  * steeper than the class allows is shared out between its two ends, except
  * where the road stands on another one (it must keep that one's height).
  */
+/**
+ * A ramp is one slab with its carriageway until its inner edge pulls clear —
+ * the nose. Relaxing each road on its own lets the two drift apart there (at
+ * a fork where one branch climbs and the other dives, by a metre), and a ramp
+ * standing half on another road at another height is neither one surface nor
+ * two. So, majors first, the ramp takes its carriageway's height again up to
+ * the nose and eases back to its own over 40 m. A ramp that parts by more
+ * than 1.5 m before its nose is climbing away over the shoulder: left alone.
+ */
+function bindSideJoins(roads) {
+  const byId = new Map(roads.map((r) => [r.id, r]));
+  const rank = (r) => (r.priority || 0) * 1e6 + r.length;
+  for (const r of [...roads].sort((a, b) => rank(b) - rank(a))) {
+    for (const j of r.junctions || []) {
+      const M = byId.get(j.major);
+      if (j.through || !M || r.street || M.street) continue;
+      const S = r.samples, dir = j.end === 'start' ? 1 : -1;
+      const set = [];
+      for (let k = dir > 0 ? 0 : S.length - 1; k >= 0 && k < S.length; k += dir) {
+        const p = S[k];
+        const hit = projectOnRoad(M, p.x, p.n);
+        if (!hit) break;
+        const a = M.samples[hit.i], b = M.samples[Math.min(M.samples.length - 1, hit.i + 1)];
+        const hM = G.lerp(a.h ?? M.half, b.h ?? M.half, hit.t);
+        if (hit.d >= hM + (p.h ?? r.half)) break;
+        set.push([k, hit.y]);
+      }
+      if (!set.length || set.some(([k, y]) => Math.abs(S[k].y - y) > 1.5)) continue;
+      for (const [k, y] of set) S[k].y = y;
+      // Past the nose, close the step this left and fade the correction out.
+      const kl = set[set.length - 1][0], next = S[kl + dir];
+      if (!next) continue;
+      const step = S[kl].y - next.y;
+      for (let k = kl + dir; k >= 0 && k < S.length; k += dir) {
+        const w = 1 - G.smoothstep(0, 40, Math.abs(S[k].s - S[kl].s));
+        if (w <= 0) break;
+        S[k].y += step * w;
+      }
+      // Then back within the class's grade, the bound stretch held.
+      relaxRoad(r, new Set([...(r.hard || []), ...set.map(([k]) => k)]));
+    }
+  }
+}
+
 function relaxSamples(roads) {
   for (const r of roads) {
     relaxRoad(r, r.hard || new Set());

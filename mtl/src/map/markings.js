@@ -126,6 +126,7 @@ export function roadMarkings(layout) {
     // Skip the junction overlaps of mountain roads.
     let i0 = 0, i1 = S.length - 1;
     for (const j of r.junctions || []) {
+      if (j.through) continue;         // it carries on: so do its lines
       const side = joins.find((k) => k.road === r.id && k.end === j.end);
       if (j.end === 'start') { if (side) i0 = Math.max(i0, side.nose); else while (i0 < i1 && S[i0].s < j.sEdge + 2) i0++; }
       else if (side) i1 = Math.min(i1, side.nose); else while (i1 > i0 && S[i1].s > j.sEdge - 2) i1--;
@@ -143,7 +144,9 @@ export function roadMarkings(layout) {
       };
       for (let i = i0; i <= i1; i += 1) {
         const p = S[i];
-        const q = [p.x + p.lx * L.off, p.n + p.ln * L.off, p.y + 0.02];
+        // Edge lines follow the edge where the road tapers into a wider one.
+        const off = L.off + edge * ((p.h ?? r.half) - r.half);
+        const q = [p.x + p.lx * off, p.n + p.ln * off, p.y + 0.02];
         const o = open(p);
         if (o ? pts.length : dashed.length) { (o ? pts : dashed).push(q); flush(); }
         (o ? dashed : pts).push(q);

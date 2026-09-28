@@ -97,8 +97,8 @@ function classify(r, p, side, index, ground) {
   // or the car would find a slot to fall through.
   const twin = twinOf(r, p, side, index);
   if (twin && twin.gap < MEDIAN_GAP) return { kind: twin.gap <= 1.2 ? 'twin' : 'twin-gap', ...twin };
-  const qx = p.x + side * p.lx * (r.half + PROBE);
-  const qn = p.n + side * p.ln * (r.half + PROBE);
+  const qx = p.x + side * p.lx * (p.h + PROBE);
+  const qn = p.n + side * p.ln * (p.h + PROBE);
   let merge = false, lower = null, higher = null, aboveInTunnel = false;
   for (const o of index.surfacesAt(qx, qn, 0)) {
     // Itself, unless it is another stretch of it: a hairpin's other leg.
@@ -197,24 +197,24 @@ function roadStructures(r, index, ground, layout, out) {
         if (kind === 'twin') {
           if (mine) out.barriers.push({ kind: 'median', road: r.id, pts: seg.map((p, j) => [...at(p, ks[j].D / 2), p.y]) });
         } else {
-          out.barriers.push({ kind: 'jersey', road: r.id, pts: seg.map((p) => [...at(p, r.half - 0.35), p.y]) });
+          out.barriers.push({ kind: 'jersey', road: r.id, pts: seg.map((p) => [...at(p, p.h - 0.35), p.y]) });
           if (mine) {
             out.medians.push({ road: r.id, depth: deck, lifted: seg.map((p) => p.carry !== 'none'), pts: seg.map((p, j) =>
-              [...at(p, r.half - 0.05), ...at(p, r.half + ks[j].gap + 0.05), p.y]) });
+              [...at(p, p.h - 0.05), ...at(p, p.h + ks[j].gap + 0.05), p.y]) });
           }
         }
       } else if (kind === 'viaduct' || kind === 'water') {
         out.walls.push({ kind: 'fascia', road: r.id, side, thickness: 0.35,
-          pts: seg.map((p) => [...at(p, r.half - 0.17), p.y - deck, p.y + 0.02]) });
+          pts: seg.map((p) => [...at(p, p.h - 0.17), p.y - deck, p.y + 0.02]) });
       } else if (kind === 'embankment') {
         out.walls.push({ kind: 'skirt', road: r.id, side, thickness: 0.4,
-          pts: seg.map((p, j) => [...at(p, r.half - 0.2), Math.min(ks[j].g, p.y) - 0.4, p.y + 0.02]) });
+          pts: seg.map((p, j) => [...at(p, p.h - 0.2), Math.min(ks[j].g, p.y) - 0.4, p.y + 0.02]) });
       } else if (kind === 'over' || kind === 'void') {
         out.walls.push({ kind: 'skirt', road: r.id, side, thickness: 0.4,
-          pts: seg.map((p, j) => [...at(p, r.half - 0.2), Math.min(ks[j].to, p.y) - 0.4, p.y + 0.02]) });
+          pts: seg.map((p, j) => [...at(p, p.h - 0.2), Math.min(ks[j].to, p.y) - 0.4, p.y + 0.02]) });
       } else if (kind === 'sunken') {
         out.walls.push({ kind: 'retaining', road: r.id, side, thickness: 0.6,
-          pts: seg.map((p, j) => [...at(p, r.half + WALL_OFFSET + 0.3), p.y - 0.5, ks[j].g + 0.05]) });
+          pts: seg.map((p, j) => [...at(p, p.h + WALL_OFFSET + 0.3), p.y - 0.5, ks[j].g + 0.05]) });
         // A fence on the street side wherever the drop is worth falling into.
         // Split where a road passes over.
         let run = [], deep = false;
@@ -223,7 +223,7 @@ function roadStructures(r, index, ground, layout, out) {
           run = []; deep = false;
         };
         seg.forEach((p, j) => {
-          const f = at(p, r.half + WALL_OFFSET + 0.45);
+          const f = at(p, p.h + WALL_OFFSET + 0.45);
           const over = index.surfacesAt(f[0], f[1], 1.5).some((o) => o.road !== r && o.y > ks[j].g - 1.5);
           if (ks[j].under || over) { flush(); return; }
           run.push([...f, ks[j].g + 0.05]);
@@ -232,14 +232,14 @@ function roadStructures(r, index, ground, layout, out) {
         flush();
       } else if (kind === 'covered' || kind === 'tunnel') {
         out.walls.push({ kind: 'tunnel', road: r.id, side, thickness: 0.6,
-          pts: seg.map((p) => [...at(p, r.half + WALL_OFFSET + 0.3), p.y - 0.5, ceilingY(p) + 0.1]) });
+          pts: seg.map((p) => [...at(p, p.h + WALL_OFFSET + 0.3), p.y - 0.5, ceilingY(p) + 0.1]) });
       } else if (kind === 'drop') {
-        out.barriers.push({ kind: 'guardrail', road: r.id, pts: seg.map((p) => [...at(p, r.half - 0.3), p.y]) });
+        out.barriers.push({ kind: 'guardrail', road: r.id, pts: seg.map((p) => [...at(p, p.h - 0.3), p.y]) });
       } else if (kind === 'grade' && r.cls === 'circuit') {
-        out.barriers.push({ kind: 'circuit', road: r.id, pts: seg.map((p) => [...at(p, r.half + 2.2), p.y]) });
+        out.barriers.push({ kind: 'circuit', road: r.id, pts: seg.map((p) => [...at(p, p.h + 2.2), p.y]) });
       }
       if (barrier) {
-        out.barriers.push({ kind: barrierKind, road: r.id, pts: seg.map((p) => [...at(p, r.half - 0.35), p.y]) });
+        out.barriers.push({ kind: barrierKind, road: r.id, pts: seg.map((p) => [...at(p, p.h - 0.35), p.y]) });
       }
     });
   }
@@ -354,7 +354,7 @@ function covers(roads, out, index) {
         if (io < 0 || io >= S.length) continue;
         const p = S[ic], o = S[io];
         if (o.y - o.gs > -0.3) continue;       // the road came up to street level
-        const w = r.half + WALL_OFFSET + 0.6;
+        const w = p.h + WALL_OFFSET + 0.6;
         const a = [p.x + p.lx * w, p.n + p.ln * w], b = [p.x - p.lx * w, p.n - p.ln * w];
         out.fascias.push({ a, b, y0: ceilingY(p), y1: p.gs + 0.05, face: io > ic ? 1 : -1, tx: p.tx, tn: p.tn });
         // No railing where another road runs across the cover at street level.

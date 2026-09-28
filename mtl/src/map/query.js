@@ -12,7 +12,7 @@ export function createRoadIndex(roads) {
   for (const r of roads) {
     const S = r.samples;
     for (let i = 0; i + 1 < S.length; i++) {
-      const a = S[i], b = S[i + 1], h = r.half + 2;
+      const a = S[i], b = S[i + 1], h = (r.maxHalf ?? r.half) + 2;
       grid.insert({ r, i }, Math.min(a.x, b.x) - h, Math.min(a.n, b.n) - h, Math.max(a.x, b.x) + h, Math.max(a.n, b.n) + h);
     }
   }
@@ -29,7 +29,8 @@ export function createRoadIndex(roads) {
     for (const c of grid.query(x, n, 0, tmp)) {
       const S = c.r.samples, a = S[c.i], b = S[c.i + 1];
       const { d2, t } = segDist2(x, n, a.x, a.n, b.x, b.n);
-      const lim = c.r.half + pad;
+      // Half-width per sample: it tapers where a road carries on from a wider one.
+      const lim = lerp(a.h ?? c.r.half, b.h ?? c.r.half, Math.min(1, Math.max(0, t))) + pad;
       if (d2 > lim * lim) continue;
       // Beyond either end of the road the projection clamps; don't extend it.
       if ((c.i === 0 && t <= 0) || (c.i === S.length - 2 && t >= 1)) {
