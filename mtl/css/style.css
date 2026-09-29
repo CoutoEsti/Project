@@ -81,6 +81,17 @@ html, body {
 #modes button.on { background: var(--accent); color: #1a1206; }
 body.fly .drive-only, body:not(.fly) .fly-only { display: none !important; }
 body.fly #speed, body.fly #road { display: none; }
+/* The garage: three cars, one tap or key each. */
+#garage {
+  position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); display: flex; gap: 6px;
+  pointer-events: auto;
+}
+#garage button {
+  padding: 6px 12px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.18); background: var(--panel);
+  color: var(--dim); font: 600 12px system-ui, sans-serif; cursor: pointer; line-height: 1.3; text-align: center;
+}
+#garage button small { display: block; font-weight: 500; opacity: 0.8; }
+#garage button.on { background: var(--accent); border-color: var(--accent); color: #1a1206; }
 #help[hidden], #road[hidden] { display: none; }
 #toast {
   position: absolute; left: 0; right: 0; top: 30%; margin: auto; width: max-content; max-width: 90vw;
@@ -124,6 +135,7 @@ body.fly #speed, body.fly #road { display: none; }
   #help, #help-fly { display: none; }
   #modes { top: 58px; left: 12px; transform: none; }
   #minimap { width: 120px; height: 120px; }
+  #garage { left: 12px; top: 100px; bottom: auto; transform: none; }
   #speed { font-size: 40px; bottom: 220px; }
 }
 
@@ -132,6 +144,7 @@ body.fly #speed, body.fly #road { display: none; }
   position: fixed; inset: 0; z-index: 6; display: flex; align-items: center; justify-content: center;
   background: rgba(3, 5, 9, 0.7);
 }
+#settings[hidden] { display: none; }
 #settings form {
   width: min(420px, calc(100vw - 32px)); padding: 18px 20px; border-radius: 12px;
   background: #0d121b; border: 1px solid rgba(255, 255, 255, 0.14); color: var(--ink);

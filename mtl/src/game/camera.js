@@ -13,6 +13,13 @@ const MODES = {
 };
 export const CAMERA_MODES = Object.keys(MODES);
 
+// Right-drag orbit: how far the camera may tilt above or below its resting
+// elevation (never under the road, never straight overhead), and how quickly
+// it swings back behind the car once the button is released.
+const ORBIT_ELEV_MIN = 0.06;     // rad above the car's look point
+const ORBIT_ELEV_MAX = 1.35;     // ~77°: high, but never vertical
+const ORBIT_RETURN = 2.6;        // 1/s, exponential
+
 export class ChaseCamera {
   /**
    * @param camera three.js PerspectiveCamera
@@ -25,6 +32,21 @@ export class ChaseCamera {
     this.pos = { x: 0, n: 0, y: 0 };
     this.fov = 60;
     this._tmp = [];
+    this.orbit = { yaw: 0, pitch: 0, held: false };
+  }
+
+  /** Right button pressed (true) or released (false). */
+  orbitHold(held) {
+    const o = this.orbit;
+    if (!held) o.yaw = Math.atan2(Math.sin(o.yaw), Math.cos(o.yaw));   // return the short way
+    o.held = held;
+  }
+
+  /** Right-drag by (yaw, pitch) radians: positive yaw swings the view right, positive pitch raises the camera. */
+  orbitBy(yaw, pitch) {
+    const o = this.orbit;
+    o.yaw += yaw;
+    o.pitch = Math.max(-1.2, Math.min(1.2, o.pitch + pitch));
   }
 
   cycle() {
@@ -34,6 +56,7 @@ export class ChaseCamera {
 
   /** Jump behind the car without easing (after a spawn or a teleport). */
   snap(pose) {
+    this.orbit.yaw = this.orbit.pitch = 0;
     const m = MODES[this.mode] || MODES.chase;
     this.pos.x = pose.x - Math.sin(pose.heading) * m.back;
     this.pos.n = pose.n - Math.cos(pose.heading) * m.back;
@@ -60,18 +83,38 @@ export class ChaseCamera {
       return;
     }
 
+    // The orbit relaxes back to zero once the button is up. It is presentation,
+    // so it runs on the render delta like the rest of the camera.
+    const o = this.orbit;
+    if (!o.held) {
+      const r = Math.exp(-ORBIT_RETURN * dt);
+      o.yaw *= r;
+      o.pitch *= r;
+      if (Math.abs(o.yaw) < 1e-3 && Math.abs(o.pitch) < 1e-3) { o.yaw = 0; o.pitch = 0; }
+    }
+    // 0 at rest, 1 well away from it: fades the look-ahead and the slide bias
+    // out so an orbit looks at the car itself.
+    const away = Math.min(1, Math.hypot(o.yaw, o.pitch) / 0.35);
+
     // A spring behind the car, pulled back with speed, biased outward in a
-    // slide so a drift stays readable.
+    // slide so a drift stays readable. The rest position is a point on a
+    // sphere around the car's look point; the orbit only turns and tilts it.
     const back = m.back + speedT * 2.6;
     const up = m.up + speedT * 0.5;
     const rx = fn, rn = -fx;
-    const slide = Math.max(-1, Math.min(1, (pose.slide || 0) / 9));
-    const tx = pose.x - fx * back + rx * slide * 1.9;
-    const tn = pose.n - fn * back + rn * slide * 1.9;
+    const slide = Math.max(-1, Math.min(1, (pose.slide || 0) / 9)) * (1 - away);
+    const rise = up - m.look;
+    const radius = Math.hypot(back, rise);
+    const elev = Math.max(ORBIT_ELEV_MIN, Math.min(ORBIT_ELEV_MAX, Math.atan2(rise, back) + o.pitch));
+    const flat = radius * Math.cos(elev);
+    const ha = pose.heading + o.yaw;
+    const tx = pose.x - Math.sin(ha) * flat + rx * slide * 1.9;
+    const tn = pose.n - Math.cos(ha) * flat + rn * slide * 1.9;
+    const ty = pose.y + m.look + radius * Math.sin(elev);
     const k = 1 - Math.pow(0.0016, dt);
     this.pos.x += (tx - this.pos.x) * k;
     this.pos.n += (tn - this.pos.n) * k;
-    this.pos.y += (pose.y + up - this.pos.y) * (1 - Math.pow(0.004, dt));
+    this.pos.y += (ty - this.pos.y) * (1 - Math.pow(0.004, dt));
 
     let cx = this.pos.x, cn = this.pos.n;
     // Pull in to the last clear point before any wall between car and camera.
@@ -87,7 +130,8 @@ export class ChaseCamera {
     if (cy > ceil - 0.5) cy = Math.max(pose.y + 1.1, ceil - 0.5);
     cam.position.set(cx, cy, -cn);
     const ly = pose.y + m.look;
-    cam.lookAt(pose.x + fx * m.ahead, Math.min(ly, ceil - 0.8), -(pose.n + fn * m.ahead));
+    const ahead = m.ahead * (1 - away);
+    cam.lookAt(pose.x + fx * ahead, Math.min(ly, ceil - 0.8), -(pose.n + fn * ahead));
     this._fov(dt, 60 + speedT * 12);
   }
 

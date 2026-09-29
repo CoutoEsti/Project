@@ -177,7 +177,8 @@ function spoke(THREE, angle) {
 
 /**
  * @param {object} THREE
- * @param {object} opts {color:number, ghost:boolean}
+ * @param {object} opts {color:number, ghost:boolean, lowering:number (body
+ *   height factor, 1 = stock), spoiler:boolean}
  */
 export function createCar(THREE, opts = {}) {
   const paint = new THREE.Color(opts.color ?? 0x1f4e8c);
@@ -208,6 +209,10 @@ export function createCar(THREE, opts = {}) {
   group.add(body);
 
   const glass = new THREE.Mesh(loft(THREE, GREENHOUSE_SECTIONS, profileSoft), glassMat);
+  // A lower roofline: the hull and the greenhouse squash together, the wheels
+  // stay where they are.
+  const lowering = opts.lowering ?? 1;
+  body.scale.y = glass.scale.y = lowering;
   glass.castShadow = !ghost;
   group.add(glass);
 
@@ -234,6 +239,14 @@ export function createCar(THREE, opts = {}) {
       box(THREE, 0.24, 0.12, 0.12, -(bodyHalfWidthAt(0.85) + 0.04), 1.00, 0.85), // mirror R
       box(THREE, 0.56, 0.13, 0.04, 0, 0.48, 2.15), // grille, flush with the nose, between the headlights
     ];
+    if (opts.spoiler) {
+      const top = 1.04 * lowering;
+      trimGeos.push(
+        box(THREE, 1.70, 0.06, 0.34, 0, top + 0.20, -2.02),
+        box(THREE, 0.08, 0.22, 0.20, 0.62, top + 0.08, -2.0),
+        box(THREE, 0.08, 0.22, 0.20, -0.62, top + 0.08, -2.0),
+      );
+    }
     group.add(new THREE.Mesh(mergeSimple(THREE, trimGeos), trimMat));
 
     // Lights: thin LED-style headlight strips, and C-shaped ("boomerang")

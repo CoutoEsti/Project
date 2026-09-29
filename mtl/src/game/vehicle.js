@@ -31,6 +31,15 @@ const SPEC = {
   cgHeight: 0.53,
   wheelRadius: 0.33,
   maxSteer: 0.55,           // rad, ~31°
+  rearStiffness: 1,         // rear cornering stiffness relative to the front. Above 1 the car
+                            // understeers at speed instead of diverging: neutral steer has
+                            // no critical speed of its own, and a fast car needs one
+  tractionControl: 0,       // 0 = off. Above ~80 km/h, cap the drive force at this
+                            // fraction of the rear grip, so the throttle never eats
+                            // the sideways grip a fast corner needs
+  steerSpeedRef: 0,         // m/s; above ~this the lock shrinks with the square
+                            // of speed (0 = off). Fast cars need it: at 300 km/h
+                            // the stock lock spins the car in half a second
   grip: 1.34,               // peak μ — arcade, well above a real road tyre
   // The CG sits ahead of centre, so the front axle carries more load — and in
   // a linear tyre model more load means more grip, which makes the car pivot
@@ -65,6 +74,35 @@ const SPEC = {
   speedLimiter: 64,         // m/s, ≈230 km/h
 };
 
+// The three cars of the garage. Each one overrides SPEC; the top speeds are
+// not a display cap: gearing, torque, drag and the limiter are set together
+// (tools/voitures.mjs) so full throttle on the flat really ends there, and the
+// faster cars pull harder on the way. `topKmh` is what tools/voitures.mjs
+// checks against; the physics never reads it.
+export const CARS = [
+  {
+    id: 1, name: 'Plateau', topKmh: 180, color: 0xd9a441, lowering: 1, spoiler: false,
+    spec: {
+      mass: 1300, peakTorque: 250, steerSpeedRef: 35, rearStiffness: 1.6, tractionControl: 0.6, redline: 6800, cylinders: 4, exhaust: 1.0, induction: 0,
+      gears: [3.90, 2.79, 1.99, 1.43, 1.02], finalDrive: 4.3, dragK: 0.793, speedLimiter: 50.5,
+    },
+  },
+  {
+    id: 2, name: 'Rosemont', topKmh: 250, color: 0x1f6f9a, lowering: 0.94, spoiler: true,
+    spec: {
+      mass: 1380, peakTorque: 370, steerSpeedRef: 30, rearStiffness: 2.0, tractionControl: 0.5, redline: 7600, cylinders: 6, exhaust: 1.2, induction: 0.4,
+      gears: [3.70, 2.79, 2.11, 1.59, 1.20, 0.90], finalDrive: 3.9, dragK: 0.497, speedLimiter: 70.14,
+    },
+  },
+  {
+    id: 3, name: 'Ville-Marie', topKmh: 350, color: 0xc0392b, lowering: 0.88, spoiler: true,
+    spec: {
+      mass: 1450, peakTorque: 520, steerSpeedRef: 25, rearStiffness: 2.0, tractionControl: 0.5, redline: 8600, cylinders: 8, exhaust: 1.5, induction: 0.8,
+      gears: [3.60, 2.82, 2.22, 1.74, 1.36, 1.07, 0.84], finalDrive: 3.4, dragK: 0.291, speedLimiter: 98.19,
+    },
+  },
+];
+
 /** Engine torque as a fraction of peak, by fraction of redline. */
 function torqueCurve(x) {
   const t = 0.62 + 1.36 * x - 0.98 * x * x;
@@ -75,6 +113,16 @@ export class Vehicle {
   constructor(spec = {}) {
     this.spec = { ...SPEC, ...spec };
     this.reset(0, 0, 0);
+  }
+
+  /**
+   * Swap the car's specification while driving. Nothing moves: position,
+   * velocity and yaw stay, only the gearing (clamped to the new gearbox),
+   * mass and forces change.
+   */
+  setSpec(spec = {}) {
+    this.spec = { ...SPEC, ...spec };
+    this.gear = Math.max(1, Math.min(this.gear, this.spec.gears.length));
   }
 
   reset(x, n, yaw) {
@@ -170,7 +218,8 @@ export class Vehicle {
 
     // --- steering ----------------------------------------------------------
     const speed = Math.abs(this.u);
-    const steerLimit = S.maxSteer * (0.28 + 0.72 / (1 + speed / 20));
+    let steerLimit = S.maxSteer * (0.28 + 0.72 / (1 + speed / 20));
+    if (S.steerSpeedRef > 0) steerLimit /= 1 + (speed / S.steerSpeedRef) ** 2;
     // In the map frame a positive yaw rate turns right, so steering right is
     // a positive wheel angle — no mirroring (Ruelle's frame needed one).
     const targetSteer = clampAbs(input.steer, 1) * steerLimit;
@@ -205,6 +254,9 @@ export class Vehicle {
     // --- longitudinal forces per axle ---------------------------------------
     const brakeForce = brakePedal * S.brakeForce;
     let FxF = -Math.sign(this.u) * brakeForce * S.brakeBias;
+    if (S.tractionControl > 0 && Math.abs(this.u) > 22) {
+      driveForce = clampAbs(driveForce, S.tractionControl * muR * FzR);
+    }
     let FxR = driveForce - Math.sign(this.u) * brakeForce * (1 - S.brakeBias);
     if (handbrake) FxR -= Math.sign(this.u) * S.handbrakeForce;
 
@@ -219,12 +271,13 @@ export class Vehicle {
     const capF = Math.sqrt(Math.max(0, maxFxF * maxFxF - FxF * FxF));
     const capR = Math.sqrt(Math.max(0, maxFxR * maxFxR - FxR * FxR));
     let FyF = clampAbs(-S.stiffnessPerN * FzF * alphaF, capF);
-    let FyR = clampAbs(-S.stiffnessPerN * FzR * alphaR, capR);
+    const kR = S.stiffnessPerN * S.rearStiffness;
+    let FyR = clampAbs(-kR * FzR * alphaR, capR);
 
     // How far past the limit the tyres are — drives smoke, screech and the
     // little steering-wheel wobble.
     const demandF = Math.abs(S.stiffnessPerN * FzF * alphaF) / (capF + 1);
-    const demandR = Math.abs(S.stiffnessPerN * FzR * alphaR) / (capR + 1);
+    const demandR = Math.abs(kR * FzR * alphaR) / (capR + 1);
     this.skid = Math.max(0, Math.min(1.6, Math.max(demandF, demandR, spinF, spinR) - 1));
     this.load = Math.max(spinF, spinR);
 

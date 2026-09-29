@@ -7,6 +7,7 @@
 //   ?spawn=<id>           start driving at a spawn point (see map/montreal.js)
 //   ?fly=1  or  #vol      start in free flight, over the whole map
 //   ?cam=x,n,h,tx,tn,th   start in free flight, camera and target (map frame)
+//   ?voiture=1|2|3       the car: 180, 250 or 350 km/h (V or 1 2 3 in the game)
 //   ?day=1                start by day
 //   ?low=1                phone settings: no bloom, lower resolution
 
@@ -29,6 +30,7 @@ import { Input, wantsTouch } from './game/input.js';
 import { Hud } from './game/hud.js';
 import { createCar } from './game/car.js';
 import { loadCarModel } from './game/gltf-car.js';
+import { CARS } from './game/vehicle.js';
 import { EngineAudio } from './game/audio.js';
 
 const params = new URLSearchParams(location.search);
@@ -89,13 +91,47 @@ const game = { layout, structures, surface, solids };
 
 // --- the car -----------------------------------------------------------------
 const driver = new Driver(game);
-const CAR_COLOR = 0x1f4e8c; // Aegean Blue Metallic-ish; configurable via createCar()'s opts.color
-// A dropped-in models/civic.glb (or ?car=<url>) replaces the generated car;
+// The chosen car: the address wins, then what the player picked last time.
+const CAR_KEY = 'mtl.voiture';
+function storedCar() {
+  try { return Number(localStorage.getItem(CAR_KEY)); } catch (e) { return 0; }
+}
+let carIndex = [Number(params.get('voiture')), storedCar()]
+  .map((id) => CARS.findIndex((c) => c.id === id)).find((i) => i >= 0) ?? 0;
+let car = null;
+// A dropped-in models/civic.glb (or ?car=<url>) replaces the generated body;
 // absent or unreadable, this silently falls back to it — see mtl/README.md.
-const car = (await loadCarModel(THREE, params.get('car') || 'models/civic.glb', { color: CAR_COLOR }))
-  || createCar(THREE, { color: CAR_COLOR });
-car.group.name = 'Voiture';
-scene.add(car.group);
+// Tried once: a missing file is not fetched again on every change of car.
+let carModel = params.get('car') || 'models/civic.glb';
+
+/**
+ * Put the car `index` on the road. Only the body and the specification change:
+ * position, speed, heading and gear stay, so nothing jumps.
+ */
+async function setCar(index, announce = false) {
+  const def = CARS[index];
+  carIndex = index;
+  driver.vehicle.setSpec(def.spec);
+  for (const b of garage.children) b.classList.toggle('on', Number(b.dataset.car) === index);
+  try { localStorage.setItem(CAR_KEY, String(def.id)); } catch (e) { /* private mode: not remembered */ }
+  if (announce) toast(`${def.name} — ${def.topKmh} km/h`, 1.8);
+  const model = carModel ? await loadCarModel(THREE, carModel, { color: def.color }) : null;
+  if (!model) carModel = null;
+  if (carIndex !== index) { if (model) model.dispose(); return; }   // changed again meanwhile
+  if (car) { scene.remove(car.group); car.dispose(); }
+  car = model || createCar(THREE, { color: def.color, lowering: def.lowering, spoiler: def.spoiler });
+  car.group.name = 'Voiture';
+  scene.add(car.group);
+}
+const garage = $('garage');
+for (const [i, def] of CARS.entries()) {
+  const b = document.createElement('button');
+  b.dataset.car = String(i);
+  b.innerHTML = `${i + 1} · ${def.name}<small>${def.topKmh} km/h</small>`;
+  b.addEventListener('click', () => { setCar(i, true); b.blur(); });
+  garage.append(b);
+}
+await setCar(carIndex);
 // One spot light for the headlights. It stays in the scene by day at zero
 // intensity: adding and removing a light recompiles every material.
 const headlight = new THREE.SpotLight(0xfff1d6, 0, 110, 0.52, 0.55, 1.1);
@@ -105,6 +141,12 @@ const audio = new EngineAudio();
 const chase = new ChaseCamera(camera, game);
 const input = new Input(window);
 input.onGesture = () => { audio.resume(); };
+// Right-drag orbits the chase camera; the free-flight camera has its own drag.
+input.bindOrbit(canvas, {
+  usable: () => !flying && chase.mode !== 'hood',
+  hold: (held) => chase.orbitHold(held),
+  by: (dx, dy) => chase.orbitBy(dx * 0.0052, dy * 0.0042),
+});
 const hud = new Hud(layout, {
   root: $('hud'), zone: $('zone'), road: $('road'), kmh: $('kmh'),
   minimap: $('minimap'), bigmap: $('bigmap'), bigmapCanvas: $('bigmap-canvas'),
@@ -265,6 +307,8 @@ function act(action) {
       setFlying(false);
       break;
     }
+    case 'car': setCar((carIndex + 1) % CARS.length, true); break;
+    case 'car1': case 'car2': case 'car3': setCar(Number(action.slice(3)) - 1, true); break;
     case 'export': exportWorld(); break;
     case 'help': $('help').hidden = $('help-fly').hidden = !$('help').hidden; break;
     default: break;
@@ -453,6 +497,8 @@ window.__mtl = {
     fly.lookAt(x, n, h, tx, tn, th);
   },
   fly,
+  chase,
+  setCar,
   act,
   /** Drive view: put the car somewhere (heading in degrees). */
   place(x, n, headingDeg, y) {

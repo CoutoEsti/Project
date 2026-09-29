@@ -15,7 +15,7 @@ const KEYS = {
 
 const ACTIONS = {
   KeyR: 'reset', KeyC: 'camera', KeyM: 'map', KeyN: 'night', KeyF: 'fly', KeyE: 'export',
-  KeyH: 'help', Escape: 'close', KeyO: 'overview', KeyG: 'drop',
+  KeyH: 'help', Escape: 'close', KeyO: 'overview', KeyG: 'drop', KeyV: 'car', Digit1: 'car1', Digit2: 'car2', Digit3: 'car3',
 };
 
 // Standard gamepad mapping: A handbrake, X reset, Y camera, Start map.
@@ -115,6 +115,41 @@ export class Input {
       const d = kSteer - this.steer;
       this.steer += Math.sign(d) * Math.min(Math.abs(d), rate * dt);
     }
+  }
+
+  /**
+   * Right button on the game canvas: hold and drag to orbit the chase camera.
+   * The browser's context menu is suppressed on this element only (text
+   * fields elsewhere on the page keep theirs). Free flight owns the pointer
+   * while it is on, so `usable()` says when the orbit may start.
+   *
+   * @param dom     the game canvas
+   * @param orbit   { usable(): boolean, hold(bool), by(dx, dy) } — dx, dy in pixels
+   */
+  bindOrbit(dom, orbit) {
+    dom.addEventListener('contextmenu', (e) => e.preventDefault());
+    let drag = null;
+    dom.addEventListener('pointerdown', (e) => {
+      if (e.button !== 2 || drag || !orbit.usable()) return;
+      drag = { id: e.pointerId, x: e.clientX, y: e.clientY };
+      dom.setPointerCapture(e.pointerId);
+      orbit.hold(true);
+      e.preventDefault();
+    });
+    dom.addEventListener('pointermove', (e) => {
+      if (!drag || drag.id !== e.pointerId) return;
+      orbit.by(e.clientX - drag.x, e.clientY - drag.y);
+      drag.x = e.clientX; drag.y = e.clientY;
+    });
+    const end = (e) => {
+      if (!drag || drag.id !== e.pointerId) return;
+      drag = null;
+      orbit.hold(false);
+    };
+    dom.addEventListener('pointerup', end);
+    dom.addEventListener('pointercancel', end);
+    // A released button outside the window still ends the drag.
+    dom.addEventListener('lostpointercapture', end);
   }
 
   /** Wire the on-screen stick, pedals and buttons. */

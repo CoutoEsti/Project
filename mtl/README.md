@@ -41,10 +41,31 @@ La valeur de départ est dans `carte.json` ; l'adresse la remplace :
 | Espace | frein à main |
 | R | replacer sur la route |
 | C | caméra (poursuite, lointaine, capot) |
+| clic droit + glisser | orbiter la caméra autour de la voiture (poursuite et lointaine) ; au relâchement, elle revient doucement derrière |
+| V ou 1 / 2 / 3 | changer de voiture (ou les boutons en bas de l’écran) |
 | M | grande carte ; un clic y téléporte |
 | N | nuit / jour |
 | F | vol libre (ou le bouton **Vol libre** en haut) |
 | E | exporter pour Unity (un `.zip` : `.glb` + `map.json`) |
+
+### Les trois voitures
+
+| | Nom | Pointe | 0-100 km/h | Silhouette |
+|---|---|---|---|---|
+| 1 | Plateau | 180 km/h | ≈ 5,8 s | ocre, carrosserie d’origine |
+| 2 | Rosemont | 250 km/h | ≈ 4,3 s | bleue, plus basse, aileron |
+| 3 | Ville-Marie | 350 km/h | ≈ 3,8 s | rouge, très basse, aileron |
+
+Les pointes ne sont pas un plafond d’affichage : rapports, couple, traînée et
+limiteur sont réglés ensemble (`CARS` dans `src/game/vehicle.js`) pour que plein
+gaz sur le plat la voiture s’y rende vraiment (95 % de la pointe en 21 s, 26 s
+et 34 s). Les deux rapides ont un peu de régulation de traction et une direction
+qui se referme avec la vitesse, sinon elles partent en tête-à-queue dès 250 km/h.
+`node mtl/tools/voitures.mjs` le mesure à 120 Hz, sans le monde, à ±5 %.
+
+Changer de voiture ne déplace rien : position, cap et vitesse restent, seuls la
+carrosserie et les réglages changent. Le choix est mémorisé (`localStorage`) ;
+`?voiture=1|2|3` dans l’adresse l’emporte.
 
 ### Vol libre
 
@@ -61,7 +82,7 @@ La voiture reste où elle est ; la vitesse suit l'altitude.
 | G | poser la voiture sur la rue au centre de la vue et reprendre le volant |
 | F | revenir à la voiture |
 
-Autres paramètres d'URL : `?spawn=decarie|metropolitaine|ville-marie|centre-ville|vieux-port|plateau|camillien-houde|jacques-cartier|stade|circuit`,
+Autres paramètres d'URL : `?voiture=1|2|3`, `?spawn=decarie|metropolitaine|ville-marie|centre-ville|vieux-port|plateau|camillien-houde|jacques-cartier|stade|circuit`,
 `?day=1`, `?low=1` (réglages téléphone), `?fly=1` ou `#vol` (démarrer en vol
 libre), `?cam=x,n,h,tx,tn,th` (vol libre à un point précis).
 
@@ -194,6 +215,7 @@ node mtl/tools/shots.mjs --day                   # captures → mtl/.shots/
 node mtl/tools/plan.mjs --png                    # régénère docs/plan.png
 node mtl/tools/export.mjs                        # export Unity → mtl/export/
 node mtl/tools/voies.mjs export.json            # nombre de voies OSM → data/voies.json (requête dans l'en-tête)
+node mtl/tools/voitures.mjs                      # pointes des trois voitures (±5 %) et changement en roulant
 ```
 
 `check.mjs` fait rouler un pilote automatique, voie de droite, sur Décarie
