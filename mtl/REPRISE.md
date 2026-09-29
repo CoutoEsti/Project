@@ -107,6 +107,9 @@ puis à la main), en premier `textures.mjs` et les trois bétons.
    `primary` et bretelles de la zone). À faire : un fichier `data/voies.json`
    (id de voie OSM → voies), le lire dans `tools/extract.py` ou `map/real.js`,
    largeur = voies × 3,7 m + accotements, et le marquage suit.
+10. Pied de r1054 (échangeur Décarie/40, vers (−3413, 6572)) : trou dans le
+   sol et bouts de murets/clôtures au pied de la bretelle. La bretelle est
+   au-dessus du sol ; le trou vient d'une route voisine en tranchée.
 9. Fourche r1147 (échangeur Décarie/40) : pente de 8,9 % juste après le nez
    (limite 7,9 %), le seul avertissement ajouté par le raccord des fourches.
 

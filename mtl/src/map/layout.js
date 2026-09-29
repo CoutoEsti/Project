@@ -105,6 +105,7 @@ export function compile(map) {
   tl = lap('meet', tl);
 
   // --- 3. ground, tunnels, covers, holes ---------------------------------------
+  liftFeet(terrain, roads, streetsAt);
   const coverers = new Set();
   const tmp = [];
   for (const r of roads) {
@@ -556,6 +557,48 @@ function settleEnds(roads, streets, terrain) {
  * the road's height, and the street, which lies on the relief, ramps up or
  * down to the junction over the next mesh cell.
  */
+/**
+ * The foot of a ramp climbing out of the street it starts from: meeting the
+ * streets lifts whole 20 m cells of ground, and a few tens of centimetres of
+ * it could end above the asphalt there. Below the ground, the road counted as
+ * sunk, the ground opened round it, and the street went with it. Over its
+ * last 40 m, a ramp less than a metre under the ground comes up onto it.
+ */
+function liftFeet(terrain, roads, streetsAt) {
+  const tmp = [];
+  for (const r of roads) {
+    if (r.loop || r.street) continue;
+    const S = r.samples;
+    for (const [name, k0, dir] of [['start', 0, 1], ['end', S.length - 1, -1]]) {
+      if ((r.junctions || []).some((j) => j.end === name)) continue;
+      if (!streetsAt(S[k0].x, S[k0].n, 0.5, tmp).length) continue;
+      // How far each sample is under the ground, then a moving maximum and
+      // a moving average over ±8 m, so the correction follows no bump of the
+      // relief: a lift, not a copy of the ground.
+      const ks = [];
+      for (let k = k0; k >= 0 && k < S.length && Math.abs(S[k].s - S[k0].s) < 48; k += dir) ks.push(k);
+      const need = ks.map((k) => {
+        const p = S[k], d = terrain.height(p.x, p.n) + 0.02 - p.y;
+        return Math.abs(p.s - S[k0].s) < 40 && d > 0 && d < 1 ? Math.min(d, 0.6) : 0;
+      });
+      // Climbing out of a trench to the street is not a foot to lift.
+      if (ks.some((k) => Math.abs(S[k].s - S[k0].s) < 40 && terrain.height(S[k].x, S[k].n) - S[k].y > 1)) continue;
+      const W = 4;
+      const peak = need.map((_, i) => Math.max(...need.slice(Math.max(0, i - W), i + W + 1)));
+      const lift = ks.map((_, i) => {
+        const win = peak.slice(Math.max(0, i - W), i + W + 1);
+        return win.reduce((a, b) => a + b, 0) / win.length;
+      });
+      // Held at the foot, eased out by 48 m so no step is left where it stops.
+      const top = Math.max(0, ...lift);
+      ks.forEach((k, i) => {
+        const w = 1 - G.smoothstep(20, 48, Math.abs(S[k].s - S[k0].s));
+        S[k].y += Math.max(lift[i], top * w);
+      });
+    }
+  }
+}
+
 function meetStreets(terrain, roads, streetsAt) {
   const g = terrain.grid;
   const tmp = [];
