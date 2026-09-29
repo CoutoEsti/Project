@@ -131,6 +131,11 @@ export function roadMarkings(layout) {
       if (j.end === 'start') { if (side) i0 = Math.max(i0, side.nose); else while (i0 < i1 && S[i0].s < j.sEdge + 2) i0++; }
       else if (side) i1 = Math.min(i1, side.nose); else while (i1 > i0 && S[i1].s > j.sEdge - 2) i1--;
     }
+    // Where a ramp comes down to a street, its lines stop at the street's edge.
+    for (const l of layout.landings || []) {
+      if (l.road !== r.id) continue;
+      if (l.end === 'start') i0 = Math.max(i0, l.clear); else i1 = Math.min(i1, l.clear);
+    }
     // Stretches of this road's edges that a ramp opens: [side, s0, s1].
     const mouths = joins.filter((k) => k.major === r.id).map((k) => [k.side, k.majorFrom - 4, k.majorTo + 4]);
     for (const L of lines) {

@@ -25,10 +25,14 @@ export function buildRoads(THREE, layout, S, M) {
   const under = new GeoBuilder();
   const circuit = new GeoBuilder();
   const joins = layout.joins || [];
+  const landings = layout.landings || [];
   for (const r of layout.roads) {
     const [i0, i1] = drawRange(r, joins);
     const b = r.cls === 'circuit' ? circuit : top;
-    ribbon(b, r.samples, i0, i1, (p) => p.y, halfOf(r), false);
+    // Edges slid onto the street a ramp comes down to (map/junctions.js).
+    const edges = new Map();
+    for (const l of landings) if (l.road === r.id) for (const [k, e] of l.edges) edges.set(k, e);
+    ribbon(b, r.samples, i0, i1, (p) => p.y, halfOf(r), false, edges);
     // Undersides where the deck is carried on pillars.
     let run = [];
     const flush = () => {
@@ -92,8 +96,8 @@ function halfOf(r, extra = 0) {
   return (p) => (p.h ?? r.half) + extra;
 }
 
-function ribbon(b, S, i0, i1, yOf, halfAt, down) {
-  let prevL = -1, prevR = -1;
+function ribbon(b, S, i0, i1, yOf, halfAt, down, edges = null) {
+  let prevL = -1, prevR = -1, prevIn = false;
   for (let i = i0; i <= i1; i++) {
     const p = S[i];
     const y = yOf(p);
@@ -105,15 +109,20 @@ function ribbon(b, S, i0, i1, yOf, halfAt, down) {
     nx /= l; nn /= l; ny /= l;
     if (down) { nx = -nx; nn = -nn; ny = -ny; }
     const half = halfAt(p);
-    const lx = p.x + p.lx * half, ln = p.n + p.ln * half;
-    const rx = p.x - p.lx * half, rn = p.n - p.ln * half;
-    const L = b.v(lx, ln, y, nx, nn, ny, lx, ln);
-    const R = b.v(rx, rn, y, nx, nn, ny, rx, rn);
-    if (prevL >= 0) {
+    let lx = p.x + p.lx * half, ln = p.n + p.ln * half, ly = y;
+    let rx = p.x - p.lx * half, rn = p.n - p.ln * half, ry = y;
+    const e = edges && edges.get(i);
+    if (e && e.L) [lx, ln, ly] = e.L;
+    if (e && e.R) [rx, rn, ry] = e.R;
+    const inside = !!(e && e.inside);
+    const L = b.v(lx, ln, ly, nx, nn, ny, lx, ln);
+    const R = b.v(rx, rn, ry, nx, nn, ny, rx, rn);
+    // Both edges on another surface's edge: that stretch is the other's.
+    if (prevL >= 0 && !(inside && prevIn)) {
       if (down) b.quad(prevL, L, R, prevR);
       else b.quad(prevL, prevR, R, L);
     }
-    prevL = L; prevR = R;
+    prevL = L; prevR = R; prevIn = inside;
   }
 }
 
