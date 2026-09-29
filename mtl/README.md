@@ -193,6 +193,7 @@ node mtl/tools/check.mjs --browser               # + la vraie page dans Chromium
 node mtl/tools/shots.mjs --day                   # captures → mtl/.shots/
 node mtl/tools/plan.mjs --png                    # régénère docs/plan.png
 node mtl/tools/export.mjs                        # export Unity → mtl/export/
+node mtl/tools/voies.mjs export.json            # nombre de voies OSM → data/voies.json (requête dans l'en-tête)
 ```
 
 `check.mjs` fait rouler un pilote automatique, voie de droite, sur Décarie

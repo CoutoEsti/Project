@@ -41,6 +41,19 @@ const WIDTH = {
 };
 const LINK_WIDTH = 6.8;
 
+/**
+ * Real metres of carriageway from OpenStreetMap's lane count, where the data
+ * has one (data/voies.json): 3.7 m lanes and their shoulders on motorways and
+ * ramps — a one-lane ramp keeps its 6.8 m, room to drive it fast. Streets
+ * keep their width, sidewalks and buildings are laid out from it; their lane
+ * count only draws their lines. Null when unknown.
+ */
+function laneWidth(r, highway, oneway) {
+  if (!r.lanes || !highway) return null;
+  if (r.kind === 'link') return r.lanes * 3.7 + 3.1;
+  return oneway ? r.lanes * 3.7 + 1.3 : r.lanes * 3.5 + 2;
+}
+
 /** How a street is drawn and furnished (markings, lamps, trees). */
 function streetClass(r, width) {
   if (r.kind === 'alley') return 'alley';
@@ -106,8 +119,8 @@ export function buildMap(src, settings) {
     for (const piece of clipRoad(r, zone.box)) {
       if (piece.flags) piece.flags = piece.flags.map((f, i) => ((f & 2) && !(piece.levels && piece.levels[i] < 0) ? f & ~2 : f));
       const highway = isHighway(r);
-      const width = S(r.kind === 'link' && highway ? LINK_WIDTH : r.kind === 'alley' ? WIDTH.alley[0]
-        : (WIDTH[r.cls] || WIDTH.residential)[oneway ? 1 : 0]);
+      const width = S(laneWidth(r, highway, oneway) || (r.kind === 'link' && highway ? LINK_WIDTH : r.kind === 'alley' ? WIDTH.alley[0]
+        : (WIDTH[r.cls] || WIDTH.residential)[oneway ? 1 : 0]));
       const pts = piece.pts.map(P);
       const edges = piece.pts.length - 1;
       const level = (i) => (piece.levels ? piece.levels[i] : 0);
@@ -128,7 +141,7 @@ export function buildMap(src, settings) {
           loop,
           id: `r${r.id}${piece.part ? `-${piece.part}` : ''}`,
           cls: special[name] ? special[name].cls || 'bridge' : r.kind === 'link' ? 'ramp' : 'highway',
-          lanes: Math.max(1, Math.round((width / s - 1.6) / 3.6)),
+          lanes: r.lanes || Math.max(1, Math.round((width / s - 1.6) / 3.6)),
           width, median: false, pts, levels: piece.levels, flags: piece.flags, wet: lifted.map((_, i) => wet(i)),
           priority: (PRIORITY[r.cls] || 0) + (r.kind === 'link' ? 0 : 1),
           structure: special[name] ? special[name].structure : null,
@@ -159,7 +172,7 @@ export function buildMap(src, settings) {
         const sub = slice(pts, cum, a, b);
         if (sub.pts.length < 2) return;
         streets.push({ ...common, cls: streetClass(r, width / s), width, half: width / 2, path: sub.pts,
-          rank: PRIORITY[r.cls] || 0 });
+          rank: PRIORITY[r.cls] || 0, lanes: r.lanes || null });
       };
       spans.forEach(([a, b], k) => {
         a = Math.max(0, a); b = Math.min(total, b);
