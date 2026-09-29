@@ -177,18 +177,22 @@ function roadStructures(r, index, ground, layout, out) {
     }
     const at = (p, off) => [p.x + side * p.lx * off, p.n + side * p.ln * off];
 
-    runsOf(kinds, (k) => (k.road ? `${k.kind}:${k.road.id}` : k.kind), (key, i0, i1) => {
+    // Under a street crossing the trench the wall is the trench's own: same
+    // concrete, same line, one piece. Tiles are for real tunnels.
+    const group = (k) => (k.kind === 'covered' ? 'sunken' : k.kind);
+    runsOf(kinds, (k) => (k.road ? `${k.kind}:${k.road.id}` : group(k)), (key, i0, i1) => {
       const kind = key.split(':')[0];
       // A run ends on its last sample and the next begins on the one after:
       // where a retaining wall hands over to a tunnel wall under a street,
       // that left a 2 m slot on either side of the bridge. Walls and barriers
       // reach one sample into a neighbour that has its own, so they overlap.
+      // Reaching a whole sample made the two walls overlap for 2 m, two
+      // coplanar faces flickering against each other: meet halfway instead.
       const reach = (j) => j >= 0 && j < S.length && EDGED.has(kind) && EDGED.has(kinds[j].kind);
-      const a = reach(i0 - 1) ? 1 : 0, b = reach(i1 + 1) ? 1 : 0;
-      const seg = S.slice(i0 - a, i1 + 1 + b);
+      const seg = S.slice(i0, i1 + 1);
       const ks = kinds.slice(i0, i1 + 1);
-      if (a) ks.unshift(ks[0]);
-      if (b) ks.push(ks[ks.length - 1]);
+      if (reach(i0 - 1)) { seg.unshift(midSample(S[i0 - 1], S[i0])); ks.unshift(ks[0]); }
+      if (reach(i1 + 1)) { seg.push(midSample(S[i1], S[i1 + 1])); ks.push(ks[ks.length - 1]); }
       if (seg.length < 2) return;
       const barrier = rules.barriers && ['viaduct', 'water', 'embankment', 'over', 'void'].includes(kind);
       if (kind === 'twin' || kind === 'twin-gap') {
@@ -213,8 +217,10 @@ function roadStructures(r, index, ground, layout, out) {
         out.walls.push({ kind: 'skirt', road: r.id, side, thickness: 0.4,
           pts: seg.map((p, j) => [...at(p, p.h - 0.2), Math.min(ks[j].to, p.y) - 0.4, p.y + 0.02]) });
       } else if (kind === 'sunken') {
+        // Up to the street, or to the deck of the street crossing over.
+        const top = (p, j) => (ks[j].kind === 'covered' ? ceilingY(p) + 0.1 : ks[j].g + 0.05);
         out.walls.push({ kind: 'retaining', road: r.id, side, thickness: 0.6,
-          pts: seg.map((p, j) => [...at(p, p.h + WALL_OFFSET + 0.3), p.y - 0.5, ks[j].g + 0.05]) });
+          pts: seg.map((p, j) => [...at(p, p.h + WALL_OFFSET + 0.3), p.y - 0.5, top(p, j)]) });
         // A fence on the street side wherever the drop is worth falling into.
         // Split where a road passes over.
         let run = [], deep = false;
@@ -225,12 +231,12 @@ function roadStructures(r, index, ground, layout, out) {
         seg.forEach((p, j) => {
           const f = at(p, p.h + WALL_OFFSET + 0.45);
           const over = index.surfacesAt(f[0], f[1], 1.5).some((o) => o.road !== r && o.y > ks[j].g - 1.5);
-          if (ks[j].under || over) { flush(); return; }
+          if (ks[j].under || ks[j].kind === 'covered' || over) { flush(); return; }
           run.push([...f, ks[j].g + 0.05]);
           if (ks[j].g - p.y > 1.2) deep = true;
         });
         flush();
-      } else if (kind === 'covered' || kind === 'tunnel') {
+      } else if (kind === 'tunnel') {
         out.walls.push({ kind: 'tunnel', road: r.id, side, thickness: 0.6,
           pts: seg.map((p) => [...at(p, p.h + WALL_OFFSET + 0.3), p.y - 0.5, ceilingY(p) + 0.1]) });
       } else if (kind === 'drop') {
@@ -296,6 +302,15 @@ function roadStructures(r, index, ground, layout, out) {
     const p = S[Math.min(S.length - 1, 4)];
     out.closures.push({ x: p.x, n: p.n, y: p.y, tx: -p.tx, tn: -p.tn, lx: -p.lx, ln: -p.ln, width: r.width, text: r.closure || 'Fin de la zone' });
   }
+}
+
+/** Halfway between two consecutive samples: where two walls meet. */
+function midSample(a, b) {
+  const m = { ...b };
+  for (const k of ['x', 'n', 'y', 's', 'lx', 'ln', 'h', 'gs', 'g']) {
+    if (typeof a[k] === 'number' && typeof b[k] === 'number') m[k] = (a[k] + b[k]) / 2;
+  }
+  return m;
 }
 
 /** Where a pillar's columns stand: one on the centreline, or two for a twin. */
