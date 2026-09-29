@@ -16,7 +16,9 @@
 // street under the Métropolitaine's viaduct is covered, not buried. Every real
 // tunnel has a negative layer, so the bit only counts below ground.
 
-import { ZONES } from './zones.js';
+import { makeZone, zoneDef, scaleZone } from './zones.js';
+import { clipRoad, clipMulti } from './clip.js';
+import { backdropCells } from './backdrop.js';
 import { createTerrain } from './terrain.js';
 import * as G from './geom.js';
 import OVERLAY from './montreal.js';
@@ -72,11 +74,12 @@ const PRIORITY = { motorway: 6, trunk: 5, primary: 4, secondary: 3, tertiary: 2,
  */
 export function buildMap(src, settings) {
   const s = settings.echelle / 100;
-  const zone = ZONES[settings.zone];
-  const [bx0, bn0, bx1, bn1] = zone.box;
+  const zone = makeZone(zoneDef(settings));
+  if (!zone) throw new Error('zone vide');
+  const [bx0, bn0, bx1, bn1] = zone.bbox;
   const S = (v) => v * s;
   const P = (p) => [p[0] * s, p[1] * s];
-  const inZone = (x, n, pad = 0) => x >= bx0 - pad && x <= bx1 + pad && n >= bn0 - pad && n <= bn1 + pad;
+  const inZone = zone.contains;
 
   // --- water first: the relief's zero is the river --------------------------
   const river = src.surfaces.water.reduce((a, w) => (!a || area(w.poly) > area(a.poly) ? w : a), null);
@@ -84,7 +87,7 @@ export function buildMap(src, settings) {
   const terrain = createTerrain(src.relief, { scale: s, base });
   const water = [];
   for (const w of src.surfaces.water) {
-    const clipped = clipToBox(w.poly, zone.box, 400);
+    const clipped = clipMulti(w.poly, zone, zone.box ? 400 : 150);
     if (!clipped.length) continue;
     water.push({ name: w.name, kind: w.kind, level: (w.level - base) * s, poly: clipped.map((poly) => poly.map((r) => r.map(P))) });
   }
@@ -98,7 +101,7 @@ export function buildMap(src, settings) {
   const greens = [], grounds = [];
   for (const [list, out] of [[src.surfaces.green, greens], [src.surfaces.ground, grounds]]) {
     for (const g of list) {
-      const clipped = clipToBox(g.poly, zone.box, 0);
+      const clipped = clipMulti(g.poly, zone, 0);
       if (!clipped.length) continue;
       out.push({ kind: g.kind, name: g.name, poly: clipped.map((poly) => poly.map((r) => r.map(P))) });
     }
@@ -116,7 +119,7 @@ export function buildMap(src, settings) {
     // A motorway is one way unless tagged otherwise (OpenStreetMap's implied
     // rule); the data only says so when someone wrote it down.
     const oneway = r.oneway || r.cls === 'motorway';
-    for (const piece of clipRoad(r, zone.box)) {
+    for (const piece of clipRoad(r, zone)) {
       if (piece.flags) piece.flags = piece.flags.map((f, i) => ((f & 2) && !(piece.levels && piece.levels[i] < 0) ? f & ~2 : f));
       const highway = isHighway(r);
       const width = S(laneWidth(r, highway, oneway) || (r.kind === 'link' && highway ? LINK_WIDTH : r.kind === 'alley' ? WIDTH.alley[0]
@@ -249,8 +252,13 @@ export function buildMap(src, settings) {
     .map((rc) => ({ ...rc, points: rc.points.map(P) }));
 
   const world = { x0: S(bx0), n0: S(bn0), x1: S(bx1), n1: S(bn1) };
+  // The city beyond the edge, as blocks (drawn by world/backdrop.js).
+  const backdrop = backdropCells(src.buildings, zone, s);
   return {
     meta: { ...src.meta, zone: settings.zone, echelle: settings.echelle, nomZone: zone.nom },
+    // The zone at the map's scale: the edge wall, the ground and the decor follow it.
+    zone: scaleZone(zone, s),
+    backdrop,
     settings: { ...settings },
     scale: s,
     world,
@@ -832,65 +840,7 @@ function nearestOnPath(path, x, n, reach) {
   return best;
 }
 
-// ------------------------------------------------------------------- clipping --
-
-/**
- * A road cut to the zone: the pieces of it inside the box, each with its
- * edge data and whether it was cut at either end (the map ends there).
- */
-function clipRoad(r, box) {
-  const [x0, n0, x1, n1] = box;
-  const inside = (p) => p[0] >= x0 && p[0] <= x1 && p[1] >= n0 && p[1] <= n1;
-  const P = r.pts;
-  if (P.every(inside)) return [{ pts: P, levels: r.levels, flags: r.flags, cutStart: false, cutEnd: false, part: 0 }];
-  const pieces = [];
-  let cur = null;
-  const lerpP = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
-  for (let i = 0; i + 1 < P.length; i++) {
-    const a = P[i], b = P[i + 1];
-    // Liang–Barsky: the part of edge ab inside the box.
-    let t0 = 0, t1 = 1;
-    const dx = b[0] - a[0], dn = b[1] - a[1];
-    const clip = (p, q) => {
-      if (p === 0) return q >= 0;
-      const t = q / p;
-      if (p < 0) { if (t > t1) return false; if (t > t0) t0 = t; } else { if (t < t0) return false; if (t < t1) t1 = t; }
-      return true;
-    };
-    if (!(clip(-dx, a[0] - x0) && clip(dx, x1 - a[0]) && clip(-dn, a[1] - n0) && clip(dn, n1 - a[1]))) {
-      if (cur) { pieces.push(cur); cur = null; }
-      continue;
-    }
-    const pa = t0 > 0 ? lerpP(a, b, t0) : a, pb = t1 < 1 ? lerpP(a, b, t1) : b;
-    if (!cur) cur = { pts: [pa], levels: [], flags: [], cutStart: t0 > 0 || i > 0 && !inside(a), cutEnd: false, part: pieces.length };
-    cur.pts.push(pb);
-    cur.levels.push(r.levels ? r.levels[i] : 0);
-    cur.flags.push(r.flags ? r.flags[i] : 0);
-    if (t1 < 1) { cur.cutEnd = true; pieces.push(cur); cur = null; }
-  }
-  if (cur) pieces.push(cur);
-  return pieces.filter((p) => p.pts.length >= 2).map((p) => ({
-    ...p, levels: p.levels.some((v) => v) ? p.levels : null, flags: p.flags.some((v) => v) ? p.flags : null,
-  }));
-}
-
-/** A multipolygon cut to the box (grown by `pad`), empty if it misses it. */
-function clipToBox(multi, box, pad) {
-  const [x0, n0, x1, n1] = [box[0] - pad, box[1] - pad, box[2] + pad, box[3] + pad];
-  let bb = null;
-  for (const poly of multi) {
-    const b = G.ringBBox(poly[0]);
-    bb = bb ? { x0: Math.min(bb.x0, b.x0), n0: Math.min(bb.n0, b.n0), x1: Math.max(bb.x1, b.x1), n1: Math.max(bb.n1, b.n1) } : b;
-  }
-  if (!bb || bb.x1 < x0 || bb.x0 > x1 || bb.n1 < n0 || bb.n0 > n1) return [];
-  if (bb.x0 >= x0 && bb.x1 <= x1 && bb.n0 >= n0 && bb.n1 <= n1) return multi;
-  const rect = [[[x0, n0], [x1, n0], [x1, n1], [x0, n1], [x0, n0]]];
-  try {
-    return G.pc.intersection(multi.map((poly) => poly.map(G.closeRing)), rect).map((poly) => poly.map(G.openRing));
-  } catch (e) {
-    return multi;
-  }
-}
+// ------------------------------------------------------------------- slicing --
 
 /** A slice of a polyline by arc length [a, b]; `edges`: source edge of each new edge. */
 function slice(pts, cum, a, b) {

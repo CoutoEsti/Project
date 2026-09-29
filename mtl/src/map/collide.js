@@ -86,6 +86,17 @@ export function buildSolids(layout, structures, buildings, extras = {}) {
   const W = layout.map.world;
   const e = [[W.x0, W.n0], [W.x1, W.n0], [W.x1, W.n1], [W.x0, W.n1]];
   for (let i = 0; i < 4; i++) S.add(e[i][0], e[i][1], e[(i + 1) % 4][0], e[(i + 1) % 4][1], -100, 2000, 0);
+  // A drawn zone has its own edge: a wall along the whole outline, in short
+  // pieces so the grid does not file a long diagonal under thousands of cells.
+  const Z = layout.map.zone;
+  if (Z && !Z.box) {
+    for (const [ax, an, bx, bn] of Z.edges) {
+      const k = Math.max(1, Math.ceil(Math.hypot(bx - ax, bn - an) / 24));
+      for (let q = 0; q < k; q++) {
+        S.add(ax + ((bx - ax) * q) / k, an + ((bn - an) * q) / k, ax + ((bx - ax) * (q + 1)) / k, an + ((bn - an) * (q + 1)) / k, -100, 2000, 0);
+      }
+    }
+  }
   return S;
 }
 

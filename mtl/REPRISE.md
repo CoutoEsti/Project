@@ -114,6 +114,13 @@ puis à la main), en premier `textures.mjs` et les trois bétons.
 9. Fourche r1147 (échangeur Décarie/40) : pente de 8,9 % juste après le nez
    (limite 7,9 %), le seul avertissement ajouté par le raccord des fourches.
 
+## Zones dessinées (29 septembre)
+
+Une zone peut être un polygone : `zones.html` (outil de dessin, `src/zones-ui.js`),
+`?forme=` dans l'adresse, `map/zones.js` (`makeZone`, encodage), `map/clip.js`
+(coupe des rues et surfaces), mur de bord dans `map/collide.js`, décor dans
+`map/backdrop.js` + `world/backdrop.js`. Voir `README.md`, « Dessiner sa propre zone ».
+
 ## Git
 
 `CLAUDE.md` dit de travailler sur `main` ; ces sessions poussent sur la branche

@@ -4,7 +4,7 @@
 // thins by tile, the Unity export writes one file per tile and layer.
 
 import { buildMap } from '../map/real.js';
-import { compile } from '../map/layout.js';
+import { compile, findJoints } from '../map/layout.js';
 import { junctionPatches, streetLandings } from '../map/junctions.js';
 import { buildStructures } from '../map/structures.js';
 import { tiling, byTile } from '../map/tiles.js';
@@ -14,6 +14,7 @@ import { streetMarkings, roadMarkings } from '../map/markings.js';
 import { pointInRing, ringBBox } from '../map/geom.js';
 import { createMaterials } from './materials.js';
 import { buildGround, buildOutside } from './ground.js';
+import { buildBackdrop } from './backdrop.js';
 import { buildStreets } from './streets.js';
 import { buildRoads, buildStructureMeshes } from './roads.js';
 import { buildBuildings } from './buildings.js';
@@ -48,6 +49,7 @@ export async function buildWorld(THREE, source, opts = {}) {
   const layout = await step('plan', () => compile(map));
   layout.joins = junctionPatches(layout);
   layout.landings = streetLandings(layout);
+  layout.joints = findJoints(layout.roads, layout.joins);
   const structures = await step('structures', () => buildStructures(layout));
   map.signs = (map.signs || []).concat(exitSigns(layout));
   const tiles = tiling(map);
@@ -65,7 +67,12 @@ export async function buildWorld(THREE, source, opts = {}) {
     const g = buildGround(THREE, layout, M, tiles);
     stats.ground = g.stats;
     add(g.meshes);
-    if (opts.outside !== false) add(buildOutside(THREE, layout, M));
+    if (opts.outside !== false) {
+      add(buildOutside(THREE, layout, M));
+      const bd = buildBackdrop(THREE, layout, M, opts);
+      stats.backdrop = bd.stats;
+      add(bd.objects);
+    }
   });
   await step('rues', () => {
     const st = buildStreets(THREE, layout, M, tiles);

@@ -3,6 +3,7 @@
 //
 // Settings come from carte.json, then the address overrides them:
 //   ?zone=centre|anneau  &echelle=100|85|70   (or #centre-85 in the preview)
+//   ?forme=<code>         a zone drawn in zones.html (the address that tool gives)
 // Other parameters:
 //   ?spawn=<id>           start driving at a spawn point (see map/montreal.js)
 //   ?fly=1  or  #vol      start in free flight, over the whole map
@@ -195,11 +196,15 @@ for (const b of document.querySelectorAll('[data-mode]')) {
 {
   const zoneSel = $('set-zone'), scaleSel = $('set-echelle');
   for (const [id, z] of Object.entries(ZONES)) zoneSel.add(new Option(z.nom, id));
+  if (settings.zone === 'perso') zoneSel.add(new Option(`Ma zone : ${settings.forme.nom || 'sans nom'}`, 'perso'));
   for (const e of ECHELLES) scaleSel.add(new Option(`${e} %`, String(e)));
   if (!ECHELLES.includes(settings.echelle)) scaleSel.add(new Option(`${settings.echelle} %`, String(settings.echelle)));
   zoneSel.value = settings.zone;
   scaleSel.value = String(settings.echelle);
-  const describe = () => { $('set-zone-desc').textContent = ZONES[zoneSel.value].description; };
+  const describe = () => {
+    $('set-zone-desc').textContent = zoneSel.value === 'perso'
+      ? `Zone dessinée, ${(layout.map.zone.area / 1e6 / (layout.map.scale ** 2)).toFixed(1)} km².` : ZONES[zoneSel.value].description;
+  };
   zoneSel.addEventListener('change', describe);
   describe();
   $('settings-open').addEventListener('click', (e) => { $('settings').hidden = false; e.currentTarget.blur(); });
@@ -251,8 +256,8 @@ function spawnAt(id) {
     return spec.id;
   }
   // No named start in this zone: the middle of the map.
-  const W = layout.map.world;
-  driver.teleport((W.x0 + W.x1) / 2, (W.n0 + W.n1) / 2);
+  const W = layout.map.world, mid = layout.map.zone ? layout.map.zone.centre : [(W.x0 + W.x1) / 2, (W.n0 + W.n1) / 2];
+  driver.teleport(mid[0], mid[1]);
   settle();
   return null;
 }

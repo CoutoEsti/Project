@@ -483,3 +483,49 @@ function tex(THREE, c, metres) {
   t.userData.metres = metres;       // one repeat covers this many metres
   return t;
 }
+
+/**
+ * A painted skyline for the horizon panel (world/backdrop.js): three layers
+ * of silhouettes, white on transparent, the far ones fainter, with a cluster
+ * of towers at u = `towers` (0..1 around the panel) and a low ridge behind.
+ * The panel tints it to the fog, so it is only shape and depth here.
+ * Wraps seamlessly. Two thirds of the height stay empty: the sky.
+ */
+export function skyline(THREE, { towers = 0.5, tall = 1 } = {}) {
+  const W = 2048, H = 256, c = canvas(W, H), g = c.getContext('2d'), R = mulberry(77);
+  g.clearRect(0, 0, W, H);
+  const rect = (x, w, h, alpha) => {
+    g.fillStyle = `rgba(255,255,255,${alpha})`;
+    for (const dx of [-W, 0, W]) g.fillRect(x + dx, H - h, w, h);
+  };
+  // The ridge: the mountain and the hills, a slow wave.
+  g.fillStyle = 'rgba(255,255,255,0.3)';
+  for (let x = 0; x < W; x += 4) {
+    const wave = 14 + 10 * Math.sin(x * 0.0061 + 1) + 7 * Math.sin(x * 0.019 + 4) + 4 * Math.sin(x * 0.047);
+    g.fillRect(x, H - wave, 4, wave);
+  }
+  const layers = [
+    { alpha: 0.5, lo: 12, hi: 40, wMin: 10, wMax: 30 },
+    { alpha: 0.72, lo: 16, hi: 52, wMin: 12, wMax: 36 },
+    { alpha: 1, lo: 20, hi: 64, wMin: 14, wMax: 44 },
+  ];
+  const cx = towers * W, spread = W * 0.045;
+  layers.forEach((L, li) => {
+    for (let x = 0; x < W;) {
+      const w = L.wMin + R() * (L.wMax - L.wMin);
+      let d = (x + w / 2 - cx) / spread;
+      d = Math.min(Math.abs(d), Math.abs(d - W / spread), Math.abs(d + W / spread));
+      const bump = Math.exp(-d * d) * (110 + R() * 70) * tall * (li === 2 ? 0.75 : 1);
+      const h = L.lo + R() * (L.hi - L.lo) + bump;
+      rect(x, w + 1, Math.min(h, H * 0.62), L.alpha);
+      // A few have a mast or a stepped crown.
+      if (R() < 0.12) rect(x + w * 0.4, Math.max(2, w * 0.15), Math.min(h, H * 0.62) + 6 + R() * 10, L.alpha);
+      if (R() < 0.2) rect(x + w * 0.15, w * 0.7, Math.min(h, H * 0.62) + 4 + R() * 6, L.alpha);
+      x += w + (R() < 0.3 ? R() * 6 : 0);
+    }
+  });
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = THREE.RepeatWrapping;
+  return t;
+}

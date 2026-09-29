@@ -25,6 +25,32 @@ const PRIORITY = { foret: 1, gazon: 2, parc: 2, terrain: 3, golf: 3, cimetiere: 
 const lin = (c) => Math.pow(c, 2.2);
 
 /**
+ * Which mesh cells a drawn zone needs at full detail: every cell the zone
+ * touches (a cell the boundary crosses is kept whole). Null for a rectangle
+ * zone, where the bounding box says it all.
+ */
+const keptCache = new WeakMap();
+export function keptCells(layout) {
+  const Z = layout.map.zone;
+  if (!Z || Z.box) return null;
+  if (keptCache.has(layout)) return keptCache.get(layout);
+  const g = layout.terrain.grid, cell = g.cell, W = layout.map.world;
+  const i0 = Math.max(0, Math.floor((W.x0 - g.x0) / cell)), i1 = Math.min(g.cols - 1, Math.ceil((W.x1 - g.x0) / cell));
+  const j0 = Math.max(0, Math.floor((W.n0 - g.n0) / cell)), j1 = Math.min(g.rows - 1, Math.ceil((W.n1 - g.n0) / cell));
+  const cols = i1 - i0 + 1, rows = j1 - j0 + 1;
+  const bits = new Uint8Array(cols * rows);
+  for (let j = j0; j < j1; j++) {
+    for (let i = i0; i < i1; i++) {
+      const x = g.x0 + i * cell, n = g.n0 + j * cell;
+      if (Z.boxState(x, n, x + cell, n + cell) !== 0) bits[(j - j0) * cols + (i - i0)] = 1;
+    }
+  }
+  const K = { keep: (i, j) => i >= i0 && i <= i1 && j >= j0 && j <= j1 && bits[(j - j0) * cols + (i - i0)] === 1 };
+  keptCache.set(layout, K);
+  return K;
+}
+
+/**
  * @returns { meshes: Mesh[] } every mesh tagged userData.tile / userData.layer
  */
 export function buildGround(THREE, layout, M, tiles) {
@@ -141,10 +167,12 @@ export function buildGround(THREE, layout, M, tiles) {
     return [color[k * 3], color[k * 3 + 1], color[k * 3 + 2], normal[k * 3], normal[k * 3 + 1], normal[k * 3 + 2]];
   };
   let clipped = 0;
+  const K = keptCells(layout);
   for (let j = j0; j < j1; j++) {
     for (let i = i0; i < i1; i++) {
       const x = X(i), n = N(j);
       if (x + cell < W.x0 || x > W.x1 || n + cell < W.n0 || n > W.n1) continue;
+      if (K && !K.keep(i, j)) continue;
       const t = tileOf(x + cell / 2, n + cell / 2);
       const near = boundary.get(cellKey(i, j));
       if (!near) {
@@ -203,7 +231,7 @@ export function buildGround(THREE, layout, M, tiles) {
   }
 
   // --- the zone's rim: a skirt down so the edge never shows a crack ---------------
-  meshes.push(...buildRim(THREE, layout, M));
+  meshes.push(...(K ? buildCellRim(THREE, layout, M, K, { i0, i1, j0, j1 }) : buildRim(THREE, layout, M)));
   return { meshes, stats: { clipped } };
 }
 
@@ -218,6 +246,11 @@ export function buildOutside(THREE, layout, M) {
   const b = new GeoBuilder({ color: 3 });
   const idx = new Map();
   const c0 = lin(0.35), c1 = lin(0.36), c2 = lin(0.33);
+  const K = keptCells(layout);
+  const allKept = (i, j) => {
+    for (let q = 0; q < step; q++) for (let r = 0; r < step; r++) if (!K.keep(i + r, j + q)) return false;
+    return true;
+  };
   const vert = (i, j) => {
     const k = j * g.cols + i;
     let v = idx.get(k);
@@ -230,7 +263,7 @@ export function buildOutside(THREE, layout, M) {
   for (let j = 0; j + step < g.rows; j += step) {
     for (let i = 0; i + step < g.cols; i += step) {
       const x = g.x0 + i * g.cell, n = g.n0 + j * g.cell, e = step * g.cell;
-      if (x >= W.x0 && x + e <= W.x1 && n >= W.n0 && n + e <= W.n1) continue;
+      if (K ? allKept(i, j) : x >= W.x0 && x + e <= W.x1 && n >= W.n0 && n + e <= W.n1) continue;
       const a = vert(i, j), c = vert(i + step, j), d = vert(i + step, j + step), f = vert(i, j + step);
       b.tri(a, c, d);
       b.tri(a, d, f);
@@ -251,8 +284,9 @@ export function buildOutside(THREE, layout, M) {
   const far = 16000;
   const bb = T.bbox;
   const outer = [[bb.x0 - far, bb.n0 - far], [bb.x1 + far, bb.n0 - far], [bb.x1 + far, bb.n1 + far], [bb.x0 - far, bb.n1 + far]];
-  const inner = [[W.x0, W.n0], [W.x0, W.n1], [W.x1, W.n1], [W.x1, W.n0]];
-  const ring = triangulate(THREE, [outer, inner]);
+  const inner = K ? layout.map.zone.multi.map((poly) => G.openRing(poly[0]))
+    : [[[W.x0, W.n0], [W.x0, W.n1], [W.x1, W.n1], [W.x1, W.n0]]];
+  const ring = triangulate(THREE, [outer, ...inner]);
   const wb = new GeoBuilder();
   wb.flat(ring.pts, ring.tris, -0.4);
   const w = meshOf(THREE, wb, M.Water, 'Fleuve_alentours');
@@ -278,6 +312,36 @@ function buildRim(THREE, layout, M) {
     }
   }
   const m = meshOf(THREE, b, M.Concrete_Dark, 'Bord_de_zone');
+  m.userData.layer = 'sol';
+  m.userData.exportSkip = true;
+  return [m];
+}
+
+/**
+ * The rim of a drawn zone: a skirt down along every side of a kept cell whose
+ * neighbour is not kept, so where the full-detail ground meets the coarse
+ * one no crack shows.
+ */
+function buildCellRim(THREE, layout, M, K, R) {
+  const T = layout.terrain, g = T.grid, cell = g.cell;
+  const b = new GeoBuilder();
+  const skirt = (ax, an, bx, bn) => {
+    const ya = T.height(ax, an), yb = T.height(bx, bn);
+    b.wall(ax, an, bx, bn, ya - 6, ya, yb - 6, yb);
+  };
+  for (let j = R.j0; j < R.j1; j++) {
+    for (let i = R.i0; i < R.i1; i++) {
+      if (!K.keep(i, j)) continue;
+      const x = g.x0 + i * cell, n = g.n0 + j * cell;
+      // Counter-clockwise around the cell: walls face right, out of it.
+      if (!K.keep(i, j - 1)) skirt(x, n, x + cell, n);
+      if (!K.keep(i + 1, j)) skirt(x + cell, n, x + cell, n + cell);
+      if (!K.keep(i, j + 1)) skirt(x + cell, n + cell, x, n + cell);
+      if (!K.keep(i - 1, j)) skirt(x, n + cell, x, n);
+    }
+  }
+  const m = meshOf(THREE, b, M.Concrete_Dark, 'Bord_de_zone');
+  if (!m) return [];
   m.userData.layer = 'sol';
   m.userData.exportSkip = true;
   return [m];

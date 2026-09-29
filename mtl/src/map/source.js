@@ -47,7 +47,7 @@ export function fetchReader(base = 'data/') {
   };
 }
 
-function decodeRoads(doc) {
+export function decodeRoads(doc) {
   const names = doc.names;
   return doc.roads.map((r, id) => {
     const pts = [];
@@ -73,7 +73,7 @@ function ring(flat) {
   return out;
 }
 
-function decodeSurfaces(doc) {
+export function decodeSurfaces(doc) {
   const polys = (p) => p.map((poly) => poly.map(ring));
   return {
     water: doc.eau.map((w) => ({ name: w.nom, kind: w.type, level: w.niveau, poly: polys(w.poly) })),
@@ -82,7 +82,7 @@ function decodeSurfaces(doc) {
   };
 }
 
-function decodeBuildings(buf, names) {
+export function decodeBuildings(buf, names) {
   const dv = new DataView(buf);
   const magic = String.fromCharCode(dv.getUint8(0), dv.getUint8(1), dv.getUint8(2), dv.getUint8(3));
   if (magic !== 'MTLB') throw new Error('batiments.bin : format inconnu');

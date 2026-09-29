@@ -33,6 +33,29 @@ dégagements sous les ponts et dans les tunnels, qui restent en vrais mètres.
 La valeur de départ est dans `carte.json` ; l'adresse la remplace :
 `?zone=centre&echelle=85` (ou `#centre-85`).
 
+### Dessiner sa propre zone
+
+`zones.html` (lien « Dessiner ma zone… » dans **Carte…**) : un plan des rues,
+de l'eau et des parcs, sur lequel on trace la zone à jouer — polygone (un clic
+par sommet, Entrée pour finir), main levée, rectangle, ellipse. Chaque forme se
+déplace, se tourne (poignée ronde), se redimensionne (poignées carrées) et,
+pour un polygone, se déforme sommet par sommet (« En polygone » pour un
+rectangle ou une ellipse). Plusieurs formes = leur union. La page donne la
+surface en km² et une **estimation** des bâtiments et des rues gardés.
+
+- **Jouer cette zone** ouvre `index.html?forme=…` ; le code est un polygone
+  arrondi au mètre, en base64url, donc le lien de la page se partage tel quel.
+- **Exporter** télécharge `{ "zone": { "nom", "poly" }, "echelle": 100 }` : à
+  coller dans `carte.json` pour en faire la zone de départ.
+- La zone est aussi gardée dans `localStorage`.
+
+Au bord d'une zone dessinée, les rues sont coupées au contour (barrière « Fin de
+la zone »), un mur invisible longe tout le contour, et un décor donne
+l'impression que la ville continue : les vrais bâtiments hors zone (de 25 à
+1 500 m) réduits à des blocs, plus un horizon peint qui suit la caméra. Ce
+décor coûte 2 appels de rendu et ~10 triangles par bloc (`world/backdrop.js`),
+sans collision. Les zones `centre` et `anneau` restent des rectangles.
+
 ## Contrôles
 
 | Touche | Action |
