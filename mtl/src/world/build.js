@@ -4,7 +4,7 @@
 // thins by tile, the Unity export writes one file per tile and layer.
 
 import { buildMap } from '../map/real.js';
-import { compile, findJoints } from '../map/layout.js';
+import { compile } from '../map/layout.js';
 import { junctionPatches, streetLandings } from '../map/junctions.js';
 import { buildStructures } from '../map/structures.js';
 import { tiling, byTile } from '../map/tiles.js';
@@ -49,7 +49,6 @@ export async function buildWorld(THREE, source, opts = {}) {
   const layout = await step('plan', () => compile(map));
   layout.joins = junctionPatches(layout);
   layout.landings = streetLandings(layout);
-  layout.joints = findJoints(layout.roads, layout.joins);
   const structures = await step('structures', () => buildStructures(layout));
   map.signs = (map.signs || []).concat(exitSigns(layout));
   const tiles = tiling(map);
