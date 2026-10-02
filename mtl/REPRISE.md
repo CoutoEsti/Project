@@ -16,6 +16,7 @@ cd mtl && python3 -m http.server 8080     # jouer
 node mtl/tools/check.mjs                  # 18 contrôles, ~4 min — doit passer avant de commiter
 node mtl/tools/shots.mjs --day            # captures (SwiftShader, lent)
 node mtl/tools/export.mjs                 # export Unity
+node mtl/tools/bouts.mjs                  # bouts de route ouverts, ~30 s
 ```
 
 ## Ce que l'utilisateur a demandé (session du 28 septembre)
@@ -149,7 +150,26 @@ Mesuré sur la zone anneau, sondes d'un mètre sur toutes les routes et rues :
   construction (node). À surveiller sur téléphone.
 - Reste : tête du pont Jacques-Cartier (île Sainte-Hélène), rues et routes
   au niveau du sol qui se croisent avec plus de 60 cm d'écart de hauteur ;
-  65 bouts ouverts, surtout Turcot et bretelles en cul-de-sac.
+  65 bouts ouverts, surtout Turcot et bretelles en cul-de-sac. (Ce 65 venait
+  d'un script jamais commité ; voir la section suivante.)
+
+## Bouts ouverts recomptés (2 octobre, soir)
+
+`tools/bouts.mjs` remplace le script perdu : 95 bouts sur la base `746f233`,
+87 après `meetLiftedStreets` (`map/real.js`), qui reprofile une bretelle
+finissant au milieu d'un tronçon de rue surélevé une fois la rue connue.
+Liste bout par bout, cause et verdict : `docs/bouts-ouverts.md` (35 fins
+légitimes, 4 coins sur le gazon, 48 défauts). Les gros restes :
+
+- **Tête du pont Jacques-Cartier** : une seule parabole de la première
+  travée sur l'eau à la dernière met le sommet du pont sur l'île, 30 m
+  au-dessus des bretelles. Une parabole par plan d'eau les raccorde, mais
+  une bretelle croise alors le tablier au même niveau (choc dans
+  `check.mjs`). Décider de la hauteur du pont sur l'île avant d'y revenir.
+- **Turcot** : Saint-Jacques surélevée sur 630 m, qui finit 17,7 m au-dessus
+  de sa rue (relief de la falaise à vérifier) ; Upper Lachine coincée entre
+  la 15 et trois bretelles ; r511 23 m sous Saint-Jacques.
+- Les 9 bretelles laissées en l'air sous une autoroute (point 6 plus haut).
 
 ## Git
 
