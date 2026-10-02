@@ -546,6 +546,8 @@ function profile(r, terrain, waterAt, s, done, spec, onStreet, highways) {
    */
   function overGround(i, j) {
     if (j - i < 2) return;
+    // An end over the water is no abutment: the deck goes on as another way.
+    const wetEnd = (k) => !!waterAt(pts[k][0], pts[k][1]);
     const G = 0.02, half = r.width / 2;
     const chord = g.slice();
     for (let k = i + 1; k < j; k++) {
@@ -560,7 +562,8 @@ function profile(r, terrain, waterAt, s, done, spec, onStreet, highways) {
     for (let k = i + 2; k < j; k++) g[k] = Math.max(g[k], g[k - 1] - (cum[k] - cum[k - 1]) * G);
     for (let k = j - 2; k > i; k--) g[k] = Math.max(g[k], g[k + 1] - (cum[k + 1] - cum[k]) * G);
     for (let k = i + 1; k < j; k++) {
-      const reach = Math.min(g[i] + (cum[k] - cum[i]) * grade, g[j] + (cum[j] - cum[k]) * grade);
+      const reach = Math.min(wetEnd(i) ? Infinity : g[i] + (cum[k] - cum[i]) * grade,
+        wetEnd(j) ? Infinity : g[j] + (cum[j] - cum[k]) * grade);
       g[k] = Math.max(chord[k], Math.min(g[k], reach));
       lift[k] = g[k] - chord[k];
     }
@@ -671,6 +674,11 @@ function profile(r, terrain, waterAt, s, done, spec, onStreet, highways) {
       if (fixed[k] || (k === 0 ? r.cutStart : r.cutEnd)) continue;
       if (!r.street && (!onStreet || !onStreet(pts[k][0], pts[k][1]))) continue;
       if (crossedNear(pts, cum, k, 250 * s, highways)) continue;
+      // Over the water there is no street to land on: the deck goes on to
+      // the next span (the Concorde meets Avenue Pierre-Dupuy over the river),
+      // and landing there dragged the whole bridge down to the river and a
+      // metre under Île Sainte-Hélène, where Chemin Macdonald passes.
+      if (waterAt(pts[k][0], pts[k][1])) continue;
       target[k] = g[k]; fixed[k] = 1;
     }
   }
