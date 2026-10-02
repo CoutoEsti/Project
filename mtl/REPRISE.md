@@ -101,12 +101,18 @@ puis à la main), en premier `textures.mjs` et les trois bétons.
    `map/junctions.js`). Reste un petit débord quand la bretelle arrive pile sur
    un coin de deux rues (ex. r271, Décarie / Édouard-Montpetit) : elle n'est
    découpée que contre la plus proche.
-8. **Nombre de voies réel** : Overture n'a pas la balise OSM `lanes`, le jeu
-   le devine d'après la largeur (`real.js`, `lanes:`). L'utilisateur va fournir
-   un export Overpass (`lanes`, `width`, `turn:lanes` des `motorway`, `trunk`,
-   `primary` et bretelles de la zone). À faire : un fichier `data/voies.json`
-   (id de voie OSM → voies), le lire dans `tools/extract.py` ou `map/real.js`,
-   largeur = voies × 3,7 m + accotements, et le marquage suit.
+8. **Nombre de voies réel — essayé puis retiré (`b78a074`, annulé par
+   `9c93eab`).** `tools/voies.mjs` appariait les voies OSM aux routes de
+   `rues.json` par la géométrie seule ; dans les échangeurs, bretelles et
+   chaussées sont parallèles et collées, et les valeurs se croisaient (r888,
+   bretelle, à 4 voies et 17,9 m ; r1581, la 15, à 2 voies pendant que sa
+   bretelle r1585 en prenait 3). `pinJunctions` choisissant la route
+   principale d'après largeur et distance, une bretelle trop large captait
+   les bouts des autres (r887 raccordée à r888 au lieu de r508) : 25 bouts de
+   bretelle de plus restaient ouverts. Pour y revenir : apparier aussi sur le
+   nom, la référence et le sens, borner une bretelle à 2 voies et à la largeur
+   de sa chaussée, et vérifier avec le compte de bouts ouverts avant/après.
+   Le script et `data/voies.json` sont dans l'historique (`b78a074`).
 10. Pied de r1054 (échangeur Décarie/40, vers (−3413, 6572)) : trou dans le
    sol et bouts de murets/clôtures au pied de la bretelle. La bretelle est
    au-dessus du sol ; le trou vient d'une route voisine en tranchée.
