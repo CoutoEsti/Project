@@ -45,6 +45,8 @@ export function buildRoads(THREE, layout, S, M) {
     flush();
   }
   for (const j of joins) joinSurface(top, j);
+  // What is actually drawn, for the streets to give way to (world/streets.js).
+  layout.roadCover = coverIndex([top, circuit]);
   push(out, meshOf(THREE, top, M.Asphalt, 'Routes'), 'routes');
   push(out, meshOf(THREE, circuit, M.Asphalt, 'Circuit'), 'ile-notre-dame');
   push(out, meshOf(THREE, under, M.Concrete_Dark, 'Dessous_tabliers'), 'routes');
@@ -71,6 +73,66 @@ function drawRange(r, joins) {
   if (n0 >= 0) return [n0, n1 >= 0 ? n1 : Math.min(r.samples.length - 1, i1 + 1)];
   if (n1 >= 0) return [Math.max(0, i0 - 1), n1];
   return [Math.max(0, i0 - 1), Math.min(r.samples.length - 1, i1 + 1)];
+}
+
+/**
+ * The running surface as drawn — trimmed ends, noses and landings included —
+ * indexed for "which heights at (x, n)" and "anything within r of it".
+ */
+function coverIndex(builders) {
+  const CELL = 8, grid = new Map(), tris = [];
+  const key = (i, j) => i * 1e6 + j;
+  for (const b of builders) {
+    const P = b.pos, I = b.idx;
+    for (let t = 0; t + 2 < b.nIdx; t += 3) {
+      const v = [I[t], I[t + 1], I[t + 2]].map((k) => [P[k * 3], -P[k * 3 + 2], P[k * 3 + 1]]);
+      const id = tris.push(v) - 1;
+      const i0 = Math.floor(Math.min(v[0][0], v[1][0], v[2][0]) / CELL), i1 = Math.floor(Math.max(v[0][0], v[1][0], v[2][0]) / CELL);
+      const j0 = Math.floor(Math.min(v[0][1], v[1][1], v[2][1]) / CELL), j1 = Math.floor(Math.max(v[0][1], v[1][1], v[2][1]) / CELL);
+      if ((i1 - i0 + 1) * (j1 - j0 + 1) > 400) continue;
+      const lo = Math.min(v[0][2], v[1][2], v[2][2]), hi = Math.max(v[0][2], v[1][2], v[2][2]);
+      for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) {
+        let c = grid.get(key(i, j));
+        if (!c) grid.set(key(i, j), c = { ids: [], lo: Infinity, hi: -Infinity, levels: [] });
+        c.ids.push(id);
+        c.lo = Math.min(c.lo, lo); c.hi = Math.max(c.hi, hi);
+        // Height bands present in the cell, a metre apart: "is there road at
+        // this level here" without walking the triangles.
+        for (let y = Math.floor(lo); y <= Math.floor(hi); y++) if (!c.levels.includes(y)) c.levels.push(y);
+      }
+    }
+  }
+  return {
+    /** Heights of the drawn road surfaces over (x, n). */
+    heights(x, n, out = []) {
+      out.length = 0;
+      const c = grid.get(key(Math.floor(x / CELL), Math.floor(n / CELL)));
+      if (!c) return out;
+      for (const id of c.ids) {
+        const [a, b, d] = tris[id];
+        const den = (b[1] - d[1]) * (a[0] - d[0]) + (d[0] - b[0]) * (a[1] - d[1]);
+        if (!den) continue;
+        const u = ((b[1] - d[1]) * (x - d[0]) + (d[0] - b[0]) * (n - d[1])) / den;
+        const v = ((d[1] - a[1]) * (x - d[0]) + (a[0] - d[0]) * (n - d[1])) / den;
+        if (u < 0 || v < 0 || u + v > 1) continue;
+        out.push(u * a[2] + v * b[2] + (1 - u - v) * d[2]);
+      }
+      return out;
+    },
+    /** Any drawn road within about r metres (by grid cell) and dy of height y. */
+    near(x, n, r, y, dy) {
+      const i0 = Math.floor((x - r) / CELL), i1 = Math.floor((x + r) / CELL);
+      const j0 = Math.floor((n - r) / CELL), j1 = Math.floor((n + r) / CELL);
+      for (let i = i0; i <= i1; i++) {
+        for (let j = j0; j <= j1; j++) {
+          const c = grid.get(key(i, j));
+          if (!c || c.lo > y + dy || c.hi < y - dy) continue;
+          for (let k = Math.floor(y - dy); k <= Math.floor(y + dy); k++) if (c.levels.includes(k)) return true;
+        }
+      }
+      return false;
+    },
+  };
 }
 
 /** The taper of a side join: strips from the carriageway's edge to the ramp's outer edge. */

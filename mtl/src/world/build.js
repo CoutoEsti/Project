@@ -73,14 +73,14 @@ export async function buildWorld(THREE, source, opts = {}) {
       add(bd.objects);
     }
   });
+  await step('routes', () => {
+    add(tagAll(buildRoads(THREE, layout, structures, M), 'routes'));
+    add(tagAll(buildStructureMeshes(THREE, layout, structures, M), 'ouvrages'));
+  });
   await step('rues', () => {
     const st = buildStreets(THREE, layout, M, tiles);
     stats.streets = st.stats;
     add(st.meshes);
-  });
-  await step('routes', () => {
-    add(tagAll(buildRoads(THREE, layout, structures, M), 'routes'));
-    add(tagAll(buildStructureMeshes(THREE, layout, structures, M), 'ouvrages'));
   });
 
   // Landmarks first: the data's own buildings under a model make way for it.

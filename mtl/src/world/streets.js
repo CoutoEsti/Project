@@ -18,6 +18,7 @@ const LIFT = { asphalt: 0.07, sidewalk: 0.05, kerb: 0.06 };
 const KERB = { width: 0.3, tint: 1.45 };
 const SIDEWALK = { boulevard: 3.6, avenue: 3.2, street: 2.6, narrow: 1.8, plaza: 0, alley: 0 };
 const STEP = 4;            // metres between height probes
+const ROAD_OVER = 0.6;     // a road this close to the street's level replaces it
 const TOL = 0.03;          // metres a ribbon may stray from the ground
 
 /**
@@ -29,6 +30,21 @@ export function buildStreets(THREE, layout, M, tiles) {
   const holeGrid = polyIndex(layout.holes);
   const waterGrid = polyIndex(layout.water);
   const cut = (x, n) => holeGrid(x, n) || waterGrid(x, n);
+  // Where a road at street level runs over a street — a ramp's foot, a
+  // carriageway alongside a boulevard — the road is the one surface there:
+  // the street's asphalt, kerbs and sidewalks under it are left out, so no
+  // two pavements lie on top of each other a few centimetres apart.
+  // The roads are meshed first (world/build.js): their drawn surface, not
+  // their centreline's reach, says where a street gives way.
+  const cover = layout.roadCover;
+  const htmp = [];
+  const underRoad = (x, n) => {
+    if (!cover) return false;
+    const g = T.height(x, n);
+    return cover.heights(x, n, htmp).some((y) => Math.abs(y - g) < ROAD_OVER);
+  };
+  const nearRoad = (x, n, r) => !!cover && cover.near(x, n, r, T.height(x, n), ROAD_OVER + 0.5);
+  const cutAll = (x, n) => cut(x, n) || underRoad(x, n);
   const per = new Map();
   const tile = (key) => {
     let t = per.get(key);
@@ -39,17 +55,20 @@ export function buildStreets(THREE, layout, M, tiles) {
   for (const st of layout.streets) {
     const half = st.half;
     const walk = (SIDEWALK[st.cls] ?? 2.4) * s;
-    const line = stationsOf(st.path, T, half + walk);
+    // Stations every 2 m where a road comes near, so the cut follows its edge.
+    const line = densifyNear(stationsOf(st.path, T, half + walk), (x, n) => nearRoad(x, n, half + walk + 3), T);
     stations += line.length;
     const mid = st.path[Math.floor(st.path.length / 2)];
     const t = tile(tiles.key(mid[0], mid[1]));
-    ribbon(t.asphalt, line, -half, half, LIFT.asphalt, cut, T);
+    const fine = (x, n) => nearRoad(x, n, half + walk);
+    fine.under = underRoad;
+    ribbon(t.asphalt, line, -half, half, LIFT.asphalt, cutAll, T, 1, fine);
     if (walk > 0) {
-      ribbon(t.sidewalk, line, half, half + walk, LIFT.sidewalk, cut, T, 1);
-      ribbon(t.sidewalk, line, -half - walk, -half, LIFT.sidewalk, cut, T, 1);
+      ribbon(t.sidewalk, line, half, half + walk, LIFT.sidewalk, cutAll, T, 1, fine);
+      ribbon(t.sidewalk, line, -half - walk, -half, LIFT.sidewalk, cutAll, T, 1, fine);
       const kw = Math.min(KERB.width * s, walk * 0.5);
-      ribbon(t.sidewalk, line, half, half + kw, LIFT.kerb, cut, T, KERB.tint);
-      ribbon(t.sidewalk, line, -half - kw, -half, LIFT.kerb, cut, T, KERB.tint);
+      ribbon(t.sidewalk, line, half, half + kw, LIFT.kerb, cutAll, T, KERB.tint, fine);
+      ribbon(t.sidewalk, line, -half - kw, -half, LIFT.kerb, cutAll, T, KERB.tint, fine);
     }
   }
   const meshes = [];
@@ -139,10 +158,31 @@ function keepIndices(pts, tol) {
 }
 
 /**
+ * Stations every 2 m wherever `near` says a road is close, so a street can
+ * stop at a road's edge rather than at the next bend of the ground.
+ */
+function densifyNear(line, near, T) {
+  const out = [line[0]];
+  for (let i = 1; i < line.length; i++) {
+    const a = line[i - 1], b = line[i];
+    const k = Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 2);
+    if (k > 1 && (near(a[0], a[1]) || near(b[0], b[1]) || near((a[0] + b[0]) / 2, (a[1] + b[1]) / 2))) {
+      for (let j = 1; j < k; j++) {
+        const u = j / k;
+        const x = a[0] + (b[0] - a[0]) * u, n = a[1] + (b[1] - a[1]) * u;
+        out.push([x, n, T.height(x, n), a[3], a[4], a[5] + (b[5] - a[5]) * u, a[6] + (b[6] - a[6]) * u, a[7]]);
+      }
+    }
+    out.push(b);
+  }
+  return out;
+}
+
+/**
  * A strip between lateral offsets o0 < o1, at the ground plus `lift`;
  * `tint` is its vertex colour when the builder has one.
  */
-function ribbon(b, line, o0, o1, lift, cut, T, tint = 1) {
+function ribbon(b, line, o0, o1, lift, cut, T, tint = 1, fine = null) {
   let prev = null;
   for (const p of line) {
     const [x, n, , , , lx, ln] = p;
@@ -151,9 +191,44 @@ function ribbon(b, line, o0, o1, lift, cut, T, tint = 1) {
     const i1 = b.v(bx, bn, T.height(bx, bn) + lift, 0, 0, 1, bx, bn, tint, tint, tint);
     if (prev) {
       const cx = (x + prev.x) / 2 + lx * (o0 + o1) / 2, cn = (n + prev.n) / 2 + ln * (o0 + o1) / 2;
-      if (!cut(cx, cn)) b.quad(prev.i1, prev.i0, i0, i1);
+      // Near a road, a quad wholly under it goes, one wholly clear stays, and
+      // only one straddling its edge is cut into strips.
+      const mixed = fine && fine(cx, cn) && straddles(fine.under, cx, cn, [ax, an], [bx, bn], prev.b, prev.a);
+      if (mixed) strips(b, prev.p, p, o0, o1, lift, cut, T, tint);
+      else if (!cut(cx, cn)) b.quad(prev.i1, prev.i0, i0, i1);
     }
-    prev = { x, n, i0, i1 };
+    prev = { x, n, i0, i1, p, a: [ax, an], b: [bx, bn] };
+  }
+}
+
+/** Whether the cut test changes over a quad: its centre against its corners and edge middles. */
+function straddles(cut, cx, cn, ...corners) {
+  const c = cut(cx, cn);
+  const pts = corners.slice();
+  for (let k = 0; k < 4; k++) {
+    const p = corners[k], q = corners[(k + 1) % 4];
+    pts.push([(p[0] + q[0]) / 2, (p[1] + q[1]) / 2]);
+  }
+  return pts.some(([x, n]) => cut(x, n) !== c);
+}
+
+/**
+ * One quad of a ribbon cut across into strips about a metre wide, each kept
+ * or dropped on its own: a road covering half a street takes half of it.
+ */
+function strips(b, a, c, o0, o1, lift, cut, T, tint) {
+  const k = Math.max(1, Math.ceil(o1 - o0));
+  const at = (p, o) => {
+    const x = p[0] + p[5] * o, n = p[1] + p[6] * o;
+    return [x, n, T.height(x, n) + lift];
+  };
+  for (let j = 0; j < k; j++) {
+    const u0 = o0 + ((o1 - o0) * j) / k, u1 = o0 + ((o1 - o0) * (j + 1)) / k;
+    const A0 = at(a, u0), A1 = at(a, u1), C0 = at(c, u0), C1 = at(c, u1);
+    const mx = (A0[0] + A1[0] + C0[0] + C1[0]) / 4, mn = (A0[1] + A1[1] + C0[1] + C1[1]) / 4;
+    if (cut(mx, mn)) continue;
+    const v = ([x, n, y]) => b.v(x, n, y, 0, 0, 1, x, n, tint, tint, tint);
+    b.quad(v(A1), v(A0), v(C0), v(C1));
   }
 }
 
