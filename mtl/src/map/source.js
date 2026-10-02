@@ -16,17 +16,13 @@ const ROOFS = ['', 'gabled', 'hipped', 'dome', 'skillion', 'gambrel', 'mansard',
 export async function loadSource(read) {
   const json = (name) => read(name, 'json');
   const bin = (name) => read(name, 'bin');
-  const [meta, rues, surfaces, quartiers, mobilier, noms, bld, arb, rel, voies] = await Promise.all([
+  const [meta, rues, surfaces, quartiers, mobilier, noms, bld, arb, rel] = await Promise.all([
     json('meta.json'), json('rues.json'), json('surfaces.json'), json('quartiers.json'), json('mobilier.json'),
     json('batiments-noms.json'), bin('batiments.bin'), bin('arbres.bin'), bin('relief.bin'),
-    // Lane counts from OpenStreetMap (tools/voies.mjs): optional, the class
-    // decides when a road has none.
-    json('voies.json').catch(() => null),
   ]);
-  const lanes = (voies && voies.voies) || {};
   return {
     meta,
-    roads: decodeRoads(rues).map((r) => (lanes[r.id] ? { ...r, lanes: lanes[r.id] } : r)),
+    roads: decodeRoads(rues),
     surfaces: decodeSurfaces(surfaces),
     quartiers,
     furniture: mobilier.map(([k, x, n]) => ({ kind: k === 1 ? 'signal' : 'lamp', x, n })),

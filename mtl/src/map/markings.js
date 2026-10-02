@@ -87,16 +87,14 @@ function streetLines(st, s = 1) {
 function linesFor(st, w, h) {
   const L = [];
   if (st.oneway || st.cls === 'service') {
-    // OpenStreetMap's lane count when the data has one, else what fits.
-    const lanes = Math.min(st.lanes || Infinity, Math.max(1, Math.floor(w / 3.5)));
+    const lanes = Math.max(1, Math.floor(w / 3.5));
     for (let k = 1; k < lanes; k++) L.push({ off: -h + (w * k) / lanes, color: 'white', dash: DASH });
     return L;
   }
   if (st.cls === 'boulevard') {
     const med = w >= 24 ? 1.1 : 0.12;
     L.push({ off: med, color: 'yellow' }, { off: -med, color: 'yellow' });
-    const fit = Math.max(1, Math.floor((h - med) / 3.5));
-    const per = st.lanes ? Math.min(fit, Math.max(1, Math.round(st.lanes / 2))) : fit;
+    const per = Math.max(1, Math.floor((h - med) / 3.5));
     for (let k = 1; k < per; k++) {
       const o = med + ((h - med) * k) / per;
       L.push({ off: o, color: 'white', dash: DASH }, { off: -o, color: 'white', dash: DASH });
@@ -105,7 +103,7 @@ function linesFor(st, w, h) {
   }
   if (st.cls === 'avenue') {
     L.push({ off: 0.12, color: 'yellow' }, { off: -0.12, color: 'yellow' });
-    if (st.lanes ? st.lanes >= 4 && w >= 12 : w >= 16) L.push({ off: h / 2, color: 'white', dash: DASH }, { off: -h / 2, color: 'white', dash: DASH });
+    if (w >= 16) L.push({ off: h / 2, color: 'white', dash: DASH }, { off: -h / 2, color: 'white', dash: DASH });
     return L;
   }
   if (st.cls === 'street' && w >= 12) {
