@@ -6,6 +6,7 @@ import { GeoBuilder, triangulate, meshOf } from './builder.js';
 import { textPanel, hasCanvas } from './textures.js';
 import { simplifyN } from '../map/geom.js';
 import { pillarColumns } from '../map/structures.js';
+import { JOINT_SINK } from '../map/layout.js';
 
 const TOL = 0.04;   // metres: invisible, and a straight wall costs two quads
 
@@ -27,12 +28,12 @@ export function buildRoads(THREE, layout, S, M) {
   const joins = layout.joins || [];
   const landings = layout.landings || [];
   for (const r of layout.roads) {
-    const [i0, i1] = drawRange(r, joins);
+    const [i0, i1, sunk] = drawRange(r, joins);
     const b = r.cls === 'circuit' ? circuit : top;
     // Edges slid onto the street a ramp comes down to (map/junctions.js).
     const edges = new Map();
     for (const l of landings) if (l.road === r.id) for (const [k, e] of l.edges) edges.set(k, e);
-    ribbon(b, r.samples, i0, i1, (p) => p.y, halfOf(r), false, edges);
+    ribbon(b, r.samples, i0, i1, (p) => (sunk(p) ? p.y - JOINT_SINK : p.y), halfOf(r), false, edges);
     // Undersides where the deck is carried on pillars.
     let run = [];
     const flush = () => {
@@ -45,6 +46,8 @@ export function buildRoads(THREE, layout, S, M) {
     flush();
   }
   for (const j of joins) joinSurface(top, j);
+  // Joints: the wedges where two ways meet end to end at an angle.
+  for (const j of layout.joints || []) joint(top, j);
   // What is actually drawn, for the streets to give way to (world/streets.js).
   layout.roadCover = coverIndex([top, circuit]);
   push(out, meshOf(THREE, top, M.Asphalt, 'Routes'), 'routes');
@@ -54,25 +57,38 @@ export function buildRoads(THREE, layout, S, M) {
 }
 
 /**
- * Terrain roads are trimmed where they run into their major road; a ramp
- * joined at the side (map/junctions.js) starts at its nose, the taper before
- * it being part of the carriageway.
+ * A ramp joined at the side (map/junctions.js) starts at its nose, the taper
+ * before it being part of the carriageway. Any other road that runs into a
+ * major one is drawn whole, a hair under it where the two overlap: trimmed
+ * square at the major road's edge, it left a wedge of ground on one side
+ * and a corner in the air on the other, or a gap where the "major" road was
+ * itself ending (three ramps meeting at one node).
+ *
+ * @returns [i0, i1, sunk(p)]
  */
 function drawRange(r, joins) {
-  let i0 = 0, i1 = r.samples.length - 1;
+  const S = r.samples;
   let n0 = -1, n1 = -1;
   for (const j of joins) {
     if (j.road !== r.id) continue;
     if (j.end === 'start') n0 = j.nose; else n1 = j.nose;
   }
+  let s0 = -Infinity, s1 = Infinity;
   for (const j of r.junctions || []) {
     if (j.through) continue;           // carries on from the other's end: whole
-    if (j.end === 'start' && n0 < 0) while (i0 < i1 && r.samples[i0].s < j.sTrim) i0++;
-    else if (j.end === 'end' && n1 < 0) while (i1 > i0 && r.samples[i1].s > j.sTrim) i1--;
+    if (j.end === 'start' && n0 < 0) s0 = j.sTrim;
+    else if (j.end === 'end' && n1 < 0) s1 = j.sTrim;
   }
-  if (n0 >= 0) return [n0, n1 >= 0 ? n1 : Math.min(r.samples.length - 1, i1 + 1)];
-  if (n1 >= 0) return [Math.max(0, i0 - 1), n1];
-  return [Math.max(0, i0 - 1), Math.min(r.samples.length - 1, i1 + 1)];
+  const sunk = (p) => p.s < s0 || p.s > s1;
+  return [n0 >= 0 ? n0 : 0, n1 >= 0 ? n1 : S.length - 1, sunk];
+}
+
+/** A joint (map/layout.js findJoints): a fan from its centre, facing up. */
+function joint(b, j) {
+  const c = b.v(j.x, j.n, j.y, 0, 0, 1, j.x, j.n);
+  const ring = j.ring.map(([x, n, y]) => b.v(x, n, y, 0, 0, 1, x, n));
+  // The hull runs counter-clockwise seen from above, as ribbon() lays faces.
+  for (let k = 0; k < ring.length; k++) b.tri(c, ring[k], ring[(k + 1) % ring.length]);
 }
 
 /**

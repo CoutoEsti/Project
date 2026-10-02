@@ -184,7 +184,9 @@ export class Driver {
       this.slope = Math.atan(grade * (fx * p.tx + fn * p.tn));
       return grade * (v.vx * p.tx + v.vn * p.tn);
     }
-    if (g.kind === 'terrain') {
+    // A joint (the wedge where two ways meet) has no profile of its own:
+    // probed like the relief.
+    if (g.kind === 'terrain' || g.kind === 'joint') {
       const a = this.surface.at(v.x + fx * PROBE, v.n + fn * PROBE, this.y + 0.4, CLIMB);
       const b = this.surface.at(v.x - fx * PROBE, v.n - fn * PROBE, this.y + 0.4, CLIMB);
       const ya = Number.isFinite(a.y) && Math.abs(a.y - this.y) < 1.2 ? a.y : this.y;

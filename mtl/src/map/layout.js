@@ -148,6 +148,84 @@ export function compile(map) {
   return layout;
 }
 
+/** How far under the ribbons a joint is drawn: it only shows where they leave a gap. */
+export const JOINT_SINK = 0.03;
+
+/**
+ * Where two ways meet end to end at an angle — a carriageway split by the
+ * data on a bend, a fork where the way before and both branches end on the
+ * same node — each ribbon ends square and the corners on the outside of the
+ * bend leave a wedge of bare ground (or of sky, on a viaduct). A joint is the
+ * convex hull of those end sections, EasyRoads3D's connector reduced to its
+ * essence, drawn a hair under the ribbons so that only the wedges show.
+ * Ends joined at the side of a carriageway are left out: map/junctions.js
+ * builds their taper (`joins`, junctionPatches()).
+ *
+ * @returns [{ ring: [[x, n, y]], x, n, y, roads }] — a fan from (x, n, y)
+ */
+export function findJoints(roads, joins = []) {
+  const tapered = new Set(joins.map((j) => `${j.road}:${j.end}`));
+  const ends = [];
+  for (const r of roads) {
+    if (r.loop || r.samples.length < 3) continue;
+    const S = r.samples;
+    for (const [end, k, q] of [['start', 0, 1], ['end', S.length - 1, S.length - 2]]) {
+      if (tapered.has(`${r.id}:${end}`)) continue;
+      ends.push({ r, p: S[k], q: S[q] });
+    }
+  }
+  const grid = new G.Grid(16);
+  for (const e of ends) grid.insert(e, e.p.x - 1, e.p.n - 1, e.p.x + 1, e.p.n + 1);
+  const seen = new Set(), tmp = [], out = [];
+  for (const e of ends) {
+    if (seen.has(e)) continue;
+    const group = [], stack = [e];
+    seen.add(e);
+    while (stack.length) {
+      const a = stack.pop();
+      group.push(a);
+      for (const b of grid.query(a.p.x, a.p.n, 0, tmp).slice()) {
+        if (seen.has(b) || Math.hypot(b.p.x - a.p.x, b.p.n - a.p.n) > 1.5 || Math.abs(b.p.y - a.p.y) > 0.5) continue;
+        seen.add(b);
+        stack.push(b);
+      }
+    }
+    if (group.length < 2) continue;
+    const pts = [];
+    for (const { r, p, q } of group) {
+      for (const s of [p, q]) {
+        const h = s.h ?? r.half;
+        pts.push([s.x + s.lx * h, s.n + s.ln * h, s.y], [s.x - s.lx * h, s.n - s.ln * h, s.y]);
+      }
+    }
+    const ring = G.convexHull(pts);
+    if (ring.length < 3) continue;
+    // Each corner keeps its ribbon's height; the centre takes the mean.
+    let cx = 0, cn = 0, cy = 0;
+    for (const [x, n, y] of ring) { cx += x; cn += n; cy += y; }
+    const k = ring.length;
+    out.push({ ring: ring.map(([x, n, y]) => [x, n, y - JOINT_SINK]), x: cx / k, n: cn / k, y: cy / k - JOINT_SINK,
+      roads: group.map((g) => g.r.id) });
+  }
+  return out;
+}
+
+/** Height of a joint's fan at (x, n), or null outside it. */
+export function jointHeight(j, x, n) {
+  const R = j.ring;
+  for (let k = 0; k < R.length; k++) {
+    const a = R[k], b = R[(k + 1) % R.length];
+    // Barycentric coordinates in the triangle (centre, a, b).
+    const d = (a[1] - b[1]) * (j.x - b[0]) + (b[0] - a[0]) * (j.n - b[1]);
+    if (Math.abs(d) < 1e-9) continue;
+    const w0 = ((a[1] - b[1]) * (x - b[0]) + (b[0] - a[0]) * (n - b[1])) / d;
+    const w1 = ((b[1] - j.n) * (x - b[0]) + (j.x - b[0]) * (n - b[1])) / d;
+    const w2 = 1 - w0 - w1;
+    if (w0 >= -1e-6 && w1 >= -1e-6 && w2 >= -1e-6) return w0 * j.y + w1 * a[2] + w2 * b[2];
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------- roads --
 
 export function sampleRoad(road) {

@@ -6,15 +6,26 @@
 // The streets are not surfaces of their own: they lie on the relief, so the
 // relief is what a car on a street stands on.
 
+import { Grid } from './geom.js';
+import { jointHeight } from './layout.js';
+
 export function createSurface(layout, structures) {
   const { index, ground } = structures;
   const T = layout.terrain;
   const tmp = [];
+  // Joints fill the wedges where two ways meet end to end (layout.js).
+  const joints = new Grid(32);
+  for (const j of layout.joints || []) {
+    let x0 = Infinity, n0 = Infinity, x1 = -Infinity, n1 = -Infinity;
+    for (const [x, n] of j.ring) { x0 = Math.min(x0, x); n0 = Math.min(n0, n); x1 = Math.max(x1, x); n1 = Math.max(n1, n); }
+    joints.insert({ j, x0, n0, x1, n1 }, x0, n0, x1, n1);
+  }
+  const jtmp = [];
 
   /**
    * @param yRef   the car's current height
    * @param step   how much higher a surface may be and still be climbed onto
-   * @returns { y, kind: 'road'|'terrain'|'water'|'void', road, s, i, t }
+   * @returns { y, kind: 'road'|'joint'|'terrain'|'water'|'void', road, s, i, t }
    *          (s, i, t: where along the road — arc length, segment, fraction)
    */
   function at(x, n, yRef, step = 0.6) {
@@ -27,6 +38,13 @@ export function createSurface(layout, structures) {
       // A car on a covered road is under the ground: the relief there is its
       // roof, even where the portal brings the two within a step.
       if (o.covered) { if (yRef - o.y < 1) roof = Math.max(roof, o.y); } else asphalt = Math.max(asphalt, o.y);
+    }
+    for (const c of joints.query(x, n, 0, jtmp)) {
+      if (x < c.x0 || x > c.x1 || n < c.n0 || n > c.n1) continue;
+      const y = jointHeight(c.j, x, n);
+      if (y === null || y > lim) continue;
+      asphalt = Math.max(asphalt, y);
+      if (y > best) { best = y; kind = 'joint'; road = null; }
     }
     const k = ground.kindAt(x, n);
     if (k === 'terrain') {
