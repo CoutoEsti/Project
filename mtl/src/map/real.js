@@ -21,6 +21,7 @@ import { clipRoad, clipMulti } from './clip.js';
 import { backdropCells } from './backdrop.js';
 import { createTerrain } from './terrain.js';
 import * as G from './geom.js';
+import { ROAD_CLASS } from './layout.js';
 import OVERLAY from './montreal.js';
 
 /** Real metres above (below) the ground for an OSM layer. */
@@ -201,6 +202,7 @@ export function buildMap(src, settings) {
       }
     }
   }
+  meetLiftedStreets(roads, s, (r, before, grid) => profile(r, terrain, waterAt, s, before, special[r.name], (x, n) => onStreet(x, n) && !onRoad(x, n, r), grid));
 
   // --- buildings, trees, street furniture --------------------------------------
   const landmarkPlots = (OVERLAY.landmarks || []).filter((l) => inZone(l.x, l.n)).map((l) => ({ x: S(l.x), n: S(l.n), r: S(l.clear || 40) }));
@@ -813,6 +815,70 @@ function densify(pts, levels, flags, wet, maxLen) {
     }
   }
   return { pts: out, lv, fl, wt };
+}
+
+// A short link squeezed between two decks may take more than a ramp's grade
+// to meet one: up to this, no more.
+const LINK_GRADE = 0.1;
+
+/**
+ * A ramp that ends partway along a lifted piece of street — Jacques-Cartier's
+ * ramps coming down onto Saint-Charles and Taschereau, a Turcot exit onto
+ * Saint-Jacques — was profiled before it (a street ranks below a ramp), so
+ * it could not meet it: it stopped in the air beside the deck, or under it.
+ * Profiled again with the piece among the roads done, it lands on the deck.
+ * The piece keeps its heights (it never pins itself to a ramp); a new
+ * profile that still misses it, or closes the ramp off, is not kept.
+ */
+function meetLiftedStreets(roads, s, reprofile) {
+  const order = new Map(roads.map((r, i) => [r, i]));
+  const pieces = roads.filter((r) => r.street);
+  const STEP = 0.6;                      // a step a car climbs (map/surface.js)
+  // The piece under an end, profiled after the road, and the height gap.
+  const landing = (r, k) => {
+    const [x, n, y] = r.path[k];
+    let best = null;
+    for (const p of pieces) {
+      if (order.get(p) < order.get(r)) continue;
+      const hit = nearestOnPath(p.path, x, n, p.width / 2 + 1.2 * s);
+      if (!hit) continue;
+      // End to end, the two meet in layout.js (pinJunctions); here, only a
+      // ramp landing partway along the piece.
+      const a = p.path[0], b = p.path[p.path.length - 1];
+      if (Math.min(Math.hypot(a[0] - x, a[1] - n), Math.hypot(b[0] - x, b[1] - n)) < p.width + 2 * s) continue;
+      if (!best || hit.d < best.hit.d) best = { p, hit, dy: Math.abs(hit.y - y) };
+    }
+    return best;
+  };
+  for (const r of roads) {
+    if (r.street || r.loop) continue;
+    const ends = [0, r.path.length - 1].map((k) => landing(r, k));
+    if (!ends.some((e) => e && e.dy > STEP)) continue;
+    const i = order.get(r);
+    const before = roads.slice(0, i);
+    for (const e of ends) if (e && !before.includes(e.p)) before.push(e.p);
+    const grid = new G.Grid(64);
+    for (const o of roads.slice(0, i)) {
+      if (o.street) continue;
+      for (let k = 0; k + 1 < o.path.length; k++) {
+        const a = o.path[k], b = o.path[k + 1];
+        grid.insert({ a, b }, Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1]));
+      }
+    }
+    const keep = { path: r.path, cutStart: r.cutStart, cutEnd: r.cutEnd, closure: r.closure, maxGrade: r.maxGrade,
+      edgeFlags: r.edgeFlags, edgeLevels: r.edgeLevels, cum: r.cum };
+    r.path = reprofile(r, before, grid);
+    const now = [0, r.path.length - 1].map((k) => landing(r, k));
+    const better = ends.every((e, j) => !e || e.dy <= STEP || (now[j] && now[j].dy <= STEP));
+    const closed = (r.cutStart && !keep.cutStart) || (r.cutEnd && !keep.cutEnd);
+    // layout.js holds a road to its class's grade unless it carries its own.
+    let steep = 0;
+    for (let k = 1; k < r.path.length; k++) {
+      steep = Math.max(steep, Math.abs(r.path[k][2] - r.path[k - 1][2]) / ((r.cum[k] - r.cum[k - 1]) || 1));
+    }
+    if (!better || closed || steep > LINK_GRADE) Object.assign(r, keep);
+    else if (steep > (ROAD_CLASS[r.cls] || ROAD_CLASS.road).maxGrade) r.maxGrade = steep + 0.005;
+  }
 }
 
 function nearestOnPath(path, x, n, reach) {
