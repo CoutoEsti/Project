@@ -126,6 +126,31 @@ Une zone peut être un polygone : `zones.html` (outil de dessin, `src/zones-ui.j
 (coupe des rues et surfaces), mur de bord dans `map/collide.js`, décor dans
 `map/backdrop.js` + `world/backdrop.js`. Voir `README.md`, « Dessiner sa propre zone ».
 
+## Raccords et chevauchements (2 octobre)
+
+Mesuré sur la zone anneau, sondes d'un mètre sur toutes les routes et rues :
+
+| | avant | après |
+|---|---|---|
+| route posée sur un trottoir | 2 560 m² | ~50 m² |
+| route posée sur une rue | 412 m² | ~40 m² |
+| trottoir sous/sur la chaussée d'une autre rue | 476 000 m² | ~61 000 m² |
+| bouts de route partiellement ouverts | 86 | 65 |
+| trous dans les rues | 3 691 m² | ~3 950 m² |
+
+- `world/streets.js` : rues, bordures et trottoirs cèdent sous une route
+  dessinée au même niveau (`layout.roadCover`, bâti par `world/roads.js`,
+  d'où les routes maillées avant les rues) et aux chaussées des rues qu'ils
+  croisent ; virages serrés arrondis au lieu d'un onglet.
+- `map/layout.js` `findJoints` : coins comblés entre tronçons bout à bout ;
+  `world/roads.js` ne rogne plus une bretelle sans raccord latéral, il la
+  passe 3 cm sous la route principale.
+- Coût : +0,4 M triangles de trottoirs (1,45 M), ~+3 s pour les rues à la
+  construction (node). À surveiller sur téléphone.
+- Reste : tête du pont Jacques-Cartier (île Sainte-Hélène), rues et routes
+  au niveau du sol qui se croisent avec plus de 60 cm d'écart de hauteur ;
+  65 bouts ouverts, surtout Turcot et bretelles en cul-de-sac.
+
 ## Git
 
 `CLAUDE.md` dit de travailler sur `main` ; ces sessions poussent sur la branche
