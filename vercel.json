@@ -2,24 +2,24 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
     { "source": "/hop/:path*", "destination": "/hop/:path*" },
-    { "source": "/", "destination": "/hop/index.html" },
-    { "source": "/:path*", "destination": "/hop/:path*" }
+    { "source": "/", "destination": "/mtl/index.html" },
+    { "source": "/:path*", "destination": "/mtl/:path*" }
   ],
   "headers": [
     {
-      "source": "/hop/vendor/:path*",
+      "source": "/(hop|mtl)/vendor/:path*",
       "headers": [
         { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
       ]
     },
     {
-      "source": "/hop/models/:path*",
+      "source": "/(hop|mtl)/models/:path*",
       "headers": [
         { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
       ]
     },
     {
-      "source": "/hop/data/:path*",
+      "source": "/(hop|mtl)/data/:path*",
       "headers": [
         { "key": "Cache-Control", "value": "public, max-age=604800" }
       ]

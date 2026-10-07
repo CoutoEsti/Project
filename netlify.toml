@@ -1,8 +1,8 @@
-# Déploiement statique : le jeu est la racine du site publié.
+# Déploiement statique : MTL (mtl/) est la racine du site publié.
 # Aucune étape de build — c'est du HTML, du CSS et des modules ES.
 
 [build]
-  publish = "hop"
+  publish = "mtl"
   command = ""
 
 # Le jeu de données Montréal ne change qu'à chaque nouvel extrait OSM :

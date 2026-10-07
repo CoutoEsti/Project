@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>MTL — la carte</title>
+<meta name="description" content="Une Montréal compacte pour un jeu de course en monde ouvert : la tranchée Décarie, la Métropolitaine, le tunnel Ville-Marie, le mont Royal et les îles.">
+<link rel="stylesheet" href="css/style.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "./vendor/three.module.min.js",
+    "three/addons/": "./vendor/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<canvas id="view"></canvas>
+
+<div id="loading">
+  <div class="title">MTL</div>
+  <div class="step" id="loading-step">Préparation…</div>
+</div>
+
+<div id="hud" hidden>
+  <div id="zone"></div>
+  <div id="road" hidden></div>
+  <div id="speed"><span id="kmh">0</span><small>km/h</small></div>
+  <canvas id="minimap" width="220" height="220"></canvas>
+  <div id="garage" class="drive-only" role="group" aria-label="Voiture"></div>
+  <div id="toast"></div>
+  <div id="help" class="drive-only">
+    <b>WASD / flèches</b> conduire · <b>Espace</b> frein à main · <b>R</b> replacer ·
+    <b>C</b> caméra · <b>clic droit + glisser</b> orbiter · <b>V</b> ou <b>1 2 3</b> voiture · <b>M</b> carte · <b>N</b> nuit / jour · <b>F</b> vol libre ·
+    <b>E</b> exporter pour Unity · <b>H</b> masquer l’aide
+  </div>
+  <div id="help-fly" class="fly-only">
+    <b>Glisser</b> regarder · <b>WASD / flèches</b> avancer · <b>Espace / Maj</b> monter, descendre ·
+    <b>molette</b> plonger · <b>O</b> vue d’ensemble · <b>M</b> carte (clic : y aller) ·
+    <b>G</b> poser la voiture ici · <b>F</b> reprendre le volant · <b>N</b> nuit / jour
+  </div>
+</div>
+
+<div id="modes" role="group" aria-label="Mode">
+  <button data-mode="drive" class="on">Conduire</button>
+  <button data-mode="fly">Vol libre</button>
+  <button id="settings-open" aria-label="Réglages de la carte">Carte…</button>
+</div>
+
+<div id="settings" hidden>
+  <form id="settings-form">
+    <h2>La carte</h2>
+    <label>Zone
+      <select id="set-zone"></select>
+    </label>
+    <p class="hint" id="set-zone-desc"></p>
+    <label>Échelle
+      <select id="set-echelle"></select>
+    </label>
+    <p class="hint">100 % : la vraie ville. En dessous, tout rapetisse d’autant — rues, bâtiments, relief — sauf la voiture.</p>
+    <div class="row">
+      <button type="submit">Reconstruire</button>
+      <button type="button" id="settings-close">Fermer</button>
+    </div>
+    <p class="hint"><a href="zones.html">Dessiner ma zone…</a> Pour changer la valeur de départ : <code>mtl/carte.json</code>.</p>
+  </form>
+</div>
+
+<div id="bigmap" hidden>
+  <canvas id="bigmap-canvas"></canvas>
+  <div class="bigmap-caption">Clique pour t’y rendre · <b>M</b> pour fermer</div>
+</div>
+
+<div id="touch" hidden>
+  <div id="touch-top">
+    <button data-action="map">Carte</button>
+    <button data-action="reset" class="drive-only">Replacer</button>
+    <button data-action="camera" class="drive-only">Caméra</button>
+    <button data-action="overview" class="fly-only">Vue d’ensemble</button>
+    <button data-action="drop" class="fly-only">Conduire ici</button>
+  </div>
+  <div id="stick"><div id="knob"></div></div>
+  <div id="pedals">
+    <button id="handbrake" class="drive-only" aria-label="Frein à main">P</button>
+    <button class="fly-only" data-hold="up" data-sign="-1" aria-label="Descendre">↓</button>
+    <button class="fly-only" data-hold="up" data-sign="1" aria-label="Monter">↑</button>
+    <button id="brake" aria-label="Freiner">▼</button>
+    <button id="gas" aria-label="Accélérer">▲</button>
+  </div>
+</div>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>

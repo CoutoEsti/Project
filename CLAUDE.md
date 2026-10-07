@@ -3,6 +3,14 @@
 Jeu de conduite dans le navigateur, sur les vraies rues de Montréal (OpenStreetMap).
 Le jeu est dans `hop/`. Carte des fichiers et détails d'architecture : `hop/README.md`.
 
+`mtl/` est un projet distinct : la vraie Montréal (OpenStreetMap via Overture,
+relief réel) pour un jeu de course, avec zone et échelle réglables et un export
+Unity. Voir `mtl/README.md` et `mtl/REPRISE.md`. Même conventions ;
+`node mtl/tools/check.mjs` doit passer.
+
+**Le site publié sert `mtl/` à la racine** ; Ruelle reste accessible à
+`/hop/` (voir `vercel.json`).
+
 ## Commandes
 
 ```bash

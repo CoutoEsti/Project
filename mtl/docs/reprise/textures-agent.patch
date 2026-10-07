@@ -1,0 +1,2341 @@
+From b5e4785c34f2be936743151f236e84fe69356bd0 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 28 Sep 2026 01:00:51 +0000
+Subject: [PATCH] =?UTF-8?q?Refait=20textures=20et=20mat=C3=A9riaux=20:=20f?=
+ =?UTF-8?q?a=C3=A7ades=20en=20atlas=20lisible,=20b=C3=A9ton=20de=20la=2040?=
+ =?UTF-8?q?,=20asphalte=20mouill=C3=A9=20la=20nuit,=20export=20des=20textu?=
+ =?UTF-8?q?res=20pour=20Unity?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01BKPWZLLXe84DFhWuhFTM8U
+---
+ mtl/README.md              |    6 +-
+ mtl/src/world/materials.js |  290 +++++--
+ mtl/src/world/textures.js  | 1528 ++++++++++++++++++++++++++++++------
+ mtl/tools/textures.mjs     |  179 +++++
+ mtl/unity/README.md        |   71 +-
+ 5 files changed, 1781 insertions(+), 293 deletions(-)
+ create mode 100644 mtl/tools/textures.mjs
+
+diff --git a/mtl/README.md b/mtl/README.md
+index 00b0226..3fc4c2c 100644
+--- a/mtl/README.md
++++ b/mtl/README.md
+@@ -110,6 +110,8 @@ qu'aucun repère ne déborde sur une rue.
+   justes, les formes sont simplifiées.
+ - La montagne est plus basse que la vraie (72 m au lieu de ~200), pour garder
+   des pentes de 10 % au plus.
+-- Les fenêtres sont une texture procédurale : correctes de loin, simplistes de
+-  près.
++- Les façades sont un atlas procédural (brique, pierre grise, calcaire, verre,
++  vitrines et portes au rez-de-chaussée) : crédibles à hauteur de rue, mais
++  plates (pas de corniche ni de relief) et sans étage du haut distinct.
++  `node mtl/tools/textures.mjs` exporte toutes les textures pour Unity.
+ - Pas encore de trafic, de piétons, ni de course jouable (les données y sont).
+diff --git a/mtl/src/world/materials.js b/mtl/src/world/materials.js
+index b095145..12d3645 100644
+--- a/mtl/src/world/materials.js
++++ b/mtl/src/world/materials.js
+@@ -1,24 +1,45 @@
+ // Every material in the world, by name. The names are the contract with the
+ // Unity import: a mesh exported with material "Concrete" gets whatever Unity
+-// material is mapped to "Concrete" — see unity/README.md.
++// material is mapped to "Concrete" — see unity/README.md. Names are only ever
++// added, never renamed or removed.
+ //
+ // UVs are metres everywhere except facades (bays and floors), so a texture's
+ // repeat is simply 1 / its size in metres, and two surfaces that overlap
+ // sample the same texel: an at-grade ramp laid over the street is invisible.
++// A texture's size is in texture.userData.metres (across) and .metresV (up).
++//
++// Ground materials also sample a large-scale noise in world metres, so a
++// 10 m asphalt tile never reads as a grid from the air; asphalt gets wet at
++// night (darker, glossy, puddles). Both are shader patches: the textures a
++// material carries (materialTextures) are what Unity receives.
+ 
+ import * as T from './textures.js';
+ 
++/** material → { map, wet, mask, macro }: every texture a material uses, for the exports. */
++export const materialTextures = new WeakMap();
++
+ export function createMaterials(THREE, opts = {}) {
+   const canvasOk = opts.textures !== false && T.hasCanvas();
+   const M = {};
+-  const std = (name, params, texture) => {
++  const macro = canvasOk ? T.macroNoise(THREE) : null;
++  const note = (m, extra) => materialTextures.set(m, { ...(materialTextures.get(m) || {}), ...extra });
++
++  /**
++   * A standard material. Textured when there is a canvas; `flat` is the
++   * colour it has without one (and a sensible Unity fallback).
++   */
++  const std = (name, params, texture, flat) => {
+     const m = new THREE.MeshStandardMaterial({ roughness: 0.9, metalness: 0, ...params });
+     m.name = name;
++    if (flat !== undefined) m.userData.flat = '#' + new THREE.Color(flat).getHexString();
+     if (texture && canvasOk) {
+       const t = texture(THREE);
+-      const k = 1 / (t.userData.metres || 1);
+-      t.repeat.set(k, k);
++      t.repeat.set(1 / (t.userData.metres || 1), 1 / (t.userData.metresV || t.userData.metres || 1));
+       m.map = t;
++      m.userData.metres = [t.userData.metres || 1, t.userData.metresV || t.userData.metres || 1];
++      note(m, { map: t });
++    } else if (flat !== undefined) {
++      m.color.set(flat);
+     }
+     M[name] = m;
+     return m;
+@@ -31,22 +52,21 @@ export function createMaterials(THREE, opts = {}) {
+   };
+ 
+   // --- ground ---
+-  std('Asphalt', { color: 0xffffff, roughness: 0.62 }, T.asphalt);
+-  if (!canvasOk) M.Asphalt.color.set(0x2e2e32);
+-  std('Sidewalk', { color: 0xffffff, roughness: 0.92 }, T.sidewalk);
+-  if (!canvasOk) M.Sidewalk.color.set(0x85827b);
++  const wet = { value: 0 };
++  const wetMap = canvasOk ? T.asphaltWet(THREE) : null;
++  if (wetMap) wetMap.repeat.set(1 / 10, 1 / 10);
++  std('Asphalt', { color: 0xffffff, roughness: 0.85 }, T.asphalt, 0x3a3a3d);
++  std('Sidewalk', { color: 0xffffff, roughness: 0.92 }, T.sidewalk, 0x9a978f);
+   std('Curb', { color: 0x9c9990, roughness: 0.9 });
+-  std('Grass', { color: 0xffffff, roughness: 1 }, T.grass);
+-  if (!canvasOk) M.Grass.color.set(0x3f5a33);
+-  std('Yard', { color: 0xb8c4a8, roughness: 1, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 }, T.grass);
+-  if (!canvasOk) M.Yard.color.set(0x3b4a30);
+-  std('Gravel', { color: 0xffffff, roughness: 1 }, T.gravel);
+-  if (!canvasOk) M.Gravel.color.set(0x5d5850);
+-  std('Parking', { color: 0xd8d8d8, roughness: 0.7 }, T.asphalt);
+-  if (!canvasOk) M.Parking.color.set(0x38383c);
+-  std('Plaza', { color: 0xffffff, roughness: 0.85 }, T.pavers);
+-  if (!canvasOk) M.Plaza.color.set(0x8a8378);
+-  std('Terrain', { color: 0xffffff, roughness: 1, vertexColors: true });
++  std('Grass', { color: 0xffffff, roughness: 1 }, T.grass, 0x4a6a38);
++  std('Yard', { color: 0xc4ccb4, roughness: 1, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 }, T.grass, 0x3b4a30);
++  std('Gravel', { color: 0xffffff, roughness: 1 }, T.gravel, 0x5d5850);
++  std('Parking', { color: 0xdedede, roughness: 0.8 }, T.asphalt, 0x3c3c40);
++  std('Plaza', { color: 0xffffff, roughness: 0.85 }, T.pavers, 0x8f8b83);
++  std('Terrain', { color: 0xffffff, roughness: 1, vertexColors: true }, T.terrainDetail);
++  // The detail texture averages ~0.8 (linear): lift it back so the cover
++  // colours keep their value.
++  if (M.Terrain.map) M.Terrain.color.setScalar(1.2);
+   // Streets lie on the terrain a few centimetres up; the offset settles the
+   // depth test far away, where a few centimetres are below its precision.
+   M.Street_Asphalt = M.Asphalt.clone();
+@@ -55,30 +75,42 @@ export function createMaterials(THREE, opts = {}) {
+   M.Street_Sidewalk = M.Sidewalk.clone();
+   M.Street_Sidewalk.name = 'Sidewalk';
+   Object.assign(M.Street_Sidewalk, { polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 });
++  for (const m of [M.Street_Asphalt, M.Street_Sidewalk]) note(m, materialTextures.get(m === M.Street_Asphalt ? M.Asphalt : M.Sidewalk));
++  for (const m of [M.Asphalt, M.Street_Asphalt, M.Parking]) groundPatch(m, macro, { strength: 0.2, wetMap, wet });
++  for (const m of [M.Sidewalk, M.Street_Sidewalk, M.Plaza]) groundPatch(m, macro, { strength: 0.16 });
++  for (const m of [M.Grass, M.Yard]) groundPatch(m, macro, { strength: 0.22, dry: 0.7 });
++  groundPatch(M.Gravel, macro, { strength: 0.2 });
++  groundPatch(M.Terrain, macro, { strength: 0.18, dry: 0.35 });
+   const water = std('Water', { color: 0x0b1e2c, roughness: 0.08, metalness: 0.1 });
+   if (canvasOk) {
+     const n = T.water(THREE);
+     n.repeat.set(1 / 30, 1 / 30);
+     water.bumpMap = n;
+     water.bumpScale = 0.4;
++    note(water, { bump: n });
+   }
+ 
+   // --- structures ---
+-  std('Concrete', { color: 0xffffff, roughness: 0.88 }, (t) => T.concrete(t));
+-  if (!canvasOk) M.Concrete.color.set(0x8b8883);
+-  std('Concrete_Dark', { color: 0xffffff, roughness: 0.95 }, (t) => T.concrete(t, '#56544f', 4));
+-  if (!canvasOk) M.Concrete_Dark.color.set(0x56544f);
+-  std('Tunnel', { color: 0xffffff, roughness: 0.4 }, T.tiles);
+-  if (!canvasOk) M.Tunnel.color.set(0xc9c3b0);
++  std('Concrete', { color: 0xffffff, roughness: 0.88 }, (t) => T.concrete(t), 0x8f8c86);
++  std('Concrete_Dark', { color: 0xffffff, roughness: 0.95 }, (t) => T.concrete(t, '#5c5a55', 4), 0x56544f);
++  // The elevated highway (A-40): barriers, piers, deck. UV v is height in
++  // metres: from the barrier's foot, and y − top of the pier for piers.
++  std('Concrete_Barrier', { color: 0xffffff, roughness: 0.82 }, T.barrier, 0xb3b0a7);
++  std('Concrete_Pier', { color: 0xffffff, roughness: 0.92 }, T.pier, 0x96938b);
++  std('Concrete_Deck', { color: 0xffffff, roughness: 0.95 }, T.deck, 0x6a6762);
++  std('Tunnel', { color: 0xffffff, roughness: 0.4 }, T.tiles, 0xc9c3b0);
+   std('Metal', { color: 0x6b6f73, roughness: 0.45, metalness: 0.7 });
+   std('Metal_Dark', { color: 0x2a2c2e, roughness: 0.5, metalness: 0.6 });
+   std('Metal_Green', { color: 0x3d6b52, roughness: 0.55, metalness: 0.45 });
+   std('Metal_Black', { color: 0x1c1c1c, roughness: 0.6, metalness: 0.4 });
+   const fence = std('Fence', { color: 0xaeb2b4, roughness: 0.5, metalness: 0.6, side: THREE.DoubleSide, alphaTest: 0.4 });
+-  if (canvasOk) fence.alphaMap = T.chainlink(THREE);
++  if (canvasOk) {
++    fence.alphaMap = T.chainlink(THREE);
++    note(fence, { alpha: fence.alphaMap });
++  }
+   fence.transparent = false;
+   std('Glass', { color: 0x2a3d4d, roughness: 0.08, metalness: 0.3 });
+-  std('Copper', { color: 0x5c8f7a, roughness: 0.55, metalness: 0.35 });
++  std('Copper', { color: 0xffffff, roughness: 0.55, metalness: 0.2 }, T.copper, 0x5c8f7a);
+   std('Stone', { color: 0xa39c8e, roughness: 0.9 });
+   std('Stone_Dark', { color: 0x6c675f, roughness: 0.9 });
+   std('Brick', { color: 0x8e4634, roughness: 0.92 });
+@@ -91,9 +123,11 @@ export function createMaterials(THREE, opts = {}) {
+   std('Marking_Red', { color: 0xb3261e, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
+ 
+   // --- buildings ---
+-  M.Facades = facadeMaterial(THREE, canvasOk ? T.facadeAtlas(THREE) : null);
+-  std('Roof', { color: 0xffffff, roughness: 0.95 }, T.roof);
+-  if (!canvasOk) M.Roof.color.set(0x3a3836);
++  const atlas = canvasOk ? T.facadeAtlas(THREE) : null;
++  M.Facades = facadeMaterial(THREE, atlas);
++  if (atlas) note(M.Facades, { map: atlas, mask: atlas.userData.mask });
++  std('Roof', { color: 0xffffff, roughness: 0.95 }, T.roof, 0x6e6c68);
++  groundPatch(M.Roof, macro, { strength: 0.5 });
+ 
+   // --- vegetation ---
+   std('Bark', { color: 0x3b2e24, roughness: 1 });
+@@ -116,28 +150,88 @@ export function createMaterials(THREE, opts = {}) {
+   if (canvasOk) pool.map = T.lightPool(THREE);
+   M.Light_Pool = pool;
+ 
++  M.wet = wet;
+   M.setNight = (night) => setNight(M, night);
+   return M;
+ }
+ 
+ /**
+- * One material for every facade in the city: an atlas row per facade type,
+- * tiled per bay and per floor in the shader, with lit windows chosen per
+- * window from a hash — so ten thousand buildings cost one draw call per chunk
+- * and no two streets light up alike.
++ * Ground shader patch: large-scale tone variation in world metres (and dry,
++ * yellowed patches on lawns), and for asphalt the wet look — darker, glossy,
++ * mirror puddles — driven by one shared `wet` uniform, 0 by day, 1 at night.
++ */
++function groundPatch(m, macro, o) {
++  if (!macro || !m.map) return;
++  const wet = !!o.wetMap;
++  const uniforms = {
++    macroMap: { value: macro },
++    macroK: { value: o.strength ?? 0.2 },
++    macroDry: { value: o.dry || 0 },
++    tileMetres: { value: m.map.userData.metres || 1 },
++  };
++  if (wet) {
++    uniforms.wetMap = { value: o.wetMap };
++    uniforms.wet = o.wet;
++    uniforms.wetRough = { value: 0.55 };
++    materialTextures.set(m, { ...(materialTextures.get(m) || {}), wet: o.wetMap });
++  }
++  materialTextures.set(m, { ...(materialTextures.get(m) || {}), macro });
++  m.customProgramCacheKey = () => (wet ? 'ground-wet-v1' : 'ground-v1');
++  m.onBeforeCompile = (shader) => {
++    Object.assign(shader.uniforms, uniforms);
++    shader.fragmentShader = shader.fragmentShader
++      .replace('#include <common>', `#include <common>
++uniform sampler2D macroMap;
++uniform float macroK;
++uniform float macroDry;
++uniform float tileMetres;
++${wet ? 'uniform sampler2D wetMap;\nuniform float wet;\nuniform float wetRough;\nvec3 gWet = vec3(1.0, 0.6, 0.0);' : ''}`)
++      .replace('#include <map_fragment>', `#include <map_fragment>
++{
++  vec2 wUv = vMapUv * tileMetres;           // world metres
++  vec3 mA = texture2D(macroMap, wUv / 97.0).rgb;
++  float mB = texture2D(macroMap, wUv / 23.0 + vec2(0.37, 0.61)).g;
++  diffuseColor.rgb *= 1.0 + macroK * ((mA.r - 0.5) * 1.3 + (mB - 0.5) * 0.7);
++  diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.22, 1.08, 0.62), macroDry * smoothstep(0.5, 0.78, mA.g));
++${wet ? `  gWet = texture2D(wetMap, vMapUv).rgb;
++  diffuseColor.rgb *= 1.0 - wet * (0.22 + 0.35 * gWet.b);` : ''}
++}`);
++    if (wet) {
++      shader.fragmentShader = shader.fragmentShader.replace('#include <roughnessmap_fragment>',
++        'float roughnessFactor = mix(roughness * (0.7 + 0.3 * gWet.r), wetRough * gWet.g, wet);');
++    }
++  };
++}
++
++/**
++ * One material for every facade in the city: a 5 × 5 atlas of cells, one per
++ * facade type plus ground-floor shopfronts and doors, tiled per bay and per
++ * floor in the shader. Per building (the `seed` attribute): brightness and
++ * hue, trim colour, whether the ground floor has shops; per window: lit or
++ * not at night, blinds. Ten thousand buildings cost one draw call per chunk
++ * and no two streets look alike.
+  */
+ function facadeMaterial(THREE, atlas) {
+   const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.88, metalness: 0 });
+   m.name = 'Facades';
++  const tb = T.facadeTables();
+   const uniforms = {
+     facadeAtlas: { value: atlas },
++    facadeMask: { value: atlas ? atlas.userData.mask : null },
+     facadeRows: { value: T.FACADES.length },
+     night: { value: 1 },
+     litRatio: { value: 0.36 },
++    fShopA: { value: tb.shopA }, fShopB: { value: tb.shopB }, fShopC: { value: tb.shopC }, fShopP: { value: tb.shopP },
++    fDoor: { value: tb.door }, fDoorP: { value: tb.doorP }, fOffice: { value: tb.office }, fTrimSet: { value: tb.trimSet },
++    fCellLit: { value: tb.cellLit },
++    fCellWin: { value: Array.from({ length: tb.cellLit.length }, (_, i) => new THREE.Vector2(tb.cellWin[i * 2], tb.cellWin[i * 2 + 1])) },
+   };
+   m.userData.uniforms = uniforms;
+   if (!atlas) return m;
+-  m.customProgramCacheKey = () => 'facades-v1';
++  const { size, cols, cell, pad } = T.ATLAS;
++  const nT = T.FACADES.length, nC = T.FACADE_CELLS.length;
++  const f = (v) => v.toFixed(1);
++  m.customProgramCacheKey = () => 'facades-v2';
+   m.onBeforeCompile = (shader) => {
+     Object.assign(shader.uniforms, uniforms);
+     shader.vertexShader = shader.vertexShader
+@@ -145,8 +239,8 @@ function facadeMaterial(THREE, atlas) {
+ attribute float facade;
+ attribute float seed;
+ varying vec2 vFacadeUv;
+-varying float vFacade;
+-varying float vSeed;`)
++flat varying float vFacade;
++flat varying float vSeed;`)
+       .replace('#include <uv_vertex>', `#include <uv_vertex>
+ vFacadeUv = uv;
+ vFacade = facade;
+@@ -154,41 +248,120 @@ vSeed = seed;`);
+     shader.fragmentShader = shader.fragmentShader
+       .replace('#include <common>', `#include <common>
+ uniform sampler2D facadeAtlas;
+-uniform float facadeRows;
++uniform sampler2D facadeMask;
+ uniform float night;
+ uniform float litRatio;
++uniform float fShopA[${nT}];
++uniform float fShopB[${nT}];
++uniform float fShopC[${nT}];
++uniform float fShopP[${nT}];
++uniform float fDoor[${nT}];
++uniform float fDoorP[${nT}];
++uniform float fOffice[${nT}];
++uniform float fTrimSet[${nT}];
++uniform float fCellLit[${nC}];
++uniform vec2 fCellWin[${nC}];
+ varying vec2 vFacadeUv;
+-varying float vFacade;
+-varying float vSeed;
++// Flat: the hashes below are chaotic, and an interpolated constant is not
++// quite constant — every pixel would pick its own colour.
++flat varying float vFacade;
++flat varying float vSeed;
+ float fHash(vec3 p) {
+   p = fract(p * 0.3183099 + vec3(0.11, 0.17, 0.13));
+   p *= 17.0;
+   return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+ }
++// Atlas cell + position in the bay (0..1, y up) → texture coordinates. Row 0
++// of the data is the top of the painted canvas.
++vec2 fAtlasUv(float c, vec2 ff) {
++  float col = mod(c, ${f(cols)}), row = floor(c / ${f(cols)} + 0.001);
++  return vec2(col * ${f(cell)} + ${f(pad)} + ff.x * ${f(cell - 2 * pad)},
++              row * ${f(cell)} + ${f(pad)} + (1.0 - ff.y) * ${f(cell - 2 * pad)}) / ${f(size)};
++}
++const vec3 TRIM_RES[8] = vec3[8](vec3(0.82, 0.8, 0.74), vec3(0.025), vec3(0.04, 0.14, 0.07), vec3(0.24, 0.035, 0.03),
++  vec3(0.03, 0.06, 0.17), vec3(0.64, 0.54, 0.38), vec3(0.04, 0.19, 0.21), vec3(0.3, 0.3, 0.29));
++const vec3 TRIM_MET[4] = vec3[4](vec3(0.52, 0.54, 0.56), vec3(0.07, 0.06, 0.05), vec3(0.03), vec3(0.3, 0.31, 0.32));
+ float fGlass = 0.0;
+-vec2 fCell = vec2(0.0);`)
++float fGloss = 0.0;
++float fSign = 0.0;
++float fBlind = 0.0;
++float fLit = 0.36;
++float fOff = 0.0;
++vec2 fWin = vec2(0.0);
++vec2 fFrac = vec2(0.0);
++vec2 fCell = vec2(0.0);
++vec3 fAlb = vec3(0.0);`)
+       .replace('#include <map_fragment>', `
+ fCell = floor(vFacadeUv);
+-vec2 ff = fract(vFacadeUv);
+-vec2 auv = vec2(ff.x, (facadeRows - vFacade - 1.0 + ff.y) / facadeRows);
+-vec2 gx = dFdx(vFacadeUv) * vec2(1.0, 1.0 / facadeRows);
+-vec2 gy = dFdy(vFacadeUv) * vec2(1.0, 1.0 / facadeRows);
+-vec4 fs = textureGrad(facadeAtlas, auv, gx, gy);
+-fGlass = fs.a;
+-diffuseColor.rgb *= fs.rgb * (0.88 + 0.24 * fHash(vec3(vSeed, 3.0, 1.0)));`)
++fFrac = fract(vFacadeUv);
++int ft = int(vFacade + 0.5);
++float fk = ${f(cell - 2 * pad)} / ${f(size)};
++vec2 gx = dFdx(vFacadeUv) * fk, gy = dFdy(vFacadeUv) * fk;
++vec4 fa = textureGrad(facadeAtlas, fAtlasUv(vFacade, fFrac), gx, gy);
++vec4 fm = textureGrad(facadeMask, fAtlasUv(vFacade, fFrac), gx, gy);
++fLit = litRatio;
++fOff = fOffice[ft];
++fWin = fCellWin[ft];
++// Floor 0: shopfronts for some buildings, doors in some bays.
++if (abs(fCell.y) < 0.5) {
++  float gc = -1.0;
++  if (fHash(vec3(vSeed, 17.0, 3.0)) < fShopP[ft]) {
++    float pick = fHash(vec3(vSeed, 5.0, 29.0));
++    gc = pick < 0.34 ? fShopA[ft] : (pick < 0.67 ? fShopB[ft] : fShopC[ft]);
++  } else if (fHash(vec3(fCell.x, vSeed, 23.0)) < fDoorP[ft]) {
++    gc = fDoor[ft];
++  }
++  if (gc >= 0.0) {
++    vec2 guv = fAtlasUv(gc, fFrac);
++    vec4 ga = textureGrad(facadeAtlas, guv, gx, gy);
++    vec4 gm = textureGrad(facadeMask, guv, gx, gy);
++    fa.rgb = mix(fa.rgb, ga.rgb, ga.a);
++    fm = mix(fm, gm, ga.a);
++    int gi = int(gc + 0.5);
++    if (ga.a > 0.5) {
++      fLit = fCellLit[gi] < 0.0 ? litRatio : fCellLit[gi];
++      fWin = fCellWin[gi];
++      fOff = 0.0;
++    }
++  }
++}
++fGlass = fm.b;
++fGloss = fm.g;
++fSign = fm.a;
++// Per building: brightness, a warm or cool cast (walls only), trim colour.
++float fh1 = fHash(vec3(vSeed, 3.0, 1.0)), fh2 = fHash(vec3(vSeed, 9.0, 5.0)), fh3 = fHash(vec3(vSeed, 41.0, 7.0));
++vec3 fTint = (0.86 + 0.28 * fh1) * mix(vec3(1.06, 0.98, 0.92), vec3(0.94, 0.99, 1.06), fh2);
++vec3 fTrim = fTrimSet[ft] < 0.5 ? TRIM_RES[int(fh3 * 7.999)] : TRIM_MET[int(fh3 * 3.999)];
++vec3 fCol = fa.rgb * mix(fTint, vec3(1.0), clamp(fm.r + fm.b, 0.0, 1.0));
++fCol = mix(fCol, fa.rgb * fTrim * 1.35, fm.r);
++// Blinds, per window: part of the glass shows a pale blind or curtain.
++float fb = fHash(vec3(fCell, vSeed + 3.0));
++float fbl = fb < 0.55 ? 0.0 : (fb - 0.55) * 1.8;
++float fwh = fWin.y - fWin.x;
++fBlind = step(0.01, fwh) * step(fWin.y - fbl * fwh, fFrac.y) * step(fFrac.y, fWin.y) * fGlass;
++vec3 fBlindCol = mix(vec3(0.62, 0.56, 0.46), vec3(0.72, 0.72, 0.7), fHash(vec3(fCell.yx, vSeed)));
++fCol = mix(fCol, fBlindCol * 0.32, fBlind * 0.9);
++// Street grime at the foot of the walls.
++fCol *= mix(0.78, 1.0, smoothstep(0.0, 0.3, vFacadeUv.y));
++fAlb = fCol;
++diffuseColor.rgb *= fCol;`)
+       .replace('#include <roughnessmap_fragment>', `
+-float roughnessFactor = mix(roughness, 0.14, fGlass);`)
++float roughnessFactor = mix(roughness, 0.1, fGloss);`)
+       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+ float fr = fHash(vec3(fCell, vSeed * 97.0 + 1.0));
+ // Curtain-wall offices light up by floor, homes window by window.
+-float office = step(9.5, vFacade);
+ float floorLit = fHash(vec3(0.0, fCell.y, vSeed * 13.0 + 2.0));
+-float byFloor = step(floorLit, litRatio * 0.8) * step(fr, 0.85);
+-float lit = mix(step(fr, litRatio), byFloor, office) * fGlass * night;
++float byFloor = step(floorLit, fLit * 0.8) * step(fr, 0.85);
++float lit = mix(step(fr, fLit), byFloor, fOff) * max(fGlass - fSign, 0.0) * night;
+ float tone = fHash(vec3(fCell.yx, vSeed + 7.0));
+-vec3 wcol = tone < 0.72 ? vec3(1.0, 0.66, 0.36) : (tone < 0.9 ? vec3(0.7, 0.8, 0.95) : vec3(1.0, 0.86, 0.66));
++vec3 wcol = tone < 0.62 ? vec3(1.0, 0.66, 0.36) : (tone < 0.86 ? vec3(0.72, 0.82, 0.96) : vec3(1.0, 0.86, 0.66));
+ float shade = 0.45 + 0.55 * fHash(vec3(fCell, 5.0 + vSeed));
+-totalEmissiveRadiance += wcol * lit * shade * 1.05;`);
++// Brighter near the ceiling; a blind glows warm and dim.
++float ceil = fwh > 0.01 ? mix(0.7, 1.15, smoothstep(fWin.x, fWin.y, fFrac.y)) : 1.0;
++wcol = mix(wcol, vec3(1.0, 0.7, 0.42) * 0.6, fBlind);
++totalEmissiveRadiance += wcol * lit * shade * ceil * 1.1;
++// Shop signs glow in their own colour.
++totalEmissiveRadiance += fAlb * fSign * night * 7.0;`);
+   };
+   return m;
+ }
+@@ -203,7 +376,10 @@ function setNight(M, night) {
+   }
+   if (M.Light_Pool) M.Light_Pool.visible = !!night;
+   if (M.Beacon) M.Beacon.visible = !!night;
+-  // Streets look wet at night — the NFSU look — and dry by day.
+-  if (M.Asphalt) M.Asphalt.roughness = night ? 0.42 : 0.82;
+-  if (M.Street_Asphalt) M.Street_Asphalt.roughness = night ? 0.42 : 0.82;
++  // Streets look wet at night — the NFSU look — and dry by day. With a
++  // canvas the wet map does it (darker, glossy, puddles); without, roughness.
++  if (M.wet) M.wet.value = night ? 1 : 0;
++  if (!M.Asphalt.map) {
++    for (const m of [M.Asphalt, M.Street_Asphalt]) if (m) m.roughness = night ? 0.42 : 0.82;
++  }
+ }
+diff --git a/mtl/src/world/textures.js b/mtl/src/world/textures.js
+index b956d53..7bf5e77 100644
+--- a/mtl/src/world/textures.js
++++ b/mtl/src/world/textures.js
+@@ -1,6 +1,14 @@
+ // Procedural textures, drawn on canvases: nothing to download, no licence, and
+ // albedo without baked-in lighting. Browser only — under node (the export)
+ // there is no canvas and materials fall back to plain colours.
++//
++// Every texture is deterministic (fixed seeds), tiles seamlessly, and is made
++// once per page: materials that share one (Asphalt and Parking, Grass and
++// Yard) share the texture too. `textureTimings` says what each one cost.
++//
++// Canvases are premultiplied: a pixel with alpha 0 loses its colour. Nothing
++// here stores data in a canvas's alpha; textures that need a fourth channel
++// are built as DataTextures from opaque canvases.
+ 
+ export function hasCanvas() {
+   return typeof document !== 'undefined' || typeof OffscreenCanvas !== 'undefined';
+@@ -14,6 +22,10 @@ function canvas(w, h) {
+   return c;
+ }
+ 
++function ctx2d(c) {
++  return c.getContext('2d', { willReadFrequently: true });
++}
++
+ /** Deterministic noise for texture painting. */
+ function mulberry(seed) {
+   let t = seed >>> 0;
+@@ -25,289 +37,1356 @@ function mulberry(seed) {
+   };
+ }
+ 
+-function speckle(ctx, w, h, R, count, size, colours) {
+-  for (let i = 0; i < count; i++) {
+-    ctx.fillStyle = colours[Math.floor(R() * colours.length)];
+-    const s = size * (0.5 + R());
+-    ctx.fillRect(R() * w, R() * h, s, s);
++// ------------------------------------------------------------- plumbing --
++
++/** Milliseconds spent on each texture, filled as they are made. */
++export const textureTimings = {};
++const made = new WeakMap();       // THREE namespace → Map(name → texture)
++
++function once(THREE, name, fn) {
++  let m = made.get(THREE);
++  if (!m) { m = new Map(); made.set(THREE, m); }
++  if (!m.has(name)) {
++    const t0 = now();
++    const t = fn();
++    textureTimings[name] = Math.round(now() - t0);
++    if (t && t.userData) t.userData.name = name;
++    m.set(name, t);
+   }
++  return m.get(name);
+ }
+ 
+-/** Asphalt: aggregate, tar snakes, patches. Tiles every 8 m. */
+-export function asphalt(THREE) {
+-  const S = 512, c = canvas(S, S), g = c.getContext('2d'), R = mulberry(11);
+-  g.fillStyle = '#2d2d31';
+-  g.fillRect(0, 0, S, S);
+-  speckle(g, S, S, R, 26000, 1.4, ['#38383c', '#26262a', '#414145', '#1f1f22', '#333337']);
+-  // Slow mottling.
+-  for (let i = 0; i < 40; i++) {
+-    const x = R() * S, y = R() * S, r = 30 + R() * 90;
+-    const gr = g.createRadialGradient(x, y, 0, x, y, r);
+-    const v = R() < 0.5 ? 'rgba(255,255,255,0.025)' : 'rgba(0,0,0,0.05)';
+-    gr.addColorStop(0, v);
+-    gr.addColorStop(1, 'rgba(0,0,0,0)');
++function now() {
++  return typeof performance !== 'undefined' ? performance.now() : Date.now();
++}
++
++/** Repeating sRGB texture; one repeat covers `metres` (× `metresV` up). */
++function tex(THREE, c, metres, metresV = metres) {
++  const t = new THREE.CanvasTexture(c);
++  t.wrapS = t.wrapT = THREE.RepeatWrapping;
++  t.colorSpace = THREE.SRGBColorSpace;
++  t.anisotropy = 8;
++  t.userData.metres = metres;       // one repeat covers this many metres across
++  t.userData.metresV = metresV;     // and this many up
++  return t;
++}
++
++/** Same, for data (roughness, noise): no colour-space conversion. */
++function dataTexFromCanvas(THREE, c, metres, metresV = metres) {
++  const t = tex(THREE, c, metres, metresV);
++  t.colorSpace = THREE.NoColorSpace;
++  return t;
++}
++
++// Colours.
++function hexRgb(hex) {
++  const v = parseInt(hex.slice(1), 16);
++  return [(v >> 16) & 255, (v >> 8) & 255, v & 255];
++}
++function rgb(c) { return `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})`; }
++function rgba(c, a) { return `rgba(${c[0] | 0},${c[1] | 0},${c[2] | 0},${a})`; }
++/** A colour from a palette, lightness jittered by ±amt. */
++function jitter(hex, R, amt) {
++  const c = hexRgb(hex), k = 1 + (R() - 0.5) * amt;
++  return rgb(c.map((v) => Math.min(255, v * k)));
++}
++const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
++const smooth = (a, b, v) => { const t = clamp((v - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
++
++// Noise: tileable value-noise fBm fields, sampled with wrap-around.
++const fields = new Map();
++function fbm(N, seed, octaves = 5, f0 = 4, gain = 0.55) {
++  const key = `${N}:${seed}:${octaves}:${f0}:${gain}`;
++  if (fields.has(key)) return fields.get(key);
++  const out = new Float32Array(N * N), R = mulberry(seed * 7919 + 1);
++  let amp = 1, f = f0;
++  for (let o = 0; o < octaves && f <= N; o++, f *= 2, amp *= gain) {
++    const lat = new Float32Array(f * f);
++    for (let i = 0; i < lat.length; i++) lat[i] = R();
++    const cell = N / f;
++    for (let y = 0; y < N; y++) {
++      const gy = y / cell, iy = Math.floor(gy);
++      let ty = gy - iy; ty = ty * ty * (3 - 2 * ty);
++      const r0 = (iy % f) * f, r1 = ((iy + 1) % f) * f;
++      for (let x = 0; x < N; x++) {
++        const gx = x / cell, ix = Math.floor(gx);
++        let tx = gx - ix; tx = tx * tx * (3 - 2 * tx);
++        const c0 = ix % f, c1 = (ix + 1) % f;
++        const a = lat[r0 + c0] + (lat[r0 + c1] - lat[r0 + c0]) * tx;
++        const b = lat[r1 + c0] + (lat[r1 + c1] - lat[r1 + c0]) * tx;
++        out[y * N + x] += amp * (a + (b - a) * ty);
++      }
++    }
++  }
++  let lo = Infinity, hi = -Infinity;
++  for (let i = 0; i < out.length; i++) { if (out[i] < lo) lo = out[i]; if (out[i] > hi) hi = out[i]; }
++  const k = 1 / (hi - lo || 1);
++  for (let i = 0; i < out.length; i++) out[i] = (out[i] - lo) * k;
++  fields.set(key, out);
++  return out;
++}
++
++/** Bilinear, wrapping sampler over an N × N field; u, v in field periods. */
++function sampler(field, N = 256) {
++  return (u, v) => {
++    let x = (u - Math.floor(u)) * N, y = (v - Math.floor(v)) * N;
++    const ix = x | 0, iy = y | 0, tx = x - ix, ty = y - iy;
++    const x1 = (ix + 1) % N, y1 = (iy + 1) % N;
++    const r0 = iy * N, r1 = y1 * N;
++    const a = field[r0 + ix] + (field[r0 + x1] - field[r0 + ix]) * tx;
++    const b = field[r1 + ix] + (field[r1 + x1] - field[r1 + ix]) * tx;
++    return a + (b - a) * ty;
++  };
++}
++
++/** Run fn(data, index, x, y) over every pixel. */
++function pass(g, W, H, fn) {
++  const img = g.getImageData(0, 0, W, H), d = img.data;
++  for (let y = 0, i = 0; y < H; y++) for (let x = 0; x < W; x++, i += 4) fn(d, i, x, y);
++  g.putImageData(img, 0, 0);
++}
++
++/** Call fn(ox, oy) for every copy of a shape at (x, y), radius r, that touches a W × H tile. */
++function wrap9(W, H, x, y, r, fn) {
++  for (const ox of [-W, 0, W]) {
++    if (x + ox + r < 0 || x + ox - r > W) continue;
++    for (const oy of [-H, 0, H]) {
++      if (y + oy + r < 0 || y + oy - r > H) continue;
++      fn(ox, oy);
++    }
++  }
++}
++
++/** Soft radial blob, tiled; sx, sy stretch it. */
++function blob(g, W, H, x, y, r, c, a, sx = 1, sy = 1) {
++  wrap9(W, H, x, y, r * Math.max(sx, sy), (ox, oy) => {
++    g.save();
++    g.translate(x + ox, y + oy);
++    g.scale(sx, sy);
++    const gr = g.createRadialGradient(0, 0, 0, 0, 0, r);
++    gr.addColorStop(0, rgba(c, a));
++    gr.addColorStop(0.6, rgba(c, a * 0.5));
++    gr.addColorStop(1, rgba(c, 0));
+     g.fillStyle = gr;
+-    g.fillRect(x - r, y - r, r * 2, r * 2);
++    g.fillRect(-r, -r, r * 2, r * 2);
++    g.restore();
++  });
++}
++
++/**
++ * A stain running down from (x, y), fading out over `len`, tiled. Three
++ * nested strips give it a soft edge: wide and short, narrow and long.
++ */
++function streak(g, W, H, x, y, w, len, c, a) {
++  wrap9(W, H, x + w / 2, y + len / 2, Math.max(w, len) / 2 + 2, (ox, oy) => {
++    for (let k = 0; k < 3; k++) {
++      const ww = w * (1 - k * 0.3), ll = len * (0.55 + k * 0.225);
++      const gr = g.createLinearGradient(0, y + oy, 0, y + oy + ll);
++      gr.addColorStop(0, rgba(c, a * 0.45));
++      gr.addColorStop(0.3, rgba(c, a * 0.35));
++      gr.addColorStop(1, rgba(c, 0));
++      g.fillStyle = gr;
++      g.fillRect(x + ox + (w - ww) / 2, y + oy, ww, ll);
++    }
++  });
++}
++
++/** A random walk: cracks, tar snakes. */
++function walk(R, x, y, ang, len, step, wiggle) {
++  const pts = [[x, y]];
++  for (let d = 0; d < len; d += step) {
++    ang += (R() - 0.5) * wiggle;
++    x += Math.cos(ang) * step;
++    y += Math.sin(ang) * step;
++    pts.push([x, y]);
+   }
+-  // Tar snakes: sealed cracks, darker and a little glossy.
+-  g.strokeStyle = 'rgba(12,12,14,0.55)';
+-  for (let i = 0; i < 7; i++) {
+-    g.lineWidth = 1.5 + R() * 2;
++  return pts;
++}
++
++/** Stroke a polyline, tiled. */
++function polyline(g, W, H, pts, width, style) {
++  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
++  for (const [x, y] of pts) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
++  g.lineWidth = width;
++  g.strokeStyle = style;
++  g.lineCap = 'round';
++  g.lineJoin = 'round';
++  wrap9(W, H, (x0 + x1) / 2, (y0 + y1) / 2, Math.max(x1 - x0, y1 - y0) / 2 + width, (ox, oy) => {
+     g.beginPath();
+-    let x = R() * S, y = R() * S;
+-    g.moveTo(x, y);
+-    for (let k = 0; k < 8; k++) { x += (R() - 0.5) * 70; y += (R() - 0.5) * 70; g.lineTo(x, y); }
++    g.moveTo(pts[0][0] + ox, pts[0][1] + oy);
++    for (let i = 1; i < pts.length; i++) g.lineTo(pts[i][0] + ox, pts[i][1] + oy);
+     g.stroke();
++  });
++}
++
++/** Rectangle, tiled. */
++function rectW(g, W, H, x, y, w, h, style) {
++  g.fillStyle = style;
++  wrap9(W, H, x + w / 2, y + h / 2, Math.max(w, h) / 2 + 1, (ox, oy) => g.fillRect(x + ox, y + oy, w, h));
++}
++
++/** Multiply a pixel's colour. */
++function mul(d, i, kr, kg = kr, kb = kr) {
++  d[i] = Math.min(255, d[i] * kr);
++  d[i + 1] = Math.min(255, d[i + 1] * kg);
++  d[i + 2] = Math.min(255, d[i + 2] * kb);
++}
++
++// ---------------------------------------------------------------- ground --
++
++/**
++ * Asphalt: aggregate, patches, sealed and open cracks, alligator cracking,
++ * oil and dried puddles. 1024² for 10 m.
++ */
++export function asphalt(THREE) {
++  return once(THREE, 'asphalt', () => {
++    const S = 1024, c = canvas(S, S), g = ctx2d(c);
++    g.fillStyle = '#4d4c4a';
++    g.fillRect(0, 0, S, S);
++    asphaltShapes(g, S, false);
++    const nA = sampler(fbm(256, 12, 5, 2)), nB = sampler(fbm(256, 13, 4, 8)), nC = sampler(fbm(256, 17, 2, 64)), R = mulberry(14);
++    pass(g, S, S, (d, i, x, y) => {
++      const u = x / S, v = y / S;
++      let k = (0.88 + 0.24 * nA(u, v)) * (0.92 + 0.16 * nB(u * 2, v * 2));
++      k *= 0.78 + 0.44 * nC(u * 4, v * 4);  // aggregate, stone by stone
++      const r = R();
++      k *= 0.9 + 0.2 * r;                   // fine grain
++      if (r > 0.992) k *= 1.45;             // pale aggregate catching the light
++      else if (r < 0.006) k *= 0.6;
++      mul(d, i, k, k, k * 0.985);
++    });
++    return tex(THREE, c, 10);
++  });
++}
++
++/**
++ * Asphalt wetness, same layout as asphalt(): R = dry roughness factor,
++ * G = wet roughness factor (puddles near 0), B = puddle mask. 512².
++ */
++export function asphaltWet(THREE) {
++  return once(THREE, 'asphaltWet', () => {
++    const S = 512, c = canvas(S, S), g = ctx2d(c);
++    g.fillStyle = 'rgb(235,150,0)';
++    g.fillRect(0, 0, S, S);
++    g.save();
++    g.scale(0.5, 0.5);
++    asphaltShapes(g, 1024, true);
++    g.restore();
++    const n = sampler(fbm(256, 15, 4, 8)), R = mulberry(16);
++    pass(g, S, S, (d, i, x, y) => {
++      const k = 0.85 + 0.3 * n(x / S * 2, y / S * 2) + (R() - 0.5) * 0.12;
++      d[i + 1] = clamp(d[i + 1] * k, 0, 255);
++    });
++    return dataTexFromCanvas(THREE, c, 10);
++  });
++}
++
++/** The shapes shared by asphalt() and asphaltWet(), in a 1024 frame. */
++function asphaltShapes(g, S, wet) {
++  const R = mulberry(101);
++  const pick = (albedo, rough) => (wet ? rough : albedo);
++  // Utility cuts: rectangles of newer, darker asphalt with sealed edges.
++  for (let i = 0; i < 2; i++) {
++    const w = 90 + R() * 220, h = 60 + R() * 160, x = R() * S, y = R() * S;
++    const old = i === 1;
++    rectW(g, S, S, x, y, w, h, pick(old ? 'rgba(130,130,132,0.1)' : 'rgba(20,20,24,0.13)', old ? 'rgb(245,165,0)' : 'rgb(215,120,20)'));
++    g.save();
++    g.lineWidth = 2.5;
++    g.strokeStyle = pick('rgba(14,14,16,0.3)', 'rgb(175,70,50)');
++    wrap9(S, S, x + w / 2, y + h / 2, Math.max(w, h) / 2 + 4, (ox, oy) => g.strokeRect(x + ox, y + oy, w, h));
++    g.restore();
+   }
+-  return tex(THREE, c, 8);
+-}
+-
+-export function concrete(THREE, base = '#8b8883', seed = 3) {
+-  const S = 256, c = canvas(S, S), g = c.getContext('2d'), R = mulberry(seed);
+-  g.fillStyle = base;
+-  g.fillRect(0, 0, S, S);
+-  speckle(g, S, S, R, 5000, 1.2, ['rgba(0,0,0,0.06)', 'rgba(255,255,255,0.05)', 'rgba(0,0,0,0.1)']);
+-  // Formwork joints.
+-  g.fillStyle = 'rgba(0,0,0,0.12)';
+-  g.fillRect(0, S / 2, S, 2);
+-  g.fillRect(S / 3, 0, 2, S / 2);
+-  g.fillRect((2 * S) / 3, S / 2, 2, S / 2);
+-  // Water stains running down.
+-  for (let i = 0; i < 12; i++) {
+-    const x = R() * S, w = 3 + R() * 10;
+-    const gr = g.createLinearGradient(0, 0, 0, S);
+-    gr.addColorStop(0, 'rgba(0,0,0,0.12)');
+-    gr.addColorStop(1, 'rgba(0,0,0,0)');
+-    g.fillStyle = gr;
+-    g.fillRect(x, 0, w, S * (0.3 + R() * 0.6));
++  // Tar snakes: sealed cracks, dark and glossy.
++  for (let i = 0; i < 7; i++) {
++    const along = R() < 0.6;
++    const ang = (along ? 0 : Math.PI / 2) + (R() - 0.5) * 0.4;
++    const pts = walk(R, R() * S, R() * S, ang, 150 + R() * 380, 6, 0.9);
++    polyline(g, S, S, pts, 2.5 + R() * 2.5, pick('rgba(16,16,18,0.42)', 'rgb(160,50,70)'));
++  }
++  // Open cracks: thin, branching.
++  for (let i = 0; i < 16; i++) {
++    const pts = walk(R, R() * S, R() * S, R() * Math.PI * 2, 80 + R() * 260, 6, 1.1);
++    polyline(g, S, S, pts, 1 + R() * 1, pick('rgba(18,18,20,0.5)', 'rgb(220,90,90)'));
++    if (R() < 0.6) {
++      const k = Math.floor(R() * (pts.length - 1));
++      polyline(g, S, S, walk(R, pts[k][0], pts[k][1], R() * Math.PI * 2, 40 + R() * 90, 5, 1.2), 1.1, pick('rgba(18,18,20,0.4)', 'rgb(225,100,90)'));
++    }
++  }
++  // Alligator cracking: a worn zone, a mesh of short cracks.
++  {
++    const cx = R() * S, cy = R() * S, rad = 150;
++    blob(g, S, S, cx, cy, rad * 1.2, wet ? [245, 170, 0] : [120, 118, 112], wet ? 0.5 : 0.18);
++    const step = 20, pts = [];
++    for (let j = -8; j <= 8; j++) for (let i = -8; i <= 8; i++) pts.push([cx + i * step + (R() - 0.5) * 12, cy + j * step + (R() - 0.5) * 12, i, j]);
++    const at = (i, j) => pts[(j + 8) * 17 + (i + 8)];
++    for (const p of pts) {
++      const [x, y, i, j] = p;
++      if (Math.hypot(x - cx, y - cy) > rad * (0.75 + R() * 0.3)) continue;
++      if (i < 8 && R() < 0.8) polyline(g, S, S, [[x, y], at(i + 1, j)], 1, pick('rgba(20,20,22,0.42)', 'rgb(220,95,110)'));
++      if (j < 8 && R() < 0.8) polyline(g, S, S, [[x, y], at(i, j + 1)], 1, pick('rgba(20,20,22,0.42)', 'rgb(220,95,110)'));
++    }
++  }
++  // Oil: dark, a little glossy.
++  for (let i = 0; i < 9; i++) {
++    blob(g, S, S, R() * S, R() * S, 12 + R() * 40, wet ? [190, 70, 40] : [8, 8, 10], wet ? 0.8 : 0.2, 1, 0.5 + R());
++  }
++  // Puddles: where water stands after rain. Dry, they leave a dusty ring.
++  for (let i = 0; i < 6; i++) {
++    const x = R() * S, y = R() * S, r = 40 + R() * 110, sx = 0.7 + R() * 0.9;
++    if (wet) {
++      blob(g, S, S, x, y, r, [180, 0, 255], 1, sx, 1);
++      blob(g, S, S, x, y, r * 0.7, [170, 0, 255], 1, sx, 1);
++    } else {
++      blob(g, S, S, x, y, r, [150, 146, 136], 0.12, sx, 1);
++      blob(g, S, S, x, y, r * 0.75, [20, 20, 22], 0.1, sx, 1);
++    }
+   }
+-  return tex(THREE, c, 4);
+ }
+ 
++/** Sidewalk: broom-finished concrete slabs, saw-cut joints, gum and stains. 512² for 3 m. */
+ export function sidewalk(THREE) {
+-  const S = 256, c = canvas(S, S), g = c.getContext('2d'), R = mulberry(5);
+-  g.fillStyle = '#85827b';
+-  g.fillRect(0, 0, S, S);
+-  speckle(g, S, S, R, 4000, 1.1, ['rgba(0,0,0,0.07)', 'rgba(255,255,255,0.06)']);
+-  g.strokeStyle = 'rgba(40,38,34,0.45)';
+-  g.lineWidth = 2;
+-  for (let i = 0; i <= 2; i++) {
+-    g.beginPath(); g.moveTo(0, (i * S) / 2); g.lineTo(S, (i * S) / 2); g.stroke();
+-    g.beginPath(); g.moveTo((i * S) / 2, 0); g.lineTo((i * S) / 2, S); g.stroke();
+-  }
+-  return tex(THREE, c, 3);
++  return once(THREE, 'sidewalk', () => {
++    const S = 512, c = canvas(S, S), g = ctx2d(c), R = mulberry(5);
++    const P = S / 2;                          // 1.5 m slabs
++    for (let j = 0; j < 2; j++) for (let i = 0; i < 2; i++) {
++      g.fillStyle = jitter('#9d9990', R, 0.08);
++      g.fillRect(i * P, j * P, P, P);
++    }
++    // Stains and gum.
++    for (let i = 0; i < 26; i++) blob(g, S, S, R() * S, R() * S, 10 + R() * 50, [70, 64, 52], 0.08 + R() * 0.08, 1, 0.6 + R() * 0.8);
++    for (let i = 0; i < 8; i++) blob(g, S, S, R() * S, R() * S, 6 + R() * 16, [95, 60, 35], 0.12);
++    for (let i = 0; i < 70; i++) {
++      const x = R() * S, y = R() * S, r = 0.8 + R() * 1.6;
++      g.fillStyle = R() < 0.75 ? `rgba(45,44,42,${0.2 + R() * 0.3})` : 'rgba(215,212,205,0.4)';
++      g.beginPath(); g.ellipse(x, y, r, r * (0.7 + R() * 0.3), R() * 3, 0, Math.PI * 2); g.fill();
++    }
++    // Cracks, and a broken corner.
++    for (let i = 0; i < 4; i++) polyline(g, S, S, walk(R, R() * S, R() * S, R() * 6.3, 40 + R() * 140, 5, 0.45), 1, 'rgba(40,38,34,0.55)');
++    g.fillStyle = 'rgba(60,57,52,0.35)';
++    g.beginPath(); g.moveTo(P - 2, P - 2); g.lineTo(P - 26, P - 4); g.lineTo(P - 6, P - 20); g.fill();
++    const nb = sampler(fbm(256, 6, 4, 4)), nm = sampler(fbm(256, 7, 5, 2));
++    pass(g, S, S, (d, i, x, y) => {
++      const u = x / S, v = y / S;
++      // Broom finish: fine streaks across the slab.
++      const broom = nb(u * 2, v * 48);
++      const k = (0.9 + 0.2 * nm(u, v)) * (0.96 + 0.07 * broom) * (0.9 + 0.2 * R());
++      mul(d, i, k, k, k * 0.99);
++    });
++    // Joints: saw cuts, darker, with a lit lip.
++    for (const t of [0, P]) {
++      rectW(g, S, S, t - 1.5, 0, 3, S, 'rgba(38,36,33,0.7)');
++      rectW(g, S, S, 0, t - 1.5, S, 3, 'rgba(38,36,33,0.7)');
++      rectW(g, S, S, t + 1.5, 0, 1, S, 'rgba(255,255,250,0.18)');
++      rectW(g, S, S, 0, t + 1.5, S, 1, 'rgba(255,255,250,0.18)');
++    }
++    // The expansion joint at the tile edge is tar-filled.
++    rectW(g, S, S, -2.5, 0, 5, S, 'rgba(25,24,24,0.55)');
++    return tex(THREE, c, 3);
++  });
+ }
+ 
++/** Lawn: two greens, dry patches, clover, the odd dandelion. 512² for 6 m. */
+ export function grass(THREE) {
+-  const S = 256, c = canvas(S, S), g = c.getContext('2d'), R = mulberry(7);
+-  g.fillStyle = '#3f5a33';
+-  g.fillRect(0, 0, S, S);
+-  speckle(g, S, S, R, 9000, 1.5, ['#4a6a3a', '#35502b', '#56733f', '#2f4726', '#62704a']);
+-  return tex(THREE, c, 6);
++  return once(THREE, 'grass', () => {
++    const S = 512, c = canvas(S, S), g = ctx2d(c), R = mulberry(7);
++    const lush = [74, 112, 50], deep = [48, 82, 38], dry = [120, 124, 66];
++    const n1 = sampler(fbm(256, 71, 5, 2)), n2 = sampler(fbm(256, 72, 4, 8)), n3 = sampler(fbm(256, 73, 3, 16));
++    const img = g.createImageData(S, S), d = img.data;
++    for (let y = 0, i = 0; y < S; y++) {
++      for (let x = 0; x < S; x++, i += 4) {
++        const u = x / S, v = y / S;
++        const a = n1(u, v), b = n2(u, v), cl = n3(u, v);
++        const tDry = smooth(0.62, 0.9, a) * 0.8, tDeep = smooth(0.55, 0.8, cl) * 0.7;
++        const r = R();
++        const k = (0.78 + 0.34 * b) * (0.7 + 0.55 * r);
++        for (let ch = 0; ch < 3; ch++) {
++          let col = lush[ch] + (deep[ch] - lush[ch]) * tDeep;
++          col += (dry[ch] - col) * tDry;
++          d[i + ch] = clamp(col * k, 0, 255);
++        }
++        d[i + 3] = 255;
++      }
++    }
++    g.putImageData(img, 0, 0);
++    for (let i = 0; i < 7; i++) blob(g, S, S, R() * S, R() * S, 10 + R() * 26, [92, 72, 45], 0.25);   // bare earth
++    for (let i = 0; i < 70; i++) {
++      g.fillStyle = R() < 0.8 ? 'rgba(222,190,40,0.85)' : 'rgba(235,235,225,0.8)';
++      g.fillRect(R() * S, R() * S, 2, 2);
++    }
++    return tex(THREE, c, 6);
++  });
++}
++
++/**
++ * Detail for the terrain's vertex colours: neutral, around 0.9, so the
++ * cover colours keep their value; the material colour lifts it back.
++ * 512² for 12 m.
++ */
++export function terrainDetail(THREE) {
++  return once(THREE, 'terrainDetail', () => {
++    const S = 512, c = canvas(S, S), g = ctx2d(c), R = mulberry(31);
++    const n1 = sampler(fbm(256, 32, 5, 2)), n2 = sampler(fbm(256, 33, 4, 8)), n3 = sampler(fbm(256, 34, 4, 4));
++    const img = g.createImageData(S, S), d = img.data;
++    for (let y = 0, i = 0; y < S; y++) {
++      for (let x = 0; x < S; x++, i += 4) {
++        const u = x / S, v = y / S;
++        let k = 228 + 22 * (n1(u, v) - 0.5) + 16 * (n2(u, v) - 0.5) + (R() - 0.5) * 26;
++        if (R() < 0.01) k *= 0.8;
++        const w = (n3(u, v) - 0.5) * 14;          // warm/cool drift
++        d[i] = clamp(k + w, 0, 255);
++        d[i + 1] = clamp(k, 0, 255);
++        d[i + 2] = clamp(k - w, 0, 255);
++        d[i + 3] = 255;
++      }
++    }
++    g.putImageData(img, 0, 0);
++    return tex(THREE, c, 12);
++  });
+ }
+ 
+ export function gravel(THREE) {
+-  const S = 256, c = canvas(S, S), g = c.getContext('2d'), R = mulberry(9);
+-  g.fillStyle = '#5d5850';
+-  g.fillRect(0, 0, S, S);
+-  speckle(g, S, S, R, 12000, 1.6, ['#6d675d', '#4d4943', '#77716a', '#3f3b36']);
+-  return tex(THREE, c, 5);
++  return once(THREE, 'gravel', () => {
++    const S = 256, c = canvas(S, S), g = ctx2d(c), R = mulberry(9);
++    g.fillStyle = '#5d5850';
++    g.fillRect(0, 0, S, S);
++    const pal = ['#77716a', '#4d4943', '#8a8378', '#3f3b36', '#6d675d', '#7b6f60'];
++    for (let i = 0; i < 2600; i++) {
++      const x = R() * S, y = R() * S, r = 0.8 + R() * 2.2;
++      g.fillStyle = pal[Math.floor(R() * pal.length)];
++      g.beginPath(); g.ellipse(x, y, r, r * (0.6 + R() * 0.4), R() * 3, 0, Math.PI * 2); g.fill();
++    }
++    pass(g, S, S, (d, i) => mul(d, i, 0.88 + 0.24 * R()));
++    return tex(THREE, c, 4);
++  });
+ }
+ 
++/** Plaza pavers: grey granite in running bond, a few warm ones. 512² for 4 m. */
+ export function pavers(THREE) {
+-  const S = 256, c = canvas(S, S), g = c.getContext('2d'), R = mulberry(13);
+-  g.fillStyle = '#6e6960';
+-  g.fillRect(0, 0, S, S);
+-  const n = 16, w = S / n;
+-  for (let j = 0; j < n; j++) {
+-    for (let i = 0; i < n; i++) {
++  return once(THREE, 'pavers', () => {
++    const S = 512, c = canvas(S, S), g = ctx2d(c), R = mulberry(13);
++    g.fillStyle = '#56524c';
++    g.fillRect(0, 0, S, S);
++    const cols = 16, rows = 32, w = S / cols, h = S / rows;
++    const pal = ['#9a968e', '#8c8981', '#a6a39b', '#7f7c75', '#b1ada4', '#928a7e'];
++    for (let j = 0; j < rows; j++) {
+       const off = (j % 2) * w / 2;
+-      const v = 95 + Math.floor(R() * 30);
+-      g.fillStyle = `rgb(${v + 8},${v + 2},${v - 8})`;
+-      g.fillRect(i * w + off + 1, j * w + 1, w - 2, w - 2);
++      for (let i = -1; i < cols; i++) {
++        const x = i * w + off, y = j * h;
++        const col = R() < 0.07 ? jitter('#8e5a45', R, 0.2) : jitter(pal[Math.floor(R() * pal.length)], R, 0.12);
++        rectW(g, S, S, x + 1.5, y + 1.5, w - 3, h - 3, col);
++        rectW(g, S, S, x + 1.5, y + 1.5, w - 3, 1, 'rgba(255,255,255,0.12)');
++        rectW(g, S, S, x + 1.5, y + h - 2.5, w - 3, 1, 'rgba(0,0,0,0.18)');
++      }
+     }
+-  }
+-  return tex(THREE, c, 4);
++    for (let i = 0; i < 16; i++) blob(g, S, S, R() * S, R() * S, 14 + R() * 50, [45, 40, 32], 0.1);
++    pass(g, S, S, (d, i) => {
++      const r = R();
++      mul(d, i, r > 0.97 ? 1.25 : r < 0.03 ? 0.7 : 0.92 + 0.16 * R());
++    });
++    return tex(THREE, c, 4);
++  });
++}
++
++// ------------------------------------------------------------ structures --
++
++/**
++ * Cast concrete: formwork panels, tie holes, rust and grime runs. 512² for
++ * 4 m. Walls map v to height, so runs go down the wall.
++ */
++export function concrete(THREE, base = '#8f8c86', seed = 3) {
++  return once(THREE, `concrete:${base}:${seed}`, () => {
++    const S = 512, c = canvas(S, S), g = ctx2d(c), R = mulberry(seed);
++    const P = S / 2;                         // 2 m form panels
++    for (let j = 0; j < 2; j++) for (let i = 0; i < 2; i++) {
++      g.fillStyle = jitter(base, R, 0.08);
++      g.fillRect(i * P, j * P, P, P);
++    }
++    const dark = hexRgb(base).map((v) => v * 0.45);
++    for (let i = 0; i < 26; i++) streak(g, S, S, R() * S, R() * S, 2 + R() * 14, 60 + R() * 260, [22, 22, 18], 0.08 + R() * 0.12);
++    for (let i = 0; i < 4; i++) streak(g, S, S, R() * S, R() * S, 8 + R() * 20, 80 + R() * 200, [236, 234, 226], 0.1 + R() * 0.08);
++    for (let i = 0; i < 8; i++) blob(g, S, S, R() * S, R() * S, 20 + R() * 60, dark, 0.1);
++    for (let i = 0; i < 3; i++) polyline(g, S, S, walk(R, R() * S, R() * S, Math.PI / 2 + (R() - 0.5), 60 + R() * 160, 6, 0.8), 1, 'rgba(30,30,28,0.55)');
++    // Tie holes on a 0.5 m grid; some bleed rust.
++    for (let y = 32; y < S; y += 64) {
++      for (let x = 32; x < S; x += 64) {
++        g.fillStyle = 'rgba(35,33,30,0.4)';
++        g.beginPath(); g.arc(x, y, 2.2, 0, Math.PI * 2); g.fill();
++        if (R() < 0.12) streak(g, S, S, x - 1.5, y + 2, 3, 20 + R() * 70, [120, 70, 32], 0.3);
++      }
++    }
++    const nm = sampler(fbm(256, seed + 40, 5, 2)), nf = sampler(fbm(256, seed + 41, 3, 16));
++    pass(g, S, S, (d, i, x, y) => {
++      const u = x / S, v = y / S;
++      const r = R();
++      let k = (0.88 + 0.24 * nm(u, v)) * (0.95 + 0.1 * nf(u, v)) * (0.93 + 0.14 * r);
++      if (r < 0.015) k *= 0.72;               // pores
++      mul(d, i, k);
++    });
++    // Panel joints and the lift line.
++    for (const t of [0, P]) {
++      rectW(g, S, S, t - 1, 0, 2, S, 'rgba(0,0,0,0.16)');
++      rectW(g, S, S, 0, t - 1, S, 2, 'rgba(0,0,0,0.18)');
++      rectW(g, S, S, 0, t + 1, S, 1, 'rgba(255,255,255,0.1)');
++    }
++    return tex(THREE, c, 4);
++  });
+ }
+ 
++/**
++ * New Jersey barrier: pale concrete, a road-grime band and splash at the
++ * foot, tyre scuffs, winter salt. 512 × 128 for 4 m × 1 m; v is the height
++ * above the barrier's foot, the top rows stay clean for the cap.
++ */
++export function barrier(THREE) {
++  return once(THREE, 'barrier', () => {
++    const W = 512, H = 128, c = canvas(W, H), g = ctx2d(c), R = mulberry(41);
++    g.fillStyle = '#bdb9af';
++    g.fillRect(0, 0, W, H);
++    for (let i = 0; i < 14; i++) streak(g, W, H * 4, R() * W, 0, 1 + R() * 3, 15 + R() * 45, [40, 38, 34], 0.06 + R() * 0.08);
++    const nm = sampler(fbm(256, 42, 5, 4)), nd = sampler(fbm(256, 43, 4, 8));
++    pass(g, W, H, (d, i, x, y) => {
++      const u = x / W, h = 1 - y / H;            // metres above the foot
++      const r = R();
++      let k = (0.9 + 0.2 * nm(u, h / 4)) * (0.93 + 0.14 * r);
++      if (r < 0.012) k *= 0.75;
++      // Road grime: dark and brown at the foot, fading by 0.45 m.
++      const edge = 0.14 + 0.1 * nd(u * 2, 0.5);
++      const dirt = smooth(edge + 0.1, edge - 0.12, h) * (0.8 + 0.2 * nd(u * 8, 2.5));
++      const kr = k * (1 - 0.34 * dirt), kg = k * (1 - 0.37 * dirt), kb = k * (1 - 0.42 * dirt);
++      mul(d, i, kr, kg, kb);
++      // Splash: specks thrown up by tyres.
++      if (h < 0.45 && R() < (0.45 - h) * 0.12) mul(d, i, 0.74, 0.72, 0.7);
++      // Winter salt: a pale crust just above the grime.
++      const salt = smooth(0.2, 0, Math.abs(h - edge - 0.08)) * nd(u * 4, 1.5);
++      if (salt > 0.25) {
++        const t = (salt - 0.25) * 0.5;
++        d[i] += (238 - d[i]) * t; d[i + 1] += (236 - d[i + 1]) * t; d[i + 2] += (228 - d[i + 2]) * t;
++      }
++    });
++    // Tyre scuffs: long, low, black.
++    for (let i = 0; i < 9; i++) {
++      const y = H - (0.04 + R() * 0.3) * H, x = R() * W, len = 60 + R() * 300;
++      g.globalAlpha = 0.18 + R() * 0.3;
++      polyline(g, W, H, [[x, y], [x + len * 0.5, y + (R() - 0.5) * 4], [x + len, y + (R() - 0.5) * 6]], 1 + R() * 3, 'rgb(18,18,18)');
++      g.globalAlpha = 1;
++    }
++    // Control joint at the segment end, with a chipped top.
++    rectW(g, W, H, -1.5, 0, 3, H, 'rgba(40,38,34,0.55)');
++    g.fillStyle = 'rgba(70,66,60,0.4)';
++    g.beginPath(); g.moveTo(2, 0); g.lineTo(14, 0); g.lineTo(3, 9); g.fill();
++    return tex(THREE, c, 4, 1);
++  });
++}
++
++/**
++ * Viaduct pier, the Métropolitaine's: raw concrete from plywood forms,
++ * vertical runs, white efflorescence, rust bleeding from ties and two
++ * repairs. 512 × 1024 for 4 m × 8 m, tiling both ways;
++ * with v = y − top of the pier, the canvas top sits under the cap. No
++ * spalls: on a 4 m repeat every pier would show the same one.
++ */
++export function pier(THREE) {
++  return once(THREE, 'pier', () => {
++    const W = 512, H = 1024, c = canvas(W, H), g = ctx2d(c), R = mulberry(51);
++    const PW = 128, PH = 256;                    // 1 m × 2 m form panels
++    for (let j = 0; j < H / PH; j++) for (let i = 0; i < W / PW; i++) {
++      g.fillStyle = jitter('#9b988f', R, 0.09);
++      g.fillRect(i * PW, j * PH, PW, PH);
++    }
++    // Heavier staining from the top of the canvas (under the cap) down.
++    const top = g.createLinearGradient(0, 0, 0, H * 0.45);
++    top.addColorStop(0, 'rgba(30,30,26,0.28)');
++    top.addColorStop(1, 'rgba(30,30,26,0)');
++    g.fillStyle = top;
++    g.fillRect(0, 0, W, H * 0.45);
++    for (let i = 0; i < 70; i++) {
++      const y = R() < 0.4 ? R() * 60 : R() * H;
++      streak(g, W, H, R() * W, y, 2 + R() * 16, 120 + R() * 520, [20, 20, 17], 0.07 + R() * 0.15);
++    }
++    for (let i = 0; i < 7; i++) {
++      const x = R() * W, y = R() * H, w = 10 + R() * 26;
++      blob(g, W, H, x + w / 2, y, w * 0.9, [240, 238, 230], 0.35, 1, 0.6);
++      streak(g, W, H, x, y, w, 100 + R() * 300, [238, 236, 228], 0.22 + R() * 0.12);
++    }
++    // Tie holes, and rust from some of them.
++    for (let y = 32; y < H; y += 64) {
++      for (let x = 32; x < W; x += 64) {
++        g.fillStyle = 'rgba(38,35,31,0.35)';
++        g.beginPath(); g.arc(x, y, 2.2, 0, Math.PI * 2); g.fill();
++        if (R() < 0.06) streak(g, W, H, x - 3, y + 2, 6, 40 + R() * 160, [126, 70, 30], 0.3);
++      }
++    }
++    // Repairs: smoother, paler patches with crisp edges.
++    for (let i = 0; i < 2; i++) {
++      const x = R() * W, y = R() * H, w = 60 + R() * 110, h = 50 + R() * 140;
++      rectW(g, W, H, x, y, w, h, 'rgba(200,197,188,0.2)');
++    }
++    for (let i = 0; i < 5; i++) {
++      const pts = walk(R, R() * W, R() * H, Math.PI / 2 + (R() - 0.5) * 0.4, 80 + R() * 260, 7, 0.6);
++      polyline(g, W, H, pts, 3, 'rgba(230,228,218,0.25)');
++      polyline(g, W, H, pts, 1, 'rgba(30,28,26,0.7)');
++    }
++    const nm = sampler(fbm(256, 52, 5, 2)), nf = sampler(fbm(256, 53, 3, 16));
++    pass(g, W, H, (d, i, x, y) => {
++      const u = x / W, v = y / H;
++      const r = R();
++      let k = (0.86 + 0.28 * nm(u, v * 2)) * (0.95 + 0.1 * nf(u, v * 2)) * (0.92 + 0.16 * r);
++      if (r < 0.02) k *= 0.7;
++      mul(d, i, k);
++    });
++    // Form joints; the lifts every 2 m are pour lines, rougher.
++    for (let x = 0; x < W; x += PW) rectW(g, W, H, x - 1, 0, 2, H, 'rgba(0,0,0,0.12)');
++    for (let y = 0; y < H; y += PH) {
++      rectW(g, W, H, 0, y - 2, W, 4, 'rgba(0,0,0,0.16)');
++      rectW(g, W, H, 0, y + 2, W, 1, 'rgba(255,255,255,0.1)');
++    }
++    return tex(THREE, c, 4, 8);
++  });
++}
++
++/**
++ * Deck underside and edges: darker, damp, map-cracked, white rings where
++ * salt water seeped through. 512² for 4 m.
++ */
++export function deck(THREE) {
++  return once(THREE, 'deck', () => {
++    const S = 512, c = canvas(S, S), g = ctx2d(c), R = mulberry(61);
++    g.fillStyle = '#6f6c66';
++    g.fillRect(0, 0, S, S);
++    // Formwork boards, 25 cm.
++    for (let y = 0; y < S; y += 32) rectW(g, S, S, 0, y, S, 32, `rgba(${R() < 0.5 ? '0,0,0' : '255,255,255'},${0.01 + R() * 0.02})`);
++    for (let i = 0; i < 9; i++) {
++      const x = R() * S, y = R() * S, r = 30 + R() * 80, sx = 0.6 + R() * 0.9;
++      blob(g, S, S, x, y, r * 1.15, [228, 226, 216], 0.2, sx, 1);
++      blob(g, S, S, x, y, r, [26, 28, 26], 0.4, sx, 1);
++    }
++    for (let i = 0; i < 12; i++) {
++      const pts = walk(R, R() * S, R() * S, R() * 6.3, 60 + R() * 200, 8, 1.4);
++      polyline(g, S, S, pts, 3, 'rgba(225,224,214,0.2)');
++      polyline(g, S, S, pts, 1, 'rgba(24,24,22,0.6)');
++    }
++    for (let i = 0; i < 14; i++) streak(g, S, S, R() * S, R() * S, 2 + R() * 8, 60 + R() * 200, [20, 20, 18], 0.1 + R() * 0.1);
++    for (let i = 0; i < 3; i++) streak(g, S, S, R() * S, R() * S, 3, 50 + R() * 120, [120, 64, 30], 0.3);
++    const nm = sampler(fbm(256, 62, 5, 2));
++    pass(g, S, S, (d, i, x, y) => {
++      const r = R();
++      let k = (0.84 + 0.32 * nm(x / S, y / S)) * (0.92 + 0.16 * r);
++      if (r < 0.02) k *= 0.7;
++      mul(d, i, k);
++    });
++    return tex(THREE, c, 4);
++  });
++}
++
++/** Tunnel wall tiles, 25 cm, cream with soot. 256² for 2 m. */
+ export function tiles(THREE) {
+-  const S = 256, c = canvas(S, S), g = c.getContext('2d');
+-  g.fillStyle = '#b9b29f';
+-  g.fillRect(0, 0, S, S);
+-  g.fillStyle = '#d6cfba';
+-  const n = 8, w = S / n;
+-  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) g.fillRect(i * w + 1.5, j * w + 1.5, w - 3, w - 3);
+-  // A darker band at bumper height: every tunnel has one.
+-  g.fillStyle = 'rgba(40,40,40,0.35)';
+-  g.fillRect(0, S * 0.78, S, S * 0.22);
+-  return tex(THREE, c, 2);
++  return once(THREE, 'tiles', () => {
++    const S = 256, c = canvas(S, S), g = ctx2d(c), R = mulberry(71);
++    g.fillStyle = '#8f887a';
++    g.fillRect(0, 0, S, S);
++    const n = 8, w = S / n;
++    for (let j = 0; j < n; j++) {
++      for (let i = 0; i < n; i++) {
++        g.fillStyle = jitter('#d3cbb4', R, 0.07);
++        g.fillRect(i * w + 1.5, j * w + 1.5, w - 3, w - 3);
++        g.fillStyle = 'rgba(255,255,255,0.18)';
++        g.fillRect(i * w + 1.5, j * w + 1.5, w - 3, 2);
++      }
++    }
++    for (let i = 0; i < 18; i++) streak(g, S, S, R() * S, R() * S, 3 + R() * 20, 40 + R() * 160, [30, 28, 24], 0.08 + R() * 0.1);
++    const nm = sampler(fbm(256, 72, 4, 2));
++    pass(g, S, S, (d, i, x, y) => mul(d, i, (0.8 + 0.24 * nm(x / S, y / S)) * (0.96 + 0.08 * R())));
++    return tex(THREE, c, 2);
++  });
+ }
+ 
++// --------------------------------------------------------------- roofs --
++
++/**
++ * Flat roofs: membrane strips, gravel ballast, ponding rings, tar repairs.
++ * 512² for 10 m. The material varies it further, roof to roof.
++ */
+ export function roof(THREE) {
+-  const S = 256, c = canvas(S, S), g = c.getContext('2d'), R = mulberry(17);
+-  g.fillStyle = '#3a3836';
+-  g.fillRect(0, 0, S, S);
+-  speckle(g, S, S, R, 9000, 1.3, ['#44423f', '#302e2c', '#4d4a46', '#2a2826']);
+-  return tex(THREE, c, 10);
++  return once(THREE, 'roof', () => {
++    const S = 512, c = canvas(S, S), g = ctx2d(c), R = mulberry(17);
++    const strip = S / 10;                         // 1 m sheets
++    for (let i = 0; i < 10; i++) {
++      g.fillStyle = jitter('#83817c', R, 0.1);
++      g.fillRect(i * strip, 0, strip + 1, S);
++    }
++    const ng = sampler(fbm(256, 18, 4, 4)), nm = sampler(fbm(256, 19, 5, 2));
++    pass(g, S, S, (d, i, x, y) => {
++      const u = x / S, v = y / S, r = R();
++      const gravelT = smooth(0.52, 0.62, ng(u, v));
++      let k = (0.88 + 0.24 * nm(u, v)) * (0.95 + 0.1 * r);
++      k *= 1 + gravelT * ((r - 0.5) * 0.36 - 0.06);
++      mul(d, i, k * (1 + gravelT * 0.03), k, k * (1 - gravelT * 0.04));
++    });
++    for (let i = 0; i <= 10; i++) rectW(g, S, S, i * strip - 1, 0, 2, S, 'rgba(0,0,0,0.2)');
++    for (let i = 0; i < 7; i++) {
++      const x = R() * S, y = R() * S, r = 20 + R() * 60;
++      blob(g, S, S, x, y, r, [40, 38, 34], 0.16, 1, 0.6 + R() * 0.8);
++    }
++    return tex(THREE, c, 10);
++  });
++}
++
++/** Copper roofing: patina, standing seams, brown where it wears through. 256² for 2 m. */
++export function copper(THREE) {
++  return once(THREE, 'copper', () => {
++    const S = 256, c = canvas(S, S), g = ctx2d(c), R = mulberry(81);
++    const nA = sampler(fbm(256, 82, 5, 2)), nB = sampler(fbm(256, 83, 4, 8));
++    const pat = [96, 158, 134], dark = [52, 104, 92], brown = [112, 88, 58];
++    const img = g.createImageData(S, S), d = img.data;
++    for (let y = 0, i = 0; y < S; y++) {
++      for (let x = 0; x < S; x++, i += 4) {
++        const u = x / S, v = y / S;
++        const a = nA(u, v * 0.5), b = nB(u * 4, v * 0.5);
++        const tb = smooth(0.25, 0.08, a), td = smooth(0.45, 0.75, b) * 0.6;
++        const k = 0.92 + 0.16 * R();
++        for (let ch = 0; ch < 3; ch++) {
++          let col = pat[ch] + (dark[ch] - pat[ch]) * td;
++          col += (brown[ch] - col) * tb;
++          d[i + ch] = clamp(col * k, 0, 255);
++        }
++        d[i + 3] = 255;
++      }
++    }
++    g.putImageData(img, 0, 0);
++    for (let i = 0; i < 12; i++) streak(g, S, S, R() * S, R() * S, 2 + R() * 6, 40 + R() * 140, [190, 225, 205], 0.15);
++    const seam = S / 5;                           // 40 cm pans
++    for (let i = 0; i < 5; i++) {
++      rectW(g, S, S, i * seam - 1.5, 0, 3, S, 'rgba(210,240,225,0.35)');
++      rectW(g, S, S, i * seam + 1.5, 0, 2, S, 'rgba(0,20,15,0.3)');
++    }
++    return tex(THREE, c, 2);
++  });
+ }
+ 
+ export function water(THREE) {
+-  const S = 256, c = canvas(S, S), g = c.getContext('2d'), R = mulberry(19);
+-  g.fillStyle = '#808080';
+-  g.fillRect(0, 0, S, S);
+-  for (let i = 0; i < 260; i++) {
+-    const x = R() * S, y = R() * S, w = 20 + R() * 60, h = 2 + R() * 3;
+-    g.fillStyle = R() < 0.5 ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.18)';
+-    g.beginPath();
+-    g.ellipse(x, y, w / 2, h / 2, 0, 0, Math.PI * 2);
+-    g.fill();
+-  }
+-  const t = tex(THREE, c, 30);
+-  t.colorSpace = THREE.NoColorSpace;
+-  return t;
++  return once(THREE, 'water', () => {
++    const S = 256, c = canvas(S, S), g = ctx2d(c), R = mulberry(19);
++    g.fillStyle = '#808080';
++    g.fillRect(0, 0, S, S);
++    for (let i = 0; i < 260; i++) {
++      const x = R() * S, y = R() * S, w = 20 + R() * 60, h = 2 + R() * 3;
++      g.fillStyle = R() < 0.5 ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.18)';
++      wrap9(S, S, x, y, w / 2, (ox, oy) => {
++        g.beginPath();
++        g.ellipse(x + ox, y + oy, w / 2, h / 2, 0, 0, Math.PI * 2);
++        g.fill();
++      });
++    }
++    return dataTexFromCanvas(THREE, c, 30);
++  });
++}
++
++/**
++ * Large-scale noise for breaking up repeats: R, G, B are fBm at three
++ * scales. Linear, 256², tiles.
++ */
++export function macroNoise(THREE) {
++  return once(THREE, 'macroNoise', () => {
++    const S = 256, c = canvas(S, S), g = ctx2d(c);
++    const a = fbm(256, 91, 5, 2), b = fbm(256, 92, 5, 4), d8 = fbm(256, 93, 4, 8);
++    const img = g.createImageData(S, S), d = img.data;
++    for (let i = 0, p = 0; i < a.length; i++, p += 4) {
++      d[p] = a[i] * 255; d[p + 1] = b[i] * 255; d[p + 2] = d8[i] * 255; d[p + 3] = 255;
++    }
++    g.putImageData(img, 0, 0);
++    const t = dataTexFromCanvas(THREE, c, 1);
++    t.anisotropy = 1;
++    return t;
++  });
+ }
+ 
+ /** Chain-link fence: alpha-tested diamond mesh. */
+ export function chainlink(THREE) {
+-  const S = 128, c = canvas(S, S), g = c.getContext('2d');
+-  g.clearRect(0, 0, S, S);
+-  g.strokeStyle = 'rgba(170,170,170,1)';
+-  g.lineWidth = 2.5;
+-  const n = 6, w = S / n;
+-  for (let i = -n; i <= n * 2; i++) {
+-    g.beginPath(); g.moveTo(i * w, 0); g.lineTo(i * w + S, S); g.stroke();
+-    g.beginPath(); g.moveTo(i * w, S); g.lineTo(i * w + S, 0); g.stroke();
+-  }
+-  return tex(THREE, c, 1);
++  return once(THREE, 'chainlink', () => {
++    const S = 128, c = canvas(S, S), g = ctx2d(c);
++    g.fillStyle = '#000';
++    g.fillRect(0, 0, S, S);
++    g.strokeStyle = '#fff';
++    g.lineWidth = 2.5;
++    const n = 6, w = S / n;
++    for (let i = -n; i <= n * 2; i++) {
++      g.beginPath(); g.moveTo(i * w, 0); g.lineTo(i * w + S, S); g.stroke();
++      g.beginPath(); g.moveTo(i * w, S); g.lineTo(i * w + S, 0); g.stroke();
++    }
++    return dataTexFromCanvas(THREE, c, 1);
++  });
+ }
+ 
+ /** Searchlight falloff along a cone's length (v = 0 at the lamp). */
+ export function beamFade(THREE) {
+-  const c = canvas(4, 128), g = c.getContext('2d');
+-  // Cone UVs run v = 1 at the apex (the lamp) to 0 at the far rim; with the
+-  // canvas flipped, v = 1 is the top row.
+-  const gr = g.createLinearGradient(0, 0, 0, 128);
+-  gr.addColorStop(0, '#ffffff');
+-  gr.addColorStop(0.3, '#8a8a8a');
+-  gr.addColorStop(1, '#000000');
+-  g.fillStyle = gr;
+-  g.fillRect(0, 0, 4, 128);
+-  return new THREE.CanvasTexture(c);
++  return once(THREE, 'beamFade', () => {
++    const c = canvas(4, 128), g = ctx2d(c);
++    // Cone UVs run v = 1 at the apex (the lamp) to 0 at the far rim; with the
++    // canvas flipped, v = 1 is the top row.
++    const gr = g.createLinearGradient(0, 0, 0, 128);
++    gr.addColorStop(0, '#ffffff');
++    gr.addColorStop(0.3, '#8a8a8a');
++    gr.addColorStop(1, '#000000');
++    g.fillStyle = gr;
++    g.fillRect(0, 0, 4, 128);
++    return new THREE.CanvasTexture(c);
++  });
+ }
+ 
+ /** Soft radial spot for the pools of light under street lamps. */
+ export function lightPool(THREE) {
+-  const S = 128, c = canvas(S, S), g = c.getContext('2d');
+-  const gr = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+-  gr.addColorStop(0, 'rgba(255,255,255,1)');
+-  gr.addColorStop(0.35, 'rgba(255,255,255,0.55)');
+-  gr.addColorStop(0.7, 'rgba(255,255,255,0.15)');
+-  gr.addColorStop(1, 'rgba(255,255,255,0)');
+-  g.fillStyle = gr;
+-  g.fillRect(0, 0, S, S);
+-  const t = new THREE.CanvasTexture(c);
+-  t.colorSpace = THREE.SRGBColorSpace;
+-  return t;
++  return once(THREE, 'lightPool', () => {
++    // White with an alpha falloff: premultiplying white loses nothing.
++    const S = 128, c = canvas(S, S), g = ctx2d(c);
++    const gr = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
++    gr.addColorStop(0, 'rgba(255,255,255,1)');
++    gr.addColorStop(0.35, 'rgba(255,255,255,0.55)');
++    gr.addColorStop(0.7, 'rgba(255,255,255,0.15)');
++    gr.addColorStop(1, 'rgba(255,255,255,0)');
++    g.fillStyle = gr;
++    g.fillRect(0, 0, S, S);
++    const t = new THREE.CanvasTexture(c);
++    t.colorSpace = THREE.SRGBColorSpace;
++    return t;
++  });
+ }
+ 
++// --------------------------------------------------------------- facades --
++
+ /**
+- * The facade atlas: one row per facade type, each row a single window bay one
+- * floor high. The shader tiles it per bay and per floor and decides, window by
+- * window, which ones are lit — so the pattern never repeats.
+- * RGB = albedo, A = glass mask.
++ * The facade atlas: a 5 × 5 grid of cells, each one window bay one floor
++ * high. Cells 0–15 are the facade types (FACADES, the index buildings carry
++ * in their `facade` attribute); cells 16–24 are ground floors — shopfronts,
++ * doors, a lobby — laid over the type's own wall on floor 0 (their alpha
++ * says where). The shader tiles the cells per bay and per floor and decides,
++ * window by window, which ones are lit — so the pattern never repeats.
++ *
++ * Two textures, same layout (row 0 of the data = top of the canvas):
++ *   map:  RGB albedo (sRGB), A = coverage (ground cells only; 1 elsewhere)
++ *   mask: R = trim (painted per building), G = gloss, B = glass (lights up
++ *         at night), A = sign (glows at night), all linear.
+  */
+ export const FACADES = [
+   'brick_red', 'brick_brown', 'brick_buff', 'brick_dark', 'brick_old', 'stone', 'stone_dark',
+   'concrete', 'panel', 'panel_dark', 'glass_blue', 'glass_dark', 'glass_green', 'glass_silver',
++  'limestone', 'condo',
+ ];
++export const GROUND_CELLS = [
++  'door_plex', 'shop_brick', 'shop_modern', 'shop_stone', 'lobby', 'garage', 'door_stone', 'awning_green', 'awning_red',
++];
++export const FACADE_CELLS = [...FACADES, ...GROUND_CELLS];
++export const ATLAS = { size: 1024, cols: 5, cell: 204, pad: 8 };
+ 
++// Per type: wall colour (exports, far LODs), window [x, y, w, h] in the cell
++// (y from the top), trim palette ('res' colourful, 'metal' neutral), office
++// lighting (by floor), and what the ground floor may carry.
++const PLEX = { shops: ['shop_brick', 'awning_green', 'awning_red'], shop: 0.12, door: 'door_plex', doorP: 0.4 };
+ const FACADE_LOOK = {
+-  brick_red: { wall: '#8e4634', mortar: '#a57b68', brick: true, win: [0.28, 0.2, 0.44, 0.62], frame: '#e8e1d2', glass: '#1b2530' },
+-  brick_brown: { wall: '#6b4432', mortar: '#8d7563', brick: true, win: [0.28, 0.2, 0.44, 0.62], frame: '#d9d2c3', glass: '#1b2530' },
+-  brick_buff: { wall: '#b59a74', mortar: '#cab69a', brick: true, win: [0.3, 0.2, 0.4, 0.6], frame: '#3d3a36', glass: '#1a232d' },
+-  brick_dark: { wall: '#523229', mortar: '#6e5a50', brick: true, win: [0.28, 0.2, 0.44, 0.62], frame: '#e6e0d0', glass: '#1b2530' },
+-  brick_old: { wall: '#7a4a3a', mortar: '#8f7a6a', brick: true, win: [0.18, 0.16, 0.64, 0.6], frame: '#2f2f2f', glass: '#1d262e' },
+-  stone: { wall: '#9d978a', mortar: '#8a8477', stone: true, win: [0.3, 0.18, 0.4, 0.6], frame: '#eee7d8', glass: '#1b242d' },
+-  stone_dark: { wall: '#6f6a61', mortar: '#615c54', stone: true, win: [0.3, 0.18, 0.4, 0.6], frame: '#d8d0bf', glass: '#1b242d' },
+-  concrete: { wall: '#8f8c86', mortar: '#8f8c86', win: [0.12, 0.2, 0.76, 0.55], frame: '#3a3a3a', glass: '#1c2631' },
+-  panel: { wall: '#9ea3a6', mortar: '#8d9295', panel: true, win: [0.1, 0.62, 0.8, 0.18], frame: '#555', glass: '#26313b' },
+-  panel_dark: { wall: '#4f5559', mortar: '#454b4f', panel: true, win: [0.1, 0.62, 0.8, 0.18], frame: '#2a2a2a', glass: '#26313b' },
+-  glass_blue: { wall: '#2f4a63', mortar: '#2f4a63', curtain: true, win: [0.04, 0.08, 0.92, 0.84], frame: '#a8b4bd', glass: '#27435c' },
+-  glass_dark: { wall: '#1e262d', mortar: '#1e262d', curtain: true, win: [0.04, 0.08, 0.92, 0.84], frame: '#5a646c', glass: '#1a2229' },
+-  glass_green: { wall: '#2c4a45', mortar: '#2c4a45', curtain: true, win: [0.04, 0.08, 0.92, 0.84], frame: '#8fa29c', glass: '#26403c' },
+-  glass_silver: { wall: '#6d7a84', mortar: '#6d7a84', curtain: true, win: [0.04, 0.08, 0.92, 0.84], frame: '#c8d0d6', glass: '#56646f' },
++  brick_red: { wall: '#8e4634', win: [0.32, 0.16, 0.36, 0.56], trim: 'res', ground: PLEX },
++  brick_brown: { wall: '#6b4432', win: [0.33, 0.17, 0.34, 0.55], trim: 'res', ground: PLEX },
++  brick_buff: { wall: '#b59a74', win: [0.22, 0.22, 0.56, 0.46], trim: 'metal', ground: { shops: ['shop_brick', 'shop_modern', 'awning_green'], shop: 0.2, door: 'door_plex', doorP: 0.25 } },
++  brick_dark: { wall: '#523229', win: [0.27, 0.18, 0.46, 0.52], trim: 'res', ground: PLEX },
++  brick_old: { wall: '#7a4a3a', win: [0.18, 0.12, 0.64, 0.64], trim: 'res', ground: { shops: ['shop_brick', 'shop_modern', 'awning_red'], shop: 0.2, door: 'garage', doorP: 0.2 } },
++  stone: { wall: '#9d978a', win: [0.3, 0.16, 0.4, 0.56], trim: 'res', ground: { shops: ['shop_stone'], shop: 0.1, door: 'door_stone', doorP: 0.35 } },
++  stone_dark: { wall: '#6f6a61', win: [0.3, 0.16, 0.4, 0.56], trim: 'res', ground: { shops: ['shop_stone'], shop: 0.1, door: 'door_stone', doorP: 0.35 } },
++  concrete: { wall: '#8f8c86', win: [0.06, 0.22, 0.88, 0.5], trim: 'metal', ground: { shops: ['shop_modern', 'shop_brick'], shop: 0.35 } },
++  panel: { wall: '#9ea3a6', win: [0.08, 0.12, 0.84, 0.2], trim: 'metal', ground: { door: 'garage', doorP: 0.35 } },
++  panel_dark: { wall: '#4f5559', win: [0.08, 0.12, 0.84, 0.2], trim: 'metal', ground: { door: 'garage', doorP: 0.35 } },
++  glass_blue: { wall: '#2f4a63', win: [0, 0.015, 1, 0.845], trim: 'metal', office: true, ground: { shops: ['lobby', 'shop_modern'], shop: 0.7 } },
++  glass_dark: { wall: '#1e262d', win: [0, 0.015, 1, 0.845], trim: 'metal', office: true, ground: { shops: ['lobby', 'shop_modern'], shop: 0.7 } },
++  glass_green: { wall: '#2c4a45', win: [0, 0.015, 1, 0.845], trim: 'metal', office: true, ground: { shops: ['lobby', 'shop_modern'], shop: 0.7 } },
++  glass_silver: { wall: '#6d7a84', win: [0, 0.015, 1, 0.845], trim: 'metal', office: true, ground: { shops: ['lobby', 'shop_modern'], shop: 0.7 } },
++  limestone: { wall: '#b3a993', win: [0.3, 0.1, 0.4, 0.66], trim: 'res', ground: { shops: ['shop_stone', 'awning_green', 'awning_red'], shop: 0.45, door: 'door_stone', doorP: 0.3 } },
++  condo: { wall: '#5d6b74', win: [0, 0, 1, 0.86], trim: 'metal', ground: { shops: ['shop_modern', 'lobby'], shop: 0.6 } },
++  // Ground cells: window extent (for blinds; none on shops) and night lighting.
++  door_plex: { win: null, lit: 0.3 },
++  shop_brick: { win: null, lit: 0.85 },
++  shop_modern: { win: null, lit: 0.9 },
++  shop_stone: { win: null, lit: 0.8 },
++  lobby: { win: null, lit: 0.95 },
++  garage: { win: null, lit: 0 },
++  door_stone: { win: null, lit: 0.3 },
++  awning_green: { win: null, lit: 0.8 },
++  awning_red: { win: null, lit: 0.8 },
+ };
+ 
+-export function facadeAtlas(THREE) {
+-  const W = 128, H = 128, rows = FACADES.length;
+-  const c = canvas(W, H * rows), g = c.getContext('2d');
+-  const R = mulberry(23);
+-  FACADES.forEach((name, row) => {
++/**
++ * The lookup tables the facade shader needs, as flat arrays — static data,
++ * no canvas required. Cell indices, -1 for none.
++ */
++export function facadeTables() {
++  const n = FACADES.length, cells = FACADE_CELLS.length;
++  const T = {
++    shopA: new Float32Array(n), shopB: new Float32Array(n), shopC: new Float32Array(n), shopP: new Float32Array(n),
++    door: new Float32Array(n), doorP: new Float32Array(n), office: new Float32Array(n), trimSet: new Float32Array(n),
++    cellLit: new Float32Array(cells), cellWin: new Float32Array(cells * 2),
++  };
++  const idx = (name) => (name ? FACADE_CELLS.indexOf(name) : -1);
++  FACADES.forEach((name, i) => {
++    const L = FACADE_LOOK[name], G = L.ground || {};
++    const s = G.shops || [];
++    T.shopA[i] = idx(s[0]); T.shopB[i] = idx(s[1] || s[0]); T.shopC[i] = idx(s[2] || s[0]);
++    T.shopP[i] = s.length ? G.shop : 0;
++    T.door[i] = idx(G.door); T.doorP[i] = G.door ? G.doorP : 0;
++    T.office[i] = L.office ? 1 : 0;
++    T.trimSet[i] = L.trim === 'metal' ? 1 : 0;
++  });
++  FACADE_CELLS.forEach((name, i) => {
+     const L = FACADE_LOOK[name];
+-    const y0 = row * H;
+-    g.fillStyle = L.wall;
+-    g.fillRect(0, y0, W, H);
+-    if (L.brick) {
+-      g.fillStyle = L.mortar;
+-      const bh = 6;
+-      for (let j = 0; j < H / bh; j++) {
+-        g.fillRect(0, y0 + j * bh, W, 1);
+-        const off = (j % 2) * 8;
+-        for (let i = 0; i < W / 16 + 1; i++) g.fillRect(i * 16 + off, y0 + j * bh, 1, bh);
++    T.cellLit[i] = L.lit ?? -1;                     // -1: the material's ratio
++    if (L.win) {
++      T.cellWin[i * 2] = 1 - (L.win[1] + L.win[3]); // bottom, in floor units
++      T.cellWin[i * 2 + 1] = 1 - L.win[1];          // top
++    }
++  });
++  return T;
++}
++
++const TRIM = '#dddad3';                  // painted per building by the shader
++const TRIM_M = [1, 0, 0], GLASS_M = [0, 1, 1], GLOSS_M = [0, 1, 0], WALL_M = [0, 0, 0];
++
++/**
++ * A pen over the three canvases of one cell: albedo, mask (trim, gloss,
++ * glass) and extra (coverage, sign). Coordinates are fractions of the cell
++ * (x right, y down); the gutter lies just outside 0..1.
++ */
++function makePen(ga, gm, gx, x0, y0, s, ground) {
++  const P = {
++    ga, gm, gx, x0, y0, s, ground,
++    X: (f) => x0 + f * s,
++    Y: (f) => y0 + f * s,
++    /** Fill a path built by `build(g)` in pixels on each canvas `o` asks for. */
++    path(build, o) {
++      if (o.c) {
++        ga.fillStyle = typeof o.c === 'function' ? o.c(ga) : o.c;
++        ga.beginPath(); build(ga); ga.fill();
+       }
+-      speckle(g, W, H, R, 500, 2, ['rgba(0,0,0,0.08)', 'rgba(255,255,255,0.05)']);
+-    } else if (L.stone) {
+-      g.fillStyle = L.mortar;
+-      for (let j = 0; j < 4; j++) {
+-        g.fillRect(0, y0 + j * 32, W, 1.5);
+-        for (let i = 0; i < 3; i++) g.fillRect(i * 48 + (j % 2) * 24, y0 + j * 32, 1.5, 32);
++      const m = o.m === undefined ? (o.c ? WALL_M : null) : o.m;
++      if (m) {
++        gm.fillStyle = rgb(m.map((v) => v * 255));
++        gm.beginPath(); build(gm); gm.fill();
+       }
+-    } else if (L.panel) {
+-      g.fillStyle = L.mortar;
+-      for (let i = 0; i < 8; i++) g.fillRect(i * 16, y0, 2, H);
+-    }
+-    // The window: frame, then glass. A = 1 on glass.
+-    const [wx, wy, ww, wh] = L.win;
+-    const x = wx * W, y = y0 + (1 - wy - wh) * H, w = ww * W, h = wh * H;
+-    g.fillStyle = L.frame;
+-    g.fillRect(x - 3, y - 3, w + 6, h + 6);
+-    g.fillStyle = L.glass;
+-    g.fillRect(x, y, w, h);
+-    if (!L.curtain) {
+-      g.fillStyle = L.frame;
+-      g.fillRect(x + w / 2 - 1.5, y, 3, h);
+-      g.fillRect(x, y + h * 0.38, w, 3);
+-      // Sill.
+-      g.fillStyle = 'rgba(230,225,215,0.9)';
+-      g.fillRect(x - 5, y + h + 3, w + 10, 4);
+-    } else {
+-      g.fillStyle = L.frame;
+-      g.fillRect(0, y0 + H - 4, W, 4);
+-      g.fillRect(0, y0, 3, H);
++      const cov = o.cov === undefined ? (ground && o.c && o.m !== false) : o.cov;
++      if (cov || o.sign) {
++        gx.fillStyle = rgb([cov ? 255 : 0, o.sign ? 255 : 0, 0]);
++        gx.beginPath(); build(gx); gx.fill();
++      }
++    },
++    rect(fx, fy, fw, fh, o) {
++      const x = P.X(fx), y = P.Y(fy), w = fw * s, h = fh * s;
++      P.path((g) => g.rect(x, y, w, h), o);
++    },
++    /** A rectangle with an arched top rising `rise` (fraction of the cell). */
++    arch(fx, fy, fw, fh, rise, o) {
++      if (!rise) { P.rect(fx, fy, fw, fh, o); return; }
++      P.path((g) => archPath(g, P.X(fx), P.Y(fy), fw * s, fh * s, rise * s), o);
++    },
++    /** The whole cell, gutter included. */
++    full(o) {
++      const p = ATLAS.pad / s;
++      P.rect(-p, -p, 1 + 2 * p, 1 + 2 * p, o);
++    },
++    clip(fx, fy, fw, fh, rise = 0) {
++      for (const g of [ga, gm, gx]) {
++        g.save();
++        g.beginPath();
++        if (rise) archPath(g, P.X(fx), P.Y(fy), fw * s, fh * s, rise * s);
++        else g.rect(P.X(fx), P.Y(fy), fw * s, fh * s);
++        g.clip();
++      }
++    },
++    unclip() { for (const g of [ga, gm, gx]) g.restore(); },
++  };
++  return P;
++}
++
++function archPath(g, x, y, w, h, rise) {
++  g.moveTo(x, y + h);
++  g.lineTo(x, y + rise);
++  g.ellipse(x + w / 2, y + rise, w / 2, rise, 0, Math.PI, 0);
++  g.lineTo(x + w, y + h);
++  g.closePath();
++}
++
++/** Glass: sky-lit at the top, dark below, a faint diagonal sheen. */
++const glassFill = (top, bottom) => (fx, fy, fw, fh, P) => (g) => {
++  const x = P.X(fx), y = P.Y(fy), h = fh * P.s;
++  const t = hexRgb(top), b = hexRgb(bottom), mix = (k) => rgb(t.map((v, i) => b[i] + (v - b[i]) * k));
++  const gr = g.createLinearGradient(x, y, x + fw * P.s * 0.25, y + h);
++  gr.addColorStop(0, top);
++  gr.addColorStop(0.42, mix(0.12));
++  gr.addColorStop(0.52, mix(0.3));
++  gr.addColorStop(0.6, mix(0.1));
++  gr.addColorStop(1, bottom);
++  return gr;
++};
++const GLASS = glassFill('#4d6072', '#161d25');
++
++/** A window: recess, frame, glass, bars, sill and lintel. */
++function windowAt(P, fx, fy, fw, fh, o = {}) {
++  const fr = o.frame ?? 0.022, rise = o.arch || 0;
++  P.arch(fx - 0.014, fy - 0.014, fw + 0.028, fh + 0.02, rise ? rise + 0.014 : 0, { c: o.reveal || '#221e1b' });
++  P.arch(fx, fy, fw, fh, rise, { c: TRIM, m: TRIM_M });
++  const gx = fx + fr, gy = fy + fr, gw = fw - 2 * fr, gh = fh - 2 * fr;
++  const grise = rise ? Math.max(0.01, rise - fr) : 0;
++  P.arch(gx, gy, gw, gh, grise, { c: (o.glass || GLASS)(gx, gy, gw, gh, P), m: GLASS_M });
++  P.clip(gx, gy, gw, gh, grise);
++  // The frame's shadow on the glass: the window is set back in the wall.
++  P.rect(gx, gy, gw, 0.022, { c: 'rgba(0,0,0,0.4)', m: false, cov: false });
++  P.rect(gx, gy, 0.012, gh, { c: 'rgba(0,0,0,0.25)', m: false, cov: false });
++  const bar = o.bar || 0.014;
++  if (o.mullion) P.rect(fx + fw / 2 - bar / 2, fy, bar, fh, { c: TRIM, m: TRIM_M });
++  if (o.transom) P.rect(fx, fy + fh * o.transom - bar / 2, fw, bar, { c: TRIM, m: TRIM_M });
++  if (o.grid) {
++    const [nc, nr] = o.grid, b = bar * 0.6;
++    for (let i = 1; i < nc; i++) P.rect(gx + (gw * i) / nc - b / 2, gy, b, gh, { c: TRIM, m: TRIM_M });
++    for (let j = 1; j < nr; j++) P.rect(gx, gy + (gh * j) / nr - b / 2, gw, b, { c: TRIM, m: TRIM_M });
++  }
++  P.unclip();
++  if (o.lintel) {
++    P.rect(fx - 0.035, fy - 0.058, fw + 0.07, 0.046, { c: o.lintel });
++    P.rect(fx - 0.035, fy - 0.014, fw + 0.07, 0.006, { c: 'rgba(0,0,0,0.25)', m: false, cov: false });
++  }
++  if (o.sill) {
++    P.rect(fx - 0.03, fy + fh, fw + 0.06, 0.03, { c: o.sill });
++    P.rect(fx - 0.03, fy + fh + 0.03, fw + 0.06, 0.014, { c: 'rgba(0,0,0,0.3)', m: false, cov: false });
++  }
++  // Rain has run off the sill corners for a century.
++  if (o.drip) {
++    for (const x of [fx - 0.02, fx + fw + 0.005]) {
++      const gr = P.ga.createLinearGradient(0, P.Y(fy + fh + 0.04), 0, P.Y(fy + fh + 0.04 + o.drip));
++      gr.addColorStop(0, 'rgba(25,20,16,0.28)');
++      gr.addColorStop(1, 'rgba(25,20,16,0)');
++      P.rect(x, fy + fh + 0.04, 0.018, o.drip, { c: gr, m: false, cov: false });
+     }
+-  });
+-  // Glass mask into the alpha channel, from the window rectangles.
+-  const img = g.getImageData(0, 0, W, H * rows);
+-  FACADES.forEach((name, row) => {
+-    const [wx, wy, ww, wh] = FACADE_LOOK[name].win;
+-    const x0 = Math.floor(wx * W), x1 = Math.ceil((wx + ww) * W);
+-    const ya = Math.floor(row * H + (1 - wy - wh) * H), yb = Math.ceil(row * H + (1 - wy) * H);
+-    for (let y = row * H; y < (row + 1) * H; y++) {
+-      for (let x = 0; x < W; x++) {
+-        const inside = x >= x0 && x < x1 && y >= ya && y < yb;
+-        img.data[(y * W + x) * 4 + 3] = inside ? 255 : 0;
++  }
++}
++
++/** Running-bond brick, one course per ~8 cm, per-brick colour. */
++function bricks(P, R, pal, mortar, courses = 40, across = 12, soot = 0) {
++  const s = P.s, ch = s / courses, bl = s / across, g = P.ga;
++  P.full({ c: mortar });
++  for (let k = -2; k < courses + 2; k++) {
++    const off = (k & 1) ? bl / 2 : 0;
++    for (let i = -2; i < across + 2; i++) {
++      let col = pal[Math.floor(R() * pal.length)];
++      const r = R();
++      const kk = r < 0.06 ? 0.72 : r > 0.95 ? 1.15 : 0.9 + R() * 0.2;
++      const c = hexRgb(col).map((v) => Math.min(255, v * kk * (1 - soot * R())));
++      g.fillStyle = rgb(c);
++      g.fillRect(P.x0 + i * bl + off + 0.6, P.y0 + k * ch + 0.6, bl - 1.2, ch - 1.2);
++    }
++  }
++}
++
++/** Ashlar: stone blocks, rock-faced (greystone) or smooth (cut limestone). */
++function ashlar(P, R, rows, cols, pal, joint, rock) {
++  const s = P.s, rh = s / rows, cw = s / cols, g = P.ga;
++  P.full({ c: joint });
++  for (let r = -1; r <= rows; r++) {
++    const off = (r & 1) ? cw / 2 : 0;
++    for (let c = -1; c <= cols; c++) {
++      const x = P.x0 + c * cw + off, y = P.y0 + r * rh;
++      g.fillStyle = jitter(pal[Math.floor(R() * pal.length)], R, 0.12);
++      g.fillRect(x + 1.2, y + 1.2, cw - 2.4, rh - 2.4);
++      if (rock) {
++        g.fillStyle = 'rgba(255,255,255,0.2)';
++        g.fillRect(x + 1.2, y + 1.2, cw - 2.4, 1.6);
++        g.fillStyle = 'rgba(0,0,0,0.25)';
++        g.fillRect(x + 1.2, y + rh - 3, cw - 2.4, 1.8);
++        g.fillRect(x + cw - 3, y + 1.2, 1.8, rh - 2.4);
++        for (let k = 0; k < 14; k++) {
++          g.fillStyle = R() < 0.5 ? 'rgba(0,0,0,0.06)' : 'rgba(255,255,255,0.06)';
++          const bx = x + 3 + R() * (cw - 8), by = y + 3 + R() * (rh - 8);
++          g.beginPath(); g.ellipse(bx, by, 1.5 + R() * 3.5, 1 + R() * 2, R() * 3, 0, Math.PI * 2); g.fill();
++        }
++      } else {
++        g.fillStyle = 'rgba(255,255,255,0.08)';
++        g.fillRect(x + 1.2, y + 1.2, cw - 2.4, 1);
+       }
+     }
++  }
++}
++
++const BRICKS = {
++  brick_red: [['#90402d', '#9c4833', '#7f3727', '#a6553c', '#88422f', '#94503a'], '#b4a794'],
++  brick_brown: [['#6f4532', '#7b4d38', '#5f3a2a', '#86563f', '#6a4230'], '#9a8d7c'],
++  brick_buff: [['#c4a77c', '#b99b6e', '#cfb28a', '#ae9066', '#c9ad84'], '#d2c5ad'],
++  brick_dark: [['#512f27', '#5c362c', '#482a20', '#653d31', '#56322a'], '#7c6f65'],
++  brick_old: [['#7e4532', '#6e3b2b', '#8c4d37', '#5d3427', '#955742', '#734030'], '#8c7c6b'],
++};
++
++// One painter per cell. L = FACADE_LOOK[name], [x, y, w, h] = L.win.
++const PAINT = {
++  brick_red(P, R, L) {
++    bricks(P, R, ...BRICKS.brick_red);
++    const [x, y, w, h] = L.win;
++    windowAt(P, x, y, w, h, { mullion: true, transom: 0.3, lintel: '#bdb6a6', sill: '#b8b1a2', drip: 0.16 });
++  },
++  brick_brown(P, R, L) {
++    bricks(P, R, ...BRICKS.brick_brown);
++    const [x, y, w, h] = L.win;
++    // Segmental arch of soldier bricks over the window.
++    P.arch(x - 0.05, y - 0.07, w + 0.1, h * 0.5, 0.1, { c: '#5b3627' });
++    for (let i = 0; i <= 12; i++) {
++      const a = Math.PI + (i / 12) * Math.PI, cx = x + w / 2, cy = y + 0.03;
++      P.rect(cx + Math.cos(a) * (w / 2 + 0.03) - 0.003, cy + Math.sin(a) * 0.08 - 0.02, 0.006, 0.04, { c: '#9a8d7c', m: false, cov: false });
++    }
++    windowAt(P, x, y, w, h, { arch: 0.06, mullion: true, transom: 0.28, sill: '#b3ab9b', drip: 0.14 });
++  },
++  brick_buff(P, R, L) {
++    bricks(P, R, ...BRICKS.brick_buff);
++    const [x, y, w, h] = L.win;
++    P.rect(x - 0.02, y - 0.03, w + 0.04, 0.02, { c: '#3a3733' });   // steel angle lintel
++    windowAt(P, x, y, w, h, { mullion: true, frame: 0.018, sill: '#c9c4b8', drip: 0.1,
++      glass: glassFill('#5a6c7c', '#1a222b') });
++  },
++  brick_dark(P, R, L) {
++    bricks(P, R, ...BRICKS.brick_dark);
++    const [x, y, w, h] = L.win;
++    // Soldier course lintel.
++    P.rect(x - 0.04, y - 0.075, w + 0.08, 0.06, { c: '#44261e' });
++    for (let i = 0; i < 16; i++) P.rect(x - 0.04 + (i * (w + 0.08)) / 16, y - 0.075, 0.004, 0.06, { c: '#7c6f65', m: false, cov: false });
++    windowAt(P, x, y, w, h, { grid: [3, 1], transom: 0.25, sill: '#a9a192', drip: 0.14 });
++  },
++  brick_old(P, R, L) {
++    bricks(P, R, ...BRICKS.brick_old, 40, 16, 0.25);
++    const [x, y, w, h] = L.win;
++    P.arch(x - 0.04, y - 0.06, w + 0.08, h * 0.4, 0.09, { c: '#5a3122' });
++    windowAt(P, x, y, w, h, { arch: 0.05, grid: [4, 5], bar: 0.012, sill: '#a39b8b', drip: 0.12,
++      glass: glassFill('#465661', '#141a20') });
++  },
++  stone(P, R, L) {
++    ashlar(P, R, 8, 3, ['#9c978c', '#a39e93', '#928d83', '#aba59a', '#8f8b84'], '#7f7a71', true);
++    const [x, y, w, h] = L.win;
++    P.rect(x - 0.06, y - 0.06, w + 0.12, h + 0.1, { c: '#b7b1a3' });         // smooth surround
++    P.rect(x + w / 2 - 0.035, y - 0.085, 0.07, 0.08, { c: '#c1bbad' });     // keystone
++    windowAt(P, x, y, w, h, { mullion: true, transom: 0.3, sill: '#c1bbad', drip: 0.12 });
++  },
++  stone_dark(P, R, L) {
++    ashlar(P, R, 8, 3, ['#6f6a62', '#77726a', '#67625b', '#7d776e'], '#58544d', true);
++    const [x, y, w, h] = L.win;
++    P.rect(x - 0.06, y - 0.06, w + 0.12, h + 0.1, { c: '#8c867c' });
++    P.rect(x + w / 2 - 0.035, y - 0.085, 0.07, 0.08, { c: '#958f84' });
++    windowAt(P, x, y, w, h, { mullion: true, transom: 0.3, sill: '#958f84', drip: 0.1 });
++  },
++  concrete(P, R, L) {
++    P.full({ c: '#9a978f' });
++    const [x, y, w, h] = L.win;
++    // Precast panel joints at the bay edges, and a spandrel band.
++    for (const e of [0, 1]) P.rect(e - 0.006, -0.1, 0.012, 1.2, { c: '#6f6c66' });
++    P.rect(-0.1, 0.9, 1.2, 0.012, { c: '#76736d' });
++    windowAt(P, x, y, w, h, { mullion: true, frame: 0.016, reveal: '#2b2a28', drip: 0.3 });
++  },
++  panel(P, R, L) { cladding(P, L, '#a2a7aa'); },
++  panel_dark(P, R, L) { cladding(P, L, '#50565a'); },
++  glass_blue(P, R, L) { curtain(P, L, '#5c83a6', '#1c3149', '#26384a'); },
++  glass_dark(P, R, L) { curtain(P, L, '#3a4751', '#0f1418', '#1a2026'); },
++  glass_green(P, R, L) { curtain(P, L, '#5e8a82', '#1b3330', '#243a36'); },
++  glass_silver(P, R, L) { curtain(P, L, '#a5b3be', '#48545e', '#606c75'); },
++  limestone(P, R, L) {
++    ashlar(P, R, 6, 2, ['#bcb29e', '#c4baa6', '#b1a793', '#cac1ae', '#b7ad97'], '#a59b87', false);
++    const [x, y, w, h] = L.win;
++    P.arch(x - 0.05, y - 0.05, w + 0.1, h + 0.08, w / 2 + 0.05, { c: '#cbc2af' });
++    P.rect(x + w / 2 - 0.03, y - 0.065, 0.06, 0.07, { c: '#d3cab8' });
++    windowAt(P, x, y, w, h, { arch: w / 2, grid: [2, 4], sill: '#cfc6b3', drip: 0.1, glass: glassFill('#475a6a', '#131a21') });
++  },
++  condo(P, R, L) {
++    P.full({ c: '#2a3640' });
++    // Floor-to-ceiling glass, mullions, then the slab edge and a glass railing.
++    P.rect(-0.1, 0, 1.2, 0.86, { c: glassFill('#557086', '#18222b')(0, 0, 1, 0.86, P), m: GLASS_M });
++    P.rect(-0.1, 0.02, 1.2, 0.04, { c: 'rgba(0,0,0,0.3)', m: false, cov: false });
++    for (const e of [0, 0.5, 1]) P.rect(e - 0.01, -0.1, 0.02, 1.2, { c: TRIM, m: TRIM_M });
++    P.rect(-0.1, 0.58, 1.2, 0.28, { c: 'rgba(170,196,204,0.35)', m: GLOSS_M });   // railing glass
++    P.rect(-0.1, 0.575, 1.2, 0.012, { c: TRIM, m: TRIM_M });
++    P.rect(-0.1, 0.86, 1.2, 0.14, { c: '#d6d4ce' });                                // slab edge
++    P.rect(-0.1, 0.86, 1.2, 0.012, { c: 'rgba(255,255,255,0.4)', m: false, cov: false });
++    P.rect(-0.1, 0.985, 1.2, 0.015, { c: 'rgba(0,0,0,0.3)', m: false, cov: false });
++  },
++
++  // --- ground floors: only what they paint covers the wall above ---
++  door_plex(P) {
++    P.rect(0.27, 0.13, 0.46, 0.05, { c: '#bdb6a6' });                   // lintel
++    P.rect(0.29, 0.17, 0.42, 0.83, { c: '#221e1b' });                   // recess
++    P.rect(0.305, 0.18, 0.39, 0.79, { c: TRIM, m: TRIM_M });            // frame
++    P.rect(0.33, 0.2, 0.34, 0.12, { c: GLASS(0.33, 0.2, 0.34, 0.12, P), m: GLASS_M });   // transom
++    P.rect(0.33, 0.34, 0.34, 0.63, { c: '#c9c5bc', m: TRIM_M });        // door, painted like the trim
++    P.rect(0.38, 0.39, 0.24, 0.2, { c: GLASS(0.38, 0.39, 0.24, 0.2, P), m: GLASS_M });
++    P.rect(0.38, 0.39, 0.24, 0.015, { c: 'rgba(0,0,0,0.35)', m: false });
++    for (const a of [0.64, 0.8]) P.rect(0.38, a, 0.24, 0.13, { c: 'rgba(0,0,0,0.12)', m: false });
++    P.rect(0.62, 0.64, 0.025, 0.025, { c: '#c9a64a', m: GLOSS_M });     // knob
++    P.rect(0.26, 0.955, 0.48, 0.045, { c: '#9d9a92' });                 // step
++  },
++  shop_brick(P) {
++    P.rect(-0.1, 0.06, 1.2, 0.035, { c: TRIM, m: TRIM_M });             // cornice
++    P.rect(-0.1, 0.095, 1.2, 0.12, { c: '#bdb9b0', m: TRIM_M });        // sign band
++    P.rect(-0.1, 0.2, 1.2, 0.015, { c: 'rgba(0,0,0,0.3)', m: false });
++    P.rect(-0.1, 0.215, 1.2, 0.785, { c: '#1f1c1a' });
++    P.rect(0.04, 0.24, 0.92, 0.58, { c: GLASS(0.04, 0.24, 0.92, 0.58, P), m: GLASS_M });
++    P.rect(0.04, 0.24, 0.92, 0.02, { c: 'rgba(0,0,0,0.4)', m: false });
++    P.rect(0.495, 0.24, 0.01, 0.58, { c: TRIM, m: TRIM_M });
++    for (const e of [-0.04, 0.96]) P.rect(e, 0.215, 0.08, 0.785, { c: TRIM, m: TRIM_M });   // pilasters
++    P.rect(0.04, 0.82, 0.92, 0.18, { c: '#aaa69e', m: TRIM_M });        // bulkhead
++    P.rect(0.08, 0.85, 0.36, 0.11, { c: 'rgba(0,0,0,0.15)', m: false });
++    P.rect(0.56, 0.85, 0.36, 0.11, { c: 'rgba(0,0,0,0.15)', m: false });
++  },
++  shop_modern(P) {
++    P.full({ c: '#1d1e20', m: TRIM_M });
++    P.rect(-0.1, 0.05, 1.2, 0.15, { c: '#141414' });                    // sign board
++    // Letters: lit at night.
++    let x = 0.1;
++    const R = mulberry(777);
++    while (x < 0.86) {
++      const w = 0.03 + R() * 0.05;
++      P.rect(x, 0.09, w, 0.075, { c: '#f4ead2', m: WALL_M, sign: 1 });
++      x += w + 0.02 + (R() < 0.2 ? 0.05 : 0);
++    }
++    P.rect(0.02, 0.22, 0.96, 0.78, { c: GLASS(0.02, 0.22, 0.96, 0.78, P), m: GLASS_M });
++    P.rect(0.02, 0.22, 0.96, 0.025, { c: 'rgba(0,0,0,0.4)', m: false });
++    P.rect(0.49, 0.22, 0.02, 0.78, { c: '#1d1e20', m: TRIM_M });
++  },
++  shop_stone(P, R) {
++    P.full({ c: '#c2b9a5' });
++    for (let j = 0; j < 6; j++) P.rect(-0.1, j / 6, 1.2, 0.006, { c: '#a59b87', m: false });
++    P.rect(-0.1, 0.02, 1.2, 0.03, { c: '#d6cdb9' });                    // cornice
++    P.rect(-0.1, 0.05, 1.2, 0.012, { c: 'rgba(0,0,0,0.3)', m: false });
++    P.rect(0.1, 0.18, 0.8, 0.72, { c: '#221e1b' });
++    P.rect(0.12, 0.2, 0.76, 0.68, { c: TRIM, m: TRIM_M });
++    P.rect(0.14, 0.22, 0.72, 0.12, { c: GLASS(0.14, 0.22, 0.72, 0.12, P), m: GLASS_M });
++    P.rect(0.14, 0.36, 0.72, 0.5, { c: GLASS(0.14, 0.36, 0.72, 0.5, P), m: GLASS_M });
++    P.rect(0.14, 0.36, 0.72, 0.02, { c: 'rgba(0,0,0,0.35)', m: false });
++    P.rect(0.08, 0.9, 0.84, 0.1, { c: '#b2a994' });
++  },
++  lobby(P) {
++    P.full({ c: glassFill('#6a8296', '#1d2a35')(0, 0, 1, 1, P), m: GLASS_M });
++    P.rect(-0.1, 0, 1.2, 0.07, { c: '#2a2c2e', m: TRIM_M });             // canopy
++    P.rect(-0.1, 0.07, 1.2, 0.03, { c: 'rgba(0,0,0,0.45)', m: false });
++    for (const e of [0, 1]) P.rect(e - 0.02, 0, 0.04, 1.1, { c: '#2a2c2e', m: TRIM_M });
++    P.rect(0.495, 0.07, 0.01, 0.93, { c: '#2a2c2e', m: TRIM_M });
++    P.rect(-0.1, 0.55, 1.2, 0.008, { c: '#2a2c2e', m: TRIM_M });
++  },
++  garage(P) {
++    P.rect(0.12, 0.26, 0.76, 0.74, { c: '#2a2826' });
++    P.rect(0.15, 0.3, 0.7, 0.7, { c: '#8f9396', m: GLOSS_M });
++    for (let j = 0; j < 14; j++) P.rect(0.15, 0.3 + j * 0.05, 0.7, 0.012, { c: 'rgba(0,0,0,0.25)', m: false });
++    const gr = P.ga.createLinearGradient(0, P.Y(0.8), 0, P.Y(1));
++    gr.addColorStop(0, 'rgba(30,26,22,0)');
++    gr.addColorStop(1, 'rgba(30,26,22,0.45)');
++    P.rect(0.15, 0.8, 0.7, 0.2, { c: gr, m: false });
++  },
++  door_stone(P) {
++    P.arch(0.28, 0.16, 0.44, 0.84, 0.22, { c: '#b9b2a2' });              // stone surround
++    P.arch(0.34, 0.24, 0.32, 0.76, 0.16, { c: '#221e1b' });
++    P.arch(0.355, 0.255, 0.29, 0.745, 0.145, { c: TRIM, m: TRIM_M });
++    P.arch(0.375, 0.275, 0.25, 0.14, 0.125, { c: GLASS(0.375, 0.275, 0.25, 0.14, P), m: GLASS_M });
++    P.rect(0.375, 0.43, 0.25, 0.53, { c: '#c9c5bc', m: TRIM_M });
++    P.rect(0.4, 0.47, 0.2, 0.2, { c: 'rgba(0,0,0,0.14)', m: false });
++    P.rect(0.4, 0.72, 0.2, 0.2, { c: 'rgba(0,0,0,0.14)', m: false });
++    P.rect(0.47, 0.13, 0.06, 0.08, { c: '#c6bfae' });                    // keystone
++    P.rect(0.26, 0.955, 0.48, 0.045, { c: '#a8a397' });
++  },
++  awning_green(P) { awning(P, '#1f5a3a'); },
++  awning_red(P) { awning(P, '#7a1f24'); },
++};
++
++/** Industrial cladding: vertical ribs, a band of high windows. */
++function cladding(P, L, base) {
++  P.full({ c: base });
++  const g = P.ga, ribs = 16;
++  for (let i = -1; i <= ribs; i++) {
++    const x = P.X(i / ribs);
++    g.fillStyle = 'rgba(255,255,255,0.16)';
++    g.fillRect(x, P.Y(-0.1), 1.5, P.s * 1.2);
++    g.fillStyle = 'rgba(0,0,0,0.22)';
++    g.fillRect(x + P.s / ribs / 2, P.Y(-0.1), 2, P.s * 1.2);
++  }
++  const [x, y, w, h] = L.win;
++  windowAt(P, x, y, w, h, { grid: [4, 1], frame: 0.015, reveal: '#2b2d2f' });
++  const gr = g.createLinearGradient(0, P.Y(0.75), 0, P.Y(1.05));
++  gr.addColorStop(0, 'rgba(40,34,26,0)');
++  gr.addColorStop(1, 'rgba(40,34,26,0.35)');
++  P.rect(-0.05, 0.75, 1.1, 0.3, { c: gr, m: false });
++}
++
++/** Curtain wall: mullions at the bay edges, vision glass, a spandrel band. */
++function curtain(P, L, top, bottom, spandrel) {
++  P.full({ c: spandrel, m: GLOSS_M });
++  const [x, y, w, h] = L.win;
++  P.rect(-0.1, y, 1.2, h, { c: glassFill(top, bottom)(0, y, 1, h, P), m: GLASS_M });
++  // Ceiling behind the glass: a darker line at the top of each floor.
++  P.rect(-0.1, y, 1.2, 0.05, { c: 'rgba(0,0,0,0.28)', m: false });
++  // Spandrel: a slightly different sheen from the vision glass.
++  P.rect(-0.1, y + h, 1.2, 1 - y - h + 0.1, { c: 'rgba(255,255,255,0.05)', m: false });
++  for (const e of [0, 1]) P.rect(e - 0.016, -0.1, 0.032, 1.2, { c: TRIM, m: TRIM_M });
++  P.rect(0.494, -0.1, 0.012, 1.2, { c: TRIM, m: TRIM_M });
++  for (const e of [0, 1]) P.rect(-0.1, e - 0.012, 1.2, 0.024, { c: TRIM, m: TRIM_M });
++  P.rect(-0.1, y + h, 1.2, 0.012, { c: TRIM, m: TRIM_M });
++}
++
++/** A shopfront under a striped awning, painted flat. */
++function awning(P, colour) {
++  P.rect(-0.1, 0.1, 1.2, 0.9, { c: '#1f1c1a' });
++  P.rect(0.06, 0.36, 0.88, 0.48, { c: GLASS(0.06, 0.36, 0.88, 0.48, P), m: GLASS_M });
++  P.rect(0.495, 0.36, 0.01, 0.48, { c: TRIM, m: TRIM_M });
++  P.rect(0.06, 0.84, 0.88, 0.16, { c: '#aaa69e', m: TRIM_M });
++  // The awning: stripes, a scalloped valance, and its shadow.
++  const stripes = 8;
++  for (let i = -1; i <= stripes; i++) {
++    P.rect(i / stripes, 0.1, 1 / stripes + 0.002, 0.22, { c: i & 1 ? '#e5dfcf' : colour });
++  }
++  for (let i = 0; i < stripes * 2; i++) {
++    const cx = (i + 0.5) / (stripes * 2);
++    P.path((g) => g.ellipse(P.X(cx), P.Y(0.32), P.s / (stripes * 4), P.s * 0.025, 0, 0, Math.PI), { c: colour });
++  }
++  P.rect(-0.1, 0.1, 1.2, 0.02, { c: 'rgba(0,0,0,0.3)', m: false });
++  const gr = P.ga.createLinearGradient(0, P.Y(0.34), 0, P.Y(0.5));
++  gr.addColorStop(0, 'rgba(0,0,0,0.55)');
++  gr.addColorStop(1, 'rgba(0,0,0,0)');
++  P.rect(-0.1, 0.34, 1.2, 0.16, { c: gr, m: false });
++}
++
++export function facadeAtlas(THREE) {
++  return once(THREE, 'facadeAtlas', () => {
++    const { size: S, cols, cell, pad } = ATLAS, inner = cell - 2 * pad;
++    const ca = canvas(S, S), cm = canvas(S, S), cx = canvas(S, S);
++    const ga = ctx2d(ca), gm = ctx2d(cm), gx = ctx2d(cx);
++    for (const g of [ga, gm, gx]) { g.fillStyle = '#000'; g.fillRect(0, 0, S, S); }
++    const R = mulberry(23);
++    FACADE_CELLS.forEach((name, i) => {
++      const col = i % cols, row = Math.floor(i / cols), ground = i >= FACADES.length;
++      const X0 = col * cell, Y0 = row * cell;
++      for (const g of [ga, gm, gx]) { g.save(); g.beginPath(); g.rect(X0, Y0, cell, cell); g.clip(); }
++      if (!ground) { gx.fillStyle = '#ff0000'; gx.fillRect(X0, Y0, cell, cell); }
++      const P = makePen(ga, gm, gx, X0 + pad, Y0 + pad, inner, ground);
++      PAINT[name](P, R, FACADE_LOOK[name]);
++      for (const g of [ga, gm, gx]) g.restore();
++    });
++    // Grain, and the two textures with their fourth channels.
++    const a = ga.getImageData(0, 0, S, S).data, m = gm.getImageData(0, 0, S, S).data, x = gx.getImageData(0, 0, S, S).data;
++    const map = new Uint8Array(S * S * 4), mask = new Uint8Array(S * S * 4);
++    for (let p = 0; p < map.length; p += 4) {
++      const k = 0.94 + 0.12 * R();
++      map[p] = Math.min(255, a[p] * k); map[p + 1] = Math.min(255, a[p + 1] * k); map[p + 2] = Math.min(255, a[p + 2] * k);
++      map[p + 3] = x[p];
++      mask[p] = m[p]; mask[p + 1] = m[p + 1]; mask[p + 2] = m[p + 2]; mask[p + 3] = x[p + 1];
++    }
++    const make = (data, srgb) => {
++      const t = new THREE.DataTexture(data, S, S, THREE.RGBAFormat);
++      t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
++      t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
++      t.magFilter = THREE.LinearFilter;
++      t.minFilter = THREE.LinearMipmapLinearFilter;
++      t.generateMipmaps = true;
++      t.anisotropy = 4;
++      t.needsUpdate = true;
++      return t;
++    };
++    const t = make(map, true);
++    t.userData.mask = make(mask, false);
++    t.userData.mask.userData.name = 'facadeMask';
++    t.userData.atlas = { ...ATLAS, cells: FACADE_CELLS };
++    return t;
+   });
+-  g.putImageData(img, 0, 0);
+-  const t = new THREE.CanvasTexture(c);
+-  t.colorSpace = THREE.SRGBColorSpace;
+-  t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+-  t.magFilter = THREE.LinearFilter;
+-  t.minFilter = THREE.LinearMipmapLinearFilter;
+-  t.generateMipmaps = true;
+-  t.premultiplyAlpha = false;
+-  return t;
+ }
+ 
+ /** Plain colour of each facade, for exports and far LODs. */
+@@ -343,12 +1422,3 @@ export function textPanel(THREE, lines, opts = {}) {
+   t.anisotropy = 4;
+   return t;
+ }
+-
+-function tex(THREE, c, metres) {
+-  const t = new THREE.CanvasTexture(c);
+-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+-  t.colorSpace = THREE.SRGBColorSpace;
+-  t.anisotropy = 8;
+-  t.userData.metres = metres;       // one repeat covers this many metres
+-  return t;
+-}
+diff --git a/mtl/tools/textures.mjs b/mtl/tools/textures.mjs
+new file mode 100644
+index 0000000..ee2a671
+--- /dev/null
++++ b/mtl/tools/textures.mjs
+@@ -0,0 +1,179 @@
++// The game's textures for Unity: the same generators as the page, run in
++// headless Chromium (they need a canvas), written as PNG, with a
++// materials.json that maps every material name to its files.
++//
++//   node mtl/tools/textures.mjs              → mtl/export/textures/
++//   node mtl/tools/textures.mjs --out DIR
++//
++// Also prints what each texture cost to make and its GPU memory. PNGs are
++// encoded here from the raw pixels: a canvas would lose the colour of every
++// pixel whose alpha is 0 (the facade atlas has some).
++
++import fs from 'node:fs/promises';
++import path from 'node:path';
++import zlib from 'node:zlib';
++import { fileURLToPath } from 'node:url';
++import { serve } from './lib/serve.mjs';
++import { loadPlaywright } from './lib/playwright.mjs';
++
++const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
++const args = process.argv.slice(2);
++const OUT = path.resolve(args.includes('--out') ? args[args.indexOf('--out') + 1] : path.join(ROOT, 'export', 'textures'));
++
++/** Runs in the page: builds the materials, returns their textures as raw RGBA. */
++async function collect() {
++  const THREE = await import('/vendor/three.module.min.js');
++  const T = await import('/src/world/textures.js');
++  const { createMaterials, materialTextures } = await import('/src/world/materials.js');
++  const t0 = performance.now();
++  const M = createMaterials(THREE);
++  const total = performance.now() - t0;
++
++  const files = new Map();                  // texture → file entry
++  const b64 = (u8) => {
++    let s = '';
++    for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
++    return btoa(s);
++  };
++  const file = (tex) => {
++    if (!tex) return null;
++    if (files.has(tex)) return files.get(tex).name;
++    const img = tex.image;
++    let data, w, h;
++    if (img.data) {
++      ({ width: w, height: h } = img);
++      data = new Uint8Array(img.data.buffer, img.data.byteOffset, img.data.byteLength);
++    } else {
++      w = img.width; h = img.height;
++      data = new Uint8Array(img.getContext('2d').getImageData(0, 0, w, h).data.buffer);
++    }
++    const name = (tex.userData.name || `texture_${files.size}`).replace(/[^a-zA-Z0-9_-]+/g, '_') + '.png';
++    const mips = tex.generateMipmaps !== false && tex.minFilter !== THREE.LinearFilter && tex.minFilter !== THREE.NearestFilter;
++    files.set(tex, {
++      name, w, h, data: b64(data), srgb: tex.colorSpace === THREE.SRGBColorSpace,
++      bytes: Math.round(w * h * 4 * (mips ? 4 / 3 : 1)),
++      metres: tex.userData.metres ? [tex.userData.metres, tex.userData.metresV || tex.userData.metres] : null,
++    });
++    return name;
++  };
++  const hex = (c) => '#' + c.getHexString();
++  const materials = {};
++  for (const m of Object.values(M)) {
++    if (!m || !m.isMaterial || materials[m.name]) continue;
++    const tx = materialTextures.get(m) || {};
++    const e = {
++      shader: m.isMeshStandardMaterial ? 'standard' : 'unlit',
++      color: hex(m.color),
++      colorLinear: m.color.toArray().map((v) => +v.toFixed(4)),
++    };
++    if (m.isMeshStandardMaterial) Object.assign(e, { roughness: m.roughness, metalness: m.metalness });
++    if (m.userData.flat) e.flat = m.userData.flat;
++    if (m.userData.metres) e.metres = m.userData.metres;
++    const textures = {};
++    for (const [k, t] of Object.entries({ albedo: tx.map, wet: tx.wet, mask: tx.mask, alpha: tx.alpha, bump: tx.bump, macro: tx.macro })) {
++      const f = file(t);
++      if (f) textures[k] = f;
++    }
++    if (Object.keys(textures).length) e.textures = textures;
++    if (m.isMeshBasicMaterial) {
++      e.emissive = true;
++      if (m.transparent) e.transparent = true;
++      if (m.blending === THREE.AdditiveBlending) e.additive = true;
++      if (m.opacity < 1) e.opacity = m.opacity;
++    }
++    if (m.vertexColors) e.vertexColors = true;
++    if (m.alphaTest) e.alphaTest = m.alphaTest;
++    materials[m.name] = e;
++  }
++  if (materials.Facades && T.facadeTables) {
++    const tb = T.facadeTables();
++    materials.Facades.atlas = {
++      ...T.ATLAS, cells: T.FACADE_CELLS, types: T.FACADES,
++      shops: T.FACADES.map((_, i) => [tb.shopA[i], tb.shopB[i], tb.shopC[i]]),
++      shopChance: Array.from(tb.shopP), door: Array.from(tb.door), doorChance: Array.from(tb.doorP),
++      office: Array.from(tb.office), trimSet: Array.from(tb.trimSet),
++      cellLit: Array.from(tb.cellLit), cellWindow: Array.from(tb.cellWin),
++    };
++  }
++  return { total, timings: T.textureTimings, materials, files: [...files.values()] };
++}
++
++// Minimal PNG encoder: RGBA, 8 bits, no filter.
++const CRC = new Int32Array(256).map((_, n) => {
++  let c = n;
++  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
++  return c;
++});
++function crc32(buf) {
++  let c = -1;
++  for (const b of buf) c = CRC[(c ^ b) & 255] ^ (c >>> 8);
++  return (c ^ -1) >>> 0;
++}
++function chunk(type, data) {
++  const out = Buffer.alloc(12 + data.length);
++  out.writeUInt32BE(data.length, 0);
++  out.write(type, 4, 'ascii');
++  data.copy(out, 8);
++  out.writeUInt32BE(crc32(out.subarray(4, 8 + data.length)), 8 + data.length);
++  return out;
++}
++function png(w, h, rgba, opaque) {
++  const ch = opaque ? 3 : 4;
++  const raw = Buffer.alloc((w * ch + 1) * h);
++  for (let y = 0; y < h; y++) {
++    const o = y * (w * ch + 1);
++    for (let x = 0; x < w; x++) {
++      const i = (y * w + x) * 4, j = o + 1 + x * ch;
++      raw[j] = rgba[i]; raw[j + 1] = rgba[i + 1]; raw[j + 2] = rgba[i + 2];
++      if (!opaque) raw[j + 3] = rgba[i + 3];
++    }
++  }
++  const ihdr = Buffer.alloc(13);
++  ihdr.writeUInt32BE(w, 0);
++  ihdr.writeUInt32BE(h, 4);
++  ihdr[8] = 8; ihdr[9] = opaque ? 2 : 6;
++  return Buffer.concat([
++    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
++    chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw, { level: 9 })), chunk('IEND', Buffer.alloc(0)),
++  ]);
++}
++
++async function main() {
++  const { server, url } = await serve(ROOT);
++  const { chromium } = await loadPlaywright();
++  const browser = await chromium.launch();
++  const page = await browser.newPage();
++  const errors = [];
++  page.on('pageerror', (e) => errors.push(String(e)));
++  await page.goto(`${url}/tools/`);                  // same origin, no game
++  const r = await page.evaluate(collect);
++  await browser.close();
++  server.close();
++  if (errors.length) throw new Error(errors.join('\n'));
++
++  await fs.mkdir(OUT, { recursive: true });
++  let bytes = 0;
++  console.log('texture'.padEnd(28), 'taille'.padEnd(11), 'ms'.padStart(5), 'Mo GPU'.padStart(8));
++  for (const f of r.files) {
++    const rgba = Buffer.from(f.data, 'base64');
++    let opaque = true;
++    for (let i = 3; i < rgba.length; i += 4) if (rgba[i] !== 255) { opaque = false; break; }
++    await fs.writeFile(path.join(OUT, f.name), png(f.w, f.h, rgba, opaque));
++    bytes += f.bytes;
++    const key = f.name.replace(/\.png$/, '');
++    const ms = Object.entries(r.timings).find(([k]) => k.replace(/[^a-zA-Z0-9_-]+/g, '_') === key)?.[1];
++    console.log(f.name.padEnd(28), `${f.w}×${f.h}`.padEnd(11), String(ms ?? '').padStart(5), (f.bytes / 1e6).toFixed(1).padStart(8));
++    delete f.data;
++  }
++  const doc = {
++    about: 'Matériaux MTL pour Unity : nom du matériau → textures et réglages. Voir unity/README.md, section Matériaux.',
++    generated: new Date().toISOString().slice(0, 10),
++    textures: Object.fromEntries(r.files.map((f) => [f.name, { size: [f.w, f.h], sRGB: f.srgb, metres: f.metres }])),
++    materials: r.materials,
++  };
++  await fs.writeFile(path.join(OUT, 'materials.json'), JSON.stringify(doc, null, 1));
++  console.log(`${r.files.length} textures, ${(bytes / 1e6).toFixed(1)} Mo en mémoire GPU (avec mipmaps), `
++    + `matériaux créés en ${Math.round(r.total)} ms → ${OUT}`);
++}
++
++main().catch((e) => { console.error(e); process.exit(1); });
+diff --git a/mtl/unity/README.md b/mtl/unity/README.md
+index 13585d2..1fbbb07 100644
+--- a/mtl/unity/README.md
++++ b/mtl/unity/README.md
+@@ -35,11 +35,72 @@ erreur ni avertissement. Extensions utilisées, toutes lues par glTFast :
+ 
+ ## Matériaux
+ 
+-Sans canvas, l'export en ligne de commande n'a pas de textures. Les matériaux
+-portent des noms stables (`Asphalt`, `Concrete`, `Glass`, `Lamp_Sodium`…) :
+-les remplacer par nom avec des matériaux URP/HDRP. Les façades utilisent un
+-shader maison dans le navigateur ; dans Unity, prévoir un matériau à atlas de
+-fenêtres, avec les attributs de sommet `_FACADE` et `_SEED` s'ils sont présents.
++Les matériaux portent des noms stables (`Asphalt`, `Concrete`, `Glass`,
++`Lamp_Sodium`…) : les remplacer par nom avec des matériaux URP/HDRP. On en
++ajoute, on n'en renomme ni n'en retire jamais.
++
++Sans canvas, l'export en ligne de commande (`export.mjs`) n'a pas de textures.
++Elles se récupèrent à part, générées par le même code que le jeu :
++
++```bash
++node mtl/tools/textures.mjs            # → mtl/export/textures/*.png + materials.json
++```
++
++L'outil ouvre Chromium sans écran, génère chaque texture, écrit un PNG par
++texture et un `materials.json` : pour chaque nom de matériau, ses fichiers, la
++taille d'une répétition en mètres, la couleur (sRGB et linéaire), la rugosité
++et le métal. Il affiche aussi le temps de génération et la mémoire GPU de
++chaque texture. `mtl/export/` n'est pas versionné.
++
++**Les UV sont en mètres** (sauf les façades) : dans Unity, régler le *tiling*
++à `1 / metres` (`metres` est `[largeur, hauteur]` d'une répétition), ou mieux,
++un shader qui échantillonne en coordonnées monde.
++
++| Matériau | Texture | Répétition | Notes |
++|---|---|---|---|
++| `Asphalt`, `Parking` | `asphalt.png` + `asphaltWet.png` | 10 m | `asphaltWet` : R rugosité à sec, G rugosité mouillée (flaques ≈ 0), B masque des flaques. La nuit, le jeu passe tout en mouillé : plus sombre, brillant, flaques miroir. |
++| `Sidewalk` | `sidewalk.png` | 3 m | dalles de 1,5 m, joints sciés |
++| `Grass`, `Yard` | `grass.png` | 6 m | |
++| `Terrain` | `terrainDetail.png` | 12 m | neutre (≈ 0,8), multiplie les couleurs de sommet ; couleur ×1,2 pour compenser |
++| `Plaza` | `pavers.png` | 4 m | |
++| `Concrete`, `Concrete_Dark` | `concrete_*.png` | 4 m | coffrages de 2 m, trous de tirants |
++| `Concrete_Barrier` | `barrier.png` | 4 m × 1 m | glissière New Jersey ; v = hauteur au-dessus du pied, crasse en bas, haut propre |
++| `Concrete_Pier` | `pier.png` | 4 m × 8 m | piliers de la 40 ; avec v = y − sommet du pilier, le haut de l'image est sous le chevêtre |
++| `Concrete_Deck` | `deck.png` | 4 m | dessous et rives du tablier |
++| `Tunnel` | `tiles.png` | 2 m | |
++| `Roof` | `roof.png` | 10 m | |
++| `Copper` | `copper.png` | 2 m | |
++| `Water` | `water.png` (relief) | 30 m | |
++| `Fence` | `chainlink.png` (alpha, canal G) | 1 m | |
++
++Les sols (`Asphalt`, `Sidewalk`, `Grass`, `Terrain`, `Roof`…) sont en plus
++modulés dans le navigateur par un bruit à grande échelle (`macroNoise.png`,
++échantillonné à 1/97 et 1/23 des coordonnées monde en mètres) pour que les
++répétitions ne se voient pas d'avion. À refaire dans Unity avec un
++*detail map* ou un nœud de Shader Graph.
++
++### Façades
++
++Un seul matériau, `Facades`, pour tous les bâtiments : un atlas de 5 × 5
++cellules de 204 px (dont 8 px de marge), 1024². Chaque cellule est une travée
++d'un étage ; les UV des murs comptent les travées en u et les étages en v.
++Cellules 0 à 15 : les types de façade (attribut de sommet `facade`, dans
++l'ordre de `materials.json` → `Facades.atlas.types`). Cellules 16 à 24 : rez-de-chaussée
++(vitrines, portes, hall), posés par-dessus le mur du type à l'étage 0.
++
++- `facadeAtlas.png` : RVB albédo (sRGB), A = couverture (cellules de
++  rez-de-chaussée : où elles recouvrent le mur).
++- `facadeMask.png` (linéaire) : R = boiserie (teintée par bâtiment), G = brillant
++  (vitre, allège), B = vitre (s'allume la nuit), A = enseigne (lumineuse la nuit).
++- La ligne 0 de l'image est la ligne du haut ; la cellule `i` est en colonne
++  `i % 5`, ligne `floor(i / 5)`.
++- Par bâtiment (attribut `seed`) : luminosité et teinte des murs, couleur des
++  boiseries (palette colorée pour le résidentiel, neutre pour le reste), vitrine
++  ou non au rez-de-chaussée. Par fenêtre : allumée ou non, store baissé ou non.
++  Les tables sont dans `materials.json` → `Facades.atlas` (cellules de vitrine
++  par type et leur probabilité, portes, éclairage par étage des bureaux, hauteur
++  des fenêtres pour les stores). Le shader du jeu (`src/world/materials.js`,
++  `facadeMaterial`) sert de référence pour un Shader Graph.
+ 
+ ## Collisions
+ 
+-- 
+2.43.0
+

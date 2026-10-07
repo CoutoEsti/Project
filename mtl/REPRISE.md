@@ -1,0 +1,194 @@
+# Reprise — état de MTL au 28 septembre 2026
+
+Pour reprendre sans contexte. Lire d'abord `CLAUDE.md` (racine), puis
+`mtl/README.md` (architecture, contrôles, limites) et `mtl/unity/README.md`.
+
+## Le projet
+
+`mtl/` : jeu de course dans la **vraie** Montréal (OpenStreetMap via Overture,
+relief Terrarium), three.js, sans build ni npm. **Il sera porté sur Unity** :
+tout ce qu'on crée doit rester exportable — logique de carte pure dans
+`src/map/` (portable en C#), maillages glTF par zone, noms de matériaux
+stables, `map.json` pour la logique de jeu.
+
+```bash
+cd mtl && python3 -m http.server 8080     # jouer
+node mtl/tools/check.mjs                  # 18 contrôles, ~4 min — doit passer avant de commiter
+node mtl/tools/shots.mjs --day            # captures (SwiftShader, lent)
+node mtl/tools/export.mjs                 # export Unity
+node mtl/tools/bouts.mjs                  # bouts de route ouverts, ~30 s
+```
+
+## Ce que l'utilisateur a demandé (session du 28 septembre)
+
+1. La 40 surélevée (piliers et murs en béton, muret central en blocs de béton)
+   ne doit plus « creuser » les routes qu'elle croise.
+2. Un agent en parallèle pour les textures.
+3. Penser Unity en permanence.
+4. Une ville vibrante, façon *Marvel's Spider-Man*, fidèle aux vraies rues et
+   quartiers de Montréal.
+
+## Ce qui a été fait
+
+**Attention à l'historique.** Les commits du 24 au 26 septembre (`d2c3854` →
+`d2c2316`) avaient déjà réglé l'essentiel du point 1 — hauteurs déduites des
+croisements, tranchée Décarie, viaduc continu de la Métropolitaine, sol qui ne
+s'effondre plus sous les routes (`terrain.frozen()`), repères hors des rues,
+contrôles et export à jour. La session du 28 est partie d'un clone qui ne les
+avait pas, a refait une bonne part du même travail en parallèle, puis a
+constaté que la version existante était meilleure (15/15 contrôles, 10
+chevauchements contre 50) et l'a gardée. N'en a été porté que ce qui manquait :
+
+- **Muret central et tablier unique de la 40** (`map/structures.js` :
+  `twinOf`, genres `twin` / `twin-gap` ; `world/roads.js` : dalles
+  `medians`). Avant, là où les deux chaussées se chevauchaient, il n'y avait
+  aucun muret : on pouvait passer en sens inverse. Aujourd'hui : 6,9 km de
+  muret New Jersey central sur la 40, 1 km de dalle entre chaussées écartées.
+- **Portiques de sortie verts générés** (`map/exits.js`, `world/signs.js`
+  accepte un vecteur `dir`) : 23 dans la zone anneau (« Sortie — Boul.
+  Pie-IX »…), textures réduites à 512 × 200 pour le téléphone.
+- **Contrôle « les rues passent sous la 40 »** dans `tools/check.mjs` : chaque
+  rue nommée qui croise le viaduc est parcourue 60 m de chaque côté ; aucun
+  choc, au moins 6,8 m sous le tablier. **16/16 contrôles passent.**
+
+## L'agent textures — travail NON fusionné
+
+Son commit est sauvegardé en patch : `mtl/docs/reprise/textures-agent.patch`
+(fait sur l'ancienne base `729046e`). Entre-temps, `d2c2316` a refait de son
+côté asphalte, trottoirs, fenêtres et corrigé les façades noires (masque de
+vitres inversé dans l'alpha). Appliquer le patch donne 12 conflits dans
+`textures.js`, `materials.js` et `README.md` : deux réécritures du même
+shader de façades. Ce que le patch apporte et qui manque :
+
+- matériaux béton de la 40 : `Concrete_Barrier` (4 × 1 m, crasse en bas),
+  `Concrete_Pier` (4 × 8 m, coulures sous le chevêtre), `Concrete_Deck`
+  (dessous du tablier, efflorescence) ;
+- `tools/textures.mjs` : génère chaque texture dans Chromium et écrit des PNG +
+  `materials.json` dans `mtl/export/textures/` — **indispensable pour Unity**,
+  qui ne reçoit aujourd'hui aucune texture de l'export en ligne de commande ;
+- atlas de façades 5 × 5 avec rez-de-chaussée (vitrines, portes de plex,
+  auvents), types `limestone` et `condo`, boiseries colorées au Plateau,
+  varyings `flat` contre un scintillement ; flaques d'asphalte la nuit.
+
+Méthode conseillée : ne pas appliquer le patch en bloc. Partir du code actuel
+et y reporter une à une les fonctions utiles (`git apply --3way` pour voir,
+puis à la main), en premier `textures.mjs` et les trois bétons.
+
+## À faire, dans l'ordre
+
+1. **Reporter l'agent textures** (voir ci-dessus), puis brancher les bétons
+   dans `world/roads.js` : glissières `jersey`/`median` → `Concrete_Barrier`,
+   piliers → `Concrete_Pier`, `Dessous_tabliers` et rives → `Concrete_Deck`.
+   Vérifier par captures de jour et de nuit sous la 40.
+2. **Ville vivante** (demande Spider-Man, rien de fait encore côté contenu) :
+   trafic et voitures garées (instanciés, chargés à la demande), piétons,
+   escaliers extérieurs des plex et corniches en géométrie, enseignes. Budget
+   `CLAUDE.md` : ~1500 appels de rendu, 8-10 M triangles, fluide sur iPhone.
+3. **Voies ferrées** absentes des données : les ajouter à
+   `tools/extract.py` (Overture `rail`) ; les ponts routiers au-dessus
+   redeviendraient de vrais ponts.
+4. **Poids de l'export Unity** : ~385 Mo en tout (bâtiments par quartier
+   surtout) ; budget 150 Mo chargé à la demande. Simplifier / instancier.
+5. `check.mjs` signale encore, sans échouer : 41 croisements juste sous le
+   gabarit, 10 chevauchements, 133 routes ni au niveau ni au-dessus d'une rue
+   (surtout Turcot et l'échangeur Décarie). À faire baisser. Le pont Victoria
+   « perd » la voiture vers (1267, −3740) : défaut existant, à regarder.
+6. 10 bouts de route arrivent encore sur une rue avec plus de 3 m d'écart
+   (contrôle « les routes se posent sur les rues », 54 au départ) : des
+   bretelles d'échangeur (l'Acadie, Décarie, Turcot) laissées en l'air parce
+   qu'une autoroute les croise juste avant. Il faudrait les faire descendre
+   sous l'autoroute avec assez de hauteur, ou les raccorder à une autre route.
+7. ~~Bretelles qui arrivent sur un boulevard~~ : fait (`streetLandings` dans
+   `map/junctions.js`). Reste un petit débord quand la bretelle arrive pile sur
+   un coin de deux rues (ex. r271, Décarie / Édouard-Montpetit) : elle n'est
+   découpée que contre la plus proche.
+8. **Nombre de voies réel — essayé puis retiré (`b78a074`, annulé par
+   `9c93eab`).** `tools/voies.mjs` appariait les voies OSM aux routes de
+   `rues.json` par la géométrie seule ; dans les échangeurs, bretelles et
+   chaussées sont parallèles et collées, et les valeurs se croisaient (r888,
+   bretelle, à 4 voies et 17,9 m ; r1581, la 15, à 2 voies pendant que sa
+   bretelle r1585 en prenait 3). `pinJunctions` choisissant la route
+   principale d'après largeur et distance, une bretelle trop large captait
+   les bouts des autres (r887 raccordée à r888 au lieu de r508) : 25 bouts de
+   bretelle de plus restaient ouverts. Pour y revenir : apparier aussi sur le
+   nom, la référence et le sens, borner une bretelle à 2 voies et à la largeur
+   de sa chaussée, et vérifier avec le compte de bouts ouverts avant/après.
+   Le script et `data/voies.json` sont dans l'historique (`b78a074`).
+10. Pied de r1054 (échangeur Décarie/40, vers (−3413, 6572)) : trou dans le
+   sol et bouts de murets/clôtures au pied de la bretelle. La bretelle est
+   au-dessus du sol ; le trou vient d'une route voisine en tranchée.
+9. Fourche r1147 (échangeur Décarie/40) : pente de 8,9 % juste après le nez
+   (limite 7,9 %), le seul avertissement ajouté par le raccord des fourches.
+
+## Zones dessinées (29 septembre)
+
+Une zone peut être un polygone : `zones.html` (outil de dessin, `src/zones-ui.js`),
+`?forme=` dans l'adresse, `map/zones.js` (`makeZone`, encodage), `map/clip.js`
+(coupe des rues et surfaces), mur de bord dans `map/collide.js`, décor dans
+`map/backdrop.js` + `world/backdrop.js`. Voir `README.md`, « Dessiner sa propre zone ».
+
+## Raccords et chevauchements (2 octobre)
+
+Mesuré sur la zone anneau, sondes d'un mètre sur toutes les routes et rues :
+
+| | avant | après |
+|---|---|---|
+| route posée sur un trottoir | 2 560 m² | ~50 m² |
+| route posée sur une rue | 412 m² | ~40 m² |
+| trottoir sous/sur la chaussée d'une autre rue | 476 000 m² | ~61 000 m² |
+| bouts de route partiellement ouverts | 86 | 65 |
+| trous dans les rues | 3 691 m² | ~3 950 m² |
+
+- `world/streets.js` : rues, bordures et trottoirs cèdent sous une route
+  dessinée au même niveau (`layout.roadCover`, bâti par `world/roads.js`,
+  d'où les routes maillées avant les rues) et aux chaussées des rues qu'ils
+  croisent ; virages serrés arrondis au lieu d'un onglet.
+- `map/layout.js` `findJoints` : coins comblés entre tronçons bout à bout ;
+  `world/roads.js` ne rogne plus une bretelle sans raccord latéral, il la
+  passe 3 cm sous la route principale.
+- Coût : +0,4 M triangles de trottoirs (1,45 M), ~+3 s pour les rues à la
+  construction (node). À surveiller sur téléphone.
+- Reste : 65 bouts ouverts, surtout Turcot et bretelles en cul-de-sac. (Ce 65
+  venait d'un script jamais commité ; voir la section suivante.)
+- ~~Tête de pont sur l'île Sainte-Hélène~~ : fait (2 octobre). Ce n'était pas
+  Jacques-Cartier mais le **Pont de la Concorde** au-dessus du chemin
+  Macdonald, vers (2325, −2345). Le pont (rue sur pont, couche 1) finit au-dessus
+  de l'eau, sur l'avenue Pierre-Dupuy ; `profile()` (`map/real.js`) le posait
+  là « au sol », c'est-à-dire sur la rivière, et prenait ce bout pour une
+  culée : tout le tablier descendait vers l'eau et passait 0,8 à 1,2 m sous
+  le chemin Macdonald. Un bout au-dessus de l'eau ne se pose plus et n'est
+  plus une culée ; le tablier passe à 10 m au-dessus du chemin. Mesure
+  (sondes d'un mètre en travers de chaque route, écart route/relief entre
+  0,6 et 5 m là où une rue est dessous, seuil `ROAD_OVER` de
+  `world/streets.js`) : 6 paires route × rue, 109 sondes → 0 sur l'île.
+  `check.mjs` : 139 → 133 crossing, 41 → 39 clearance, 12 → 11 grade.
+
+## Bouts ouverts recomptés (2 octobre, soir)
+
+`tools/bouts.mjs` remplace le script perdu : 95 bouts sur la base `746f233`,
+87 après `meetLiftedStreets` (`map/real.js`), qui reprofile une bretelle
+finissant au milieu d'un tronçon de rue surélevé une fois la rue connue.
+Liste bout par bout, cause et verdict : `docs/bouts-ouverts.md` (35 fins
+légitimes, 4 coins sur le gazon, 48 défauts). Les gros restes :
+
+- **Tête du pont Jacques-Cartier** : une seule parabole de la première
+  travée sur l'eau à la dernière met le sommet du pont sur l'île, 30 m
+  au-dessus des bretelles. Une parabole par plan d'eau les raccorde, mais
+  une bretelle croise alors le tablier au même niveau (choc dans
+  `check.mjs`). Décider de la hauteur du pont sur l'île avant d'y revenir.
+- **Turcot** : Saint-Jacques surélevée sur 630 m, qui finit 17,7 m au-dessus
+  de sa rue (relief de la falaise à vérifier) ; Upper Lachine coincée entre
+  la 15 et trois bretelles ; r511 23 m sous Saint-Jacques.
+- Les 9 bretelles laissées en l'air sous une autoroute (point 6 plus haut).
+
+Avec la Concorde et `meetLiftedStreets` ensemble (7 octobre) : toujours 87
+bouts ; `check.mjs` 18/18, à revoir 11 grade, 41 clearance, 11 overlap,
+130 crossing.
+
+## Git
+
+`CLAUDE.md` dit de travailler sur `main`. Le travail de `mtl/` a vécu sur
+`claude/funny-keller-cvo4kz` jusqu'au 7 octobre, où il a été fusionné dans
+`main` (commit de fusion, pas de force-push). Partir de `main`. **Faire
+`git fetch` avant de commencer** : c'est faute de l'avoir fait que la session
+du 28 a refait du travail existant.
