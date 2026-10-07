@@ -147,9 +147,19 @@ Mesuré sur la zone anneau, sondes d'un mètre sur toutes les routes et rues :
   passe 3 cm sous la route principale.
 - Coût : +0,4 M triangles de trottoirs (1,45 M), ~+3 s pour les rues à la
   construction (node). À surveiller sur téléphone.
-- Reste : tête du pont Jacques-Cartier (île Sainte-Hélène), rues et routes
-  au niveau du sol qui se croisent avec plus de 60 cm d'écart de hauteur ;
-  65 bouts ouverts, surtout Turcot et bretelles en cul-de-sac.
+- Reste : 65 bouts ouverts, surtout Turcot et bretelles en cul-de-sac.
+- ~~Tête de pont sur l'île Sainte-Hélène~~ : fait (2 octobre). Ce n'était pas
+  Jacques-Cartier mais le **Pont de la Concorde** au-dessus du chemin
+  Macdonald, vers (2325, −2345). Le pont (rue sur pont, couche 1) finit au-dessus
+  de l'eau, sur l'avenue Pierre-Dupuy ; `profile()` (`map/real.js`) le posait
+  là « au sol », c'est-à-dire sur la rivière, et prenait ce bout pour une
+  culée : tout le tablier descendait vers l'eau et passait 0,8 à 1,2 m sous
+  le chemin Macdonald. Un bout au-dessus de l'eau ne se pose plus et n'est
+  plus une culée ; le tablier passe à 10 m au-dessus du chemin. Mesure
+  (sondes d'un mètre en travers de chaque route, écart route/relief entre
+  0,6 et 5 m là où une rue est dessous, seuil `ROAD_OVER` de
+  `world/streets.js`) : 6 paires route × rue, 109 sondes → 0 sur l'île.
+  `check.mjs` : 139 → 133 crossing, 41 → 39 clearance, 12 → 11 grade.
 
 ## Git
 
