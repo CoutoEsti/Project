@@ -124,6 +124,40 @@ export function compile(map) {
       }
     }
   }
+  // Where a ramp comes down onto a street (map/junctions.js streetLandings),
+  // its deck stops at the street's edge and the street carries it the rest of
+  // the way: no trench may open inside that street, however shallow the
+  // ramp's foot. Outside the street the ramp is drawn as ever.
+  const landings = [];
+  for (const r of roads) {
+    if (r.loop) continue;
+    const S = r.samples;
+    for (const end of ['start', 'end']) {
+      if ((r.junctions || []).some((j) => j.end === end)) continue;
+      const k0 = end === 'start' ? 0 : S.length - 1, dir = end === 'start' ? 1 : -1;
+      const run = [], on = new Set();
+      for (let k = k0; k >= 0 && k < S.length; k += dir) {
+        const p = S[k];
+        if (Math.abs(p.y - p.gs) > 1) break;
+        const here = streetsAt(p.x, p.n, 0, tmp).filter((st) => st.cls !== 'plaza');
+        if (!here.length) break;
+        for (const st of here) on.add(st);
+        run.push([p.x, p.n]);
+      }
+      if (!on.size) continue;
+      if (run.length === 1) run.push([run[0][0] + S[k0].tx * dir, run[0][1] + S[k0].tn * dir]);
+      try {
+        const local = G.bufferPolyline(run, r.half + 1, r.half + 1);
+        // Only the stretch of each street near the landing: buffering whole
+        // streets costs more than all the rest of the trenches.
+        const bb = G.ringBBox(run), pad = r.half + 1;
+        const foot = G.unionAll([...on].flatMap((st) => nearRuns(st.path, bb.x0 - pad - st.half, bb.n0 - pad - st.half, bb.x1 + pad + st.half, bb.n1 + pad + st.half)
+          .map((pts) => G.bufferPolyline(pts, st.half, 0))));
+        const part = G.pc.intersection(local, foot);
+        if (part.length) landings.push(part);
+      } catch (e) { /* the trench stays as it was */ }
+    }
+  }
   const sunken = [], tunnels = [];
   // Under a street, a trench opens no wider than its road: the half metre left
   // around it elsewhere, so the ground stops short of the walls, would be a
@@ -134,6 +168,7 @@ export function compile(map) {
     tunnels.push(...runs(r, (p) => p.tunnel, () => 0.5));
   }
   let holes = G.unionAll(sunken);
+  if (landings.length && holes.length) holes = G.pc.difference(holes, ...landings);
   if (coverers.size && holes.length) {
     holes = G.pc.difference(holes, ...[...coverers].map((st) => G.bufferPolyline(st.path, st.half, 0)));
   }
@@ -775,6 +810,20 @@ function nearestIndex(samples, [x, n]) {
  * half-width plus `margin`. Runs are simplified before buffering so a 9 km
  * carriageway costs a few hundred quads, not five thousand.
  */
+/** The runs of a polyline's segments that touch a box, each as a polyline. */
+function nearRuns(path, x0, n0, x1, n1) {
+  const out = [];
+  let cur = null;
+  for (let i = 0; i + 1 < path.length; i++) {
+    const a = path[i], b = path[i + 1];
+    const hit = Math.max(a[0], b[0]) >= x0 && Math.min(a[0], b[0]) <= x1 && Math.max(a[1], b[1]) >= n0 && Math.min(a[1], b[1]) <= n1;
+    if (!hit) { cur = null; continue; }
+    if (!cur) out.push(cur = [a]);
+    cur.push(b);
+  }
+  return out;
+}
+
 /**
  * Footprints of the stretches of a road where `test` holds, each widened by
  * margin(sample) beyond the road's half width. Where the margin changes, the

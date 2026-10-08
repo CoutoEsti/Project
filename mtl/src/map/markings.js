@@ -2,6 +2,9 @@
 // colour and an optional dash. Every line stops short of an intersection —
 // the rule that keeps two sets of markings from ever painting over each
 // other — and none is drawn where a road already lies over the street.
+// A lifted piece of a street (a bridge, an underpass) is painted like the
+// street and its lines meet the street's end to end: the paint goes on across
+// the joint as if nothing changed.
 //
 // Québec conventions: yellow separates opposite directions, white separates
 // lanes going the same way, dashed means you may cross.
@@ -31,14 +34,17 @@ export function streetMarkings(layout, structures) {
       // Walk the centreline, splitting it into runs that are clear of other
       // streets, roads, holes and water.
       const clear = [];
-      for (let d = 0; d <= len; d += STEP) {
+      const along = [];
+      for (let d = 0; d < len - 0.25; d += STEP) along.push(d);
+      along.push(len);
+      for (const d of along) {
         const x = a[0] + tx * d, n = a[1] + tn * d;
         let ok = true;
         for (const o of layout.streetsAt(x, n, STOP * s, tmp)) {
           if (o === st || o.cls === 'alley') continue;
           if (o.name !== st.name || (o.path !== st.path && crosses(o, st))) { ok = false; break; }
         }
-        if (ok) ok = index.surfacesAt(x, n, 1).every((q) => q.covered || q.y < T.height(x, n) - 1.5);
+        if (ok) ok = index.surfacesAt(x, n, 1).every((q) => q.covered || q.y < T.height(x, n) - 1.5 || continues(q.road, st));
         if (ok) ok = ground.kindAt(x, n) === 'terrain';
         clear.push(ok ? d : null);
       }
@@ -67,6 +73,11 @@ export function streetMarkings(layout, structures) {
     }
   }
   return out;
+}
+
+/** A lifted piece of this very street, carrying on from where it ends. */
+function continues(r, st) {
+  return !!r.street && r.name === st.name && r.width === st.width && r.oneway === st.oneway;
 }
 
 function crosses(o, st) {
@@ -120,8 +131,11 @@ function linesFor(st, w, h) {
 export function roadMarkings(layout) {
   const out = [];
   const joins = layout.joins || [];
+  const s = layout.map.scale;
   for (const r of layout.roads) {
-    const lines = roadLines(r);
+    const lines = r.street && r.streetCls
+      ? streetLines({ cls: r.streetCls, oneway: r.oneway, width: r.width, half: r.half }, s)
+      : roadLines(r);
     const S = r.samples;
     // Skip the junction overlaps of mountain roads.
     let i0 = 0, i1 = S.length - 1;
@@ -143,7 +157,7 @@ export function roadMarkings(layout) {
       const open = (p) => edge && mouths.some(([side, a, b]) => side === edge && p.s >= a && p.s <= b);
       let pts = [], dashed = [];
       const flush = () => {
-        if (pts.length >= 2) out.push({ pts, w: L.w || W, color: L.color, dash: L.dash || null, road: r.id });
+        if (pts.length >= 2) out.push({ pts, w: L.w || W, color: L.color, dash: L.dash ? L.dash.map((v) => v * (r.street ? s : 1)) : null, road: r.id });
         if (dashed.length >= 2) out.push({ pts: dashed, w: L.w || W, color: L.color, dash: DASH_JOIN, road: r.id });
         pts = []; dashed = [];
       };

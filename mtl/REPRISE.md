@@ -283,3 +283,25 @@ deux chaussées n'ont pas le même profil sous la voie ferrée), Avenue Girouard
 (une voie parallèle au niveau du sol déborde d'un mètre sur la trémie),
 Taschereau, Gosford, des Lacquiers. Chaque cas demande de corriger le profil,
 pas le sol.
+
+## Raccords rue ↔ pont et pied des bretelles (8 octobre)
+
+- **Peinture continue.** Un bout de rue surélevé ou abaissé (`s…`, `street:
+  true`) se peignait comme une route de montagne (double jaune, lignes de rive
+  blanches) et la peinture de la rue s'arrêtait quelques mètres avant lui. Il
+  porte maintenant `streetCls` (la classe de sa rue) et `markings.js` le peint
+  avec les lignes de sa rue ; les lignes de la rue vont jusqu'au bout de leur
+  tracé quand c'est son propre bout surélevé qui suit (`continues`). Résultat :
+  voies et ligne centrale continues à travers le raccord (Sherbrooke,
+  Charlevoix, René-Lévesque).
+- **Pied des bretelles.** Une bretelle qui descend sur une rue
+  (`streetLandings`) s'arrête au bord de la rue, mais sa tranchée (même à
+  20 cm sous le sol) perçait la rue : un trou sous les roues au pied de la
+  bretelle. `layout.js` retire de la tranchée la partie dans la rue (rue
+  prise localement, `nearRuns`). Cœur : 42 → 39 trous ; +100 ms de compilation.
+- Essayé sans effet et retiré : garder les tuiles d'asphalte de rue à moitié
+  sous une route (`streets.js`). Les taches grises vues à Sherbrooke/Saint-Denis
+  sont le terre-plein entre deux chaussées OSM, couleur « lot ».
+- Outil de diagnostic : un lancer de rayons vertical dans la page
+  (`window.__mtl.scene`) qui imprime une carte de lettres par maillage touché ;
+  c'est ce qui a montré le vide au pied de la bretelle de la Montagne.

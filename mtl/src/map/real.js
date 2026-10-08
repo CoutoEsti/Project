@@ -173,6 +173,8 @@ export function buildMap(src, settings) {
           pts: sub.pts, levels: sub.edges.map(level), flags: sub.edges.map(flag), wet: sub.edges.map(wet),
           priority: PRIORITY[r.cls] || 0,
           street: true,
+          // Painted like the street it continues (map/markings.js).
+          streetCls: streetClass(r, width / s),
         });
         cursor = b;
       });
