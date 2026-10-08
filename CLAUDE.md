@@ -30,8 +30,10 @@ rester hermétique ; `--live` teste le chemin réseau.
 - **Site statique.** Aucun serveur, aucun compte, aucune clé d'API. Ce qui persiste
   passe par `core/store.js` ou par les paramètres d'URL. Refuser toute idée qui
   demande un backend, ou la ramener à une version sans serveur.
-- **Rien à télécharger en plus.** Moteur audio et musique sont synthétisés, les
-  textures générées. Ne pas ajouter de fichier son, ni de dépendance npm.
+- **Rien à télécharger en plus.** Musique et textures sont générées. Seule
+  exception : les sons moteur enregistrés de `mtl/sons/` (WAV, chargés à la
+  demande quand on choisit la voiture, repli silencieux sur la synthèse). Pas
+  d'autre fichier son, ni de dépendance npm.
 - **Le sol d'une tuile est un seul canvas peint** (`world/ground.js`) : routes,
   trottoirs, gazon, eau. Ne jamais poser un maillage par-dessus la chaussée —
   z-fighting immédiat au milieu des intersections.

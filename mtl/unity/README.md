@@ -22,7 +22,9 @@ erreur ni avertissement. Extensions utilisées, toutes lues par glTFast :
 
 - **Passe** : toute la géométrie (routes, tranchées, tunnel, ponts, bâtiments,
   montagne, repères, mobilier), les matériaux de base et `map.json`.
-- **Ne passe pas** : la conduite, la caméra, le HUD et le son sont en
+- **Passe aussi** : les sons moteur de `mtl/sons/` (WAV + `moteur.json`) ;
+  le mixage tient en quatre règles, voir [`sons/LISEZMOI.md`](../sons/LISEZMOI.md).
+- **Ne passe pas** : la conduite, la caméra, le HUD et le son synthétisé sont en
   JavaScript. Dans Unity, il faut les refaire en C#, ou partir d'un
   contrôleur de voiture existant (Asset Store, ou le `WheelCollider` de base). `map.json` donne ce qu'il faut pour rebrancher les
   courses, les zones et les points de départ.

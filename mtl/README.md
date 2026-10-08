@@ -275,6 +275,13 @@ recentré, posé au sol, et ses roues sont retrouvées par leur nom
 `rear`/`arrière`) pour le braquage et la rotation. Sans nœud reconnu comme
 roue, le modèle reste statique plutôt que de planter.
 
+## Le son du moteur
+
+Synthétisé par défaut. Pour un vrai son, déposer des boucles enregistrées et
+leur `moteur.json` dans `mtl/sons/voiture-<id>/` : elles remplacent la
+synthèse pour cette voiture. Format, enregistrement et mixage :
+[`sons/LISEZMOI.md`](sons/LISEZMOI.md). `node mtl/tools/sons.mjs` les vérifie.
+
 ## Unity
 
 Voir [`unity/README.md`](unity/README.md).
