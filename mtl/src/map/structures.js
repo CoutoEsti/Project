@@ -80,7 +80,10 @@ function twinOf(r, p, side, index) {
   for (const d of [-r.half * 0.5, PROBE, 3, 6, MEDIAN_GAP]) {
     const qx = p.x + side * p.lx * (r.half + d), qn = p.n + side * p.ln * (r.half + d);
     for (const o of index.surfacesAt(qx, qn, 0)) {
-      if (o.road === r || o.covered || !o.road.oneway || Math.abs(o.y - p.y) > 0.45) continue;
+      if (o.road === r || o.covered || Math.abs(o.y - p.y) > 0.45) continue;
+      // A two-way road in between (Pierre-Dupuy between the Concorde's
+      // approaches): these are not one road's carriageways.
+      if (!o.road.oneway) return null;
       const q = o.road.samples[o.i], q1 = o.road.samples[Math.min(o.road.samples.length - 1, o.i + 1)];
       if (q.tx * p.tx + q.tn * p.tn > -0.85) return null;
       const cx = q.x + (q1.x - q.x) * o.t, cn = q.n + (q1.n - q.n) * o.t;
