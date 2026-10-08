@@ -11,6 +11,8 @@
 //   ?voiture=1|2|3       the car: 180, 250 or 350 km/h (V or 1 2 3 in the game)
 //   ?day=1                start by day
 //   ?low=1                phone settings: no bloom, lower resolution
+//   ?objets=local         custom objects from objets.html's working copy, not objets.json
+//   ?voir=x,n             start in free flight, looking at (x, n), real metres
 
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
@@ -33,6 +35,8 @@ import { createCar } from './game/car.js';
 import { loadCarModel } from './game/gltf-car.js';
 import { CARS } from './game/vehicle.js';
 import { EngineAudio } from './game/audio.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { readDoc, getModel } from './objets-store.js';
 
 const params = new URLSearchParams(location.search);
 // The preview only passes a bare #anchor: tokens like #centre-85-vol.
@@ -75,10 +79,44 @@ try {
   if (r.ok) fileSettings = await r.json();
 } catch (e) { /* no file: the defaults */ }
 const settings = resolveSettings(fileSettings, params);
+// Custom objects (map/objets.js): the published objets.json, or the editor's
+// working copy for a preview. Missing or broken, the world simply has none.
+const LOCAL_OBJETS = params.get('objets') === 'local';
+let objets = null;
+if (LOCAL_OBJETS) objets = readDoc();
+else {
+  try {
+    const r = await fetch('objets.json');
+    if (r.ok) objets = await r.json();
+  } catch (e) { /* no custom objects */ }
+}
+const gltf = new GLTFLoader();
+const models = new Map();
+/** One parse per model file, however many times it is placed. */
+function loadModel(path) {
+  if (!models.has(path)) {
+    models.set(path, (async () => {
+      try {
+        let bytes = LOCAL_OBJETS ? await getModel(path) : null;
+        if (!bytes) {
+          const r = await fetch(path);
+          if (!r.ok) return null;
+          bytes = await r.arrayBuffer();
+        }
+        const g = await gltf.parseAsync(bytes, '');
+        return g.scene || (g.scenes && g.scenes[0]) || null;
+      } catch (e) {
+        console.warn(`[mtl] objet ${path} illisible`, e);
+        return null;
+      }
+    })());
+  }
+  return models.get(path);
+}
 stepLabel.textContent = 'données';
 const source = await loadSource(fetchReader('data/'));
 const world = await buildWorld(THREE, source, {
-  settings, onStep: (s) => { stepLabel.textContent = s; }, pause: nextFrame,
+  settings, onStep: (s) => { stepLabel.textContent = s; }, pause: nextFrame, objets, loadModel,
 });
 scene.add(world.root);
 stepLabel.textContent = 'collisions';
@@ -475,10 +513,18 @@ function frame(now) {
 
 hud.show();
 $('loading').classList.add('done');
+if (LOCAL_OBJETS) toast(`Aperçu local : ${(world.map.objets || []).length} objet(s) de l’éditeur`, 4);
 if (params.has('cam')) {
   const c = params.get('cam').split(',').map(Number);
   setFlying(true);
   fly.lookAt(...c);
+} else if (params.has('voir')) {
+  // Looking at one spot from the air: what objets.html's « Voir dans le jeu » opens.
+  const [vx, vn] = params.get('voir').split(',').map(Number);
+  const k = layout.map.scale, T = layout.terrain;
+  const tx = (vx || 0) * k, tn = (vn || 0) * k, th = T.height(tx, tn);
+  setFlying(true);
+  fly.lookAt(tx - 55, tn - 75, th + 55, tx, tn, th + 4);
 } else if (params.has('fly') || location.hash === '#vol') {
   setFlying(true);
   fly.overview(false);

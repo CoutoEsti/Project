@@ -25,13 +25,17 @@ import { buildSigns } from './signs.js';
 import { exitSigns } from '../map/exits.js';
 import { placeNeon } from '../map/neon.js';
 import { buildNeon } from './neon.js';
+import { buildObjets } from './objets.js';
+import { objetFootprints, underObjets } from '../map/objets.js';
 
 /**
  * @param THREE  the three.js namespace (world modules never import it)
  * @param source loadSource() output (map/source.js)
  * @param opts   { settings: { zone, echelle }, textures: bool, outside: bool,
  *                 onStep: (label) => void, pause: () => Promise — lets the
- *                 page repaint between steps }
+ *                 page repaint between steps,
+ *                 objets: the objets.json document, loadModel: async (modele)
+ *                 → THREE.Object3D — see map/objets.js }
  */
 export async function buildWorld(THREE, source, opts = {}) {
   const T = {};
@@ -45,7 +49,7 @@ export async function buildWorld(THREE, source, opts = {}) {
     return r;
   };
   const settings = opts.settings || { zone: 'centre', echelle: 100 };
-  const map = await step('carte', () => buildMap(source, settings));
+  const map = await step('carte', () => buildMap(source, settings, { objets: opts.objets }));
   const layout = await step('plan', () => compile(map));
   layout.joins = junctionPatches(layout);
   layout.landings = streetLandings(layout);
@@ -96,6 +100,10 @@ export async function buildWorld(THREE, source, opts = {}) {
     return lm.objects;
   });
   const footprints = await step('emprises', () => clearStreets(layout, landmarks, landmarkFootprints(THREE, landmarks)));
+  // Custom objects stay where they were put: no sliding off the streets.
+  if (opts.onStep) opts.onStep('objets');
+  add(await buildObjets(THREE, map, opts.loadModel));
+  footprints.push(...objetFootprints(map.objets));
   const boxes = footprints.map((f) => ({ f, bb: ringBBox(f.ring) }));
   const under = (b) => boxes.some(({ f, bb }) => {
     if (b.cx < bb.x0 - 150 || b.cx > bb.x1 + 150 || b.cn < bb.n0 - 150 || b.cn > bb.n1 + 150) return false;
@@ -114,7 +122,11 @@ export async function buildWorld(THREE, source, opts = {}) {
   animated.push(buzzer(M.Neon_Buzz), blinker(M.Beacon_Red));
   const oldTown = (x, n) => styleAt(x, n) === 'oldstone';
   const lamps = await step('lampadaires', () => placeStreetLamps(layout, structures, oldTown));
-  const { trees, mapped } = await step('arbres', () => placeTrees(layout, structures, map, lamps));
+  const underObjet = underObjets(map.objets);
+  const { trees, mapped } = await step('arbres', () => {
+    const t = placeTrees(layout, structures, map, lamps);
+    return { ...t, trees: t.trees.filter((tr) => !underObjet(tr.x, tr.n)) };
+  });
   stats.trees = { total: trees.length, mapped };
   const strips = await step('marquage', () => [...streetMarkings(layout, structures), ...roadMarkings(layout)]);
   await step('maillage mobilier', () => {

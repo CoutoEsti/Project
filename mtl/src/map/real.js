@@ -23,6 +23,7 @@ import { createTerrain } from './terrain.js';
 import * as G from './geom.js';
 import { ROAD_CLASS } from './layout.js';
 import OVERLAY from './montreal.js';
+import { normalizeObjets, placeObjets, underObjets } from './objets.js';
 
 /** Real metres above (below) the ground for an OSM layer. */
 const LEVEL_Y = { 1: 7.6, 2: 14.2, 3: 20.8, 4: 27.4, [-1]: -8, [-2]: -13, [-3]: -18, [-4]: -22 };
@@ -59,8 +60,9 @@ const PRIORITY = { motorway: 6, trunk: 5, primary: 4, secondary: 3, tertiary: 2,
 /**
  * @param src      loadSource() output
  * @param settings { zone, echelle }
+ * @param extra    { objets: the objets.json document (map/objets.js) }
  */
-export function buildMap(src, settings) {
+export function buildMap(src, settings, extra = {}) {
   const s = settings.echelle / 100;
   const zone = makeZone(zoneDef(settings));
   if (!zone) throw new Error('zone vide');
@@ -73,6 +75,9 @@ export function buildMap(src, settings) {
   const river = src.surfaces.water.reduce((a, w) => (!a || area(w.poly) > area(a.poly) ? w : a), null);
   const base = river ? river.level : 6;
   const terrain = createTerrain(src.relief, { scale: s, base });
+  // Custom objects level their ground now: everything after reads the terrain.
+  const objets = placeObjets(normalizeObjets(extra.objets), terrain, s, inZone);
+  const underObjet = underObjets(objets);
   const water = [];
   for (const w of src.surfaces.water) {
     const clipped = clipMulti(w.poly, zone, zone.box ? 400 : 150);
@@ -213,12 +218,13 @@ export function buildMap(src, settings) {
     const ring = b.ring.map(P);
     const cx = c[0] * s, cn = c[1] * s;
     if (landmarkPlots.some((p) => Math.hypot(cx - p.x, cn - p.n) < p.r)) continue;
+    if (underObjet(cx, cn, ring)) continue;
     buildings.push({ ...b, ring, cx, cn, h: S(b.h), minH: S(b.minH) });
   }
   const tx = [], tn = [];
   for (let k = 0; k < src.trees.count; k++) {
     const x = src.trees.xs[k], n = src.trees.ns[k];
-    if (inZone(x, n)) { tx.push(x * s); tn.push(n * s); }
+    if (inZone(x, n) && !underObjet(x * s, n * s)) { tx.push(x * s); tn.push(n * s); }
   }
   const furniture = src.furniture.filter((f) => inZone(f.x, f.n)).map((f) => ({ ...f, x: f.x * s, n: f.n * s }));
   // District names: the hand-placed ones, then the data's own; a data name
@@ -256,7 +262,7 @@ export function buildMap(src, settings) {
     water, waterMulti, greens, grounds,
     streets, roads,
     buildings, trees: { xs: Float32Array.from(tx), ns: Float32Array.from(tn), count: tx.length }, furniture, quartiers, styleNear,
-    landmarks, spawns, signs, races,
+    landmarks, spawns, signs, races, objets,
   };
 }
 
