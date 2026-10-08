@@ -3,6 +3,8 @@
 //   node mtl/tools/export.mjs            → mtl/export/*.glb + map.json
 //   node mtl/tools/export.mjs --out DIR --zone centre --echelle 85
 //   node mtl/tools/export.mjs --tuiles   → un fichier par couche et par tuile de 1 km
+//   node mtl/tools/export.mjs --carte f.json   → the carte.json saved by zones.html
+//   node mtl/tools/export.mjs --forme <code>   → a drawn zone, as in the address
 //
 // Same code as the E key in the page. Without a canvas in node the textures
 // are left out: Unity maps the materials by name (see unity/README.md).
@@ -32,9 +34,10 @@ const { resolveSettings } = await import('../src/map/zones.js');
 const { loadSourceNode } = await import('./lib/source-node.mjs');
 
 const t0 = Date.now();
-const file = JSON.parse(await fs.readFile(path.join(ROOT, 'carte.json'), 'utf8').catch(() => '{}'));
+const file = JSON.parse(await fs.readFile(path.resolve(arg('--carte', path.join(ROOT, 'carte.json'))), 'utf8').catch(() => '{}'));
 const params = new URLSearchParams();
 if (arg('--zone', null)) params.set('zone', arg('--zone', null));
+if (arg('--forme', null)) params.set('forme', arg('--forme', null));
 if (arg('--echelle', null)) params.set('echelle', arg('--echelle', null));
 const settings = resolveSettings(file, params);
 console.log(`zone ${settings.zone}, échelle ${settings.echelle} %`);

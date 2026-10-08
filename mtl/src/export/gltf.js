@@ -96,7 +96,8 @@ export function mapJson(world) {
       ...M.meta,
       unity: 'Unity X = x (est), Unity Z = n (nord), Unity Y = y (haut) ; 1 unité = 1 m ; caps en degrés, sens horaire depuis le nord de Montréal',
     },
-    settings: { zone: M.settings.zone, echelle: M.settings.echelle, scale: M.scale },
+    // The drawn selection (zones.html): polygons and kept routes, as in carte.json.
+    settings: { zone: M.settings.zone, echelle: M.settings.echelle, scale: M.scale, forme: M.settings.forme || null },
     world: M.world,
     roads: L.roads.map((r) => ({
       id: r.id, name: r.name, ref: r.ref || null, cls: r.cls, width: r1(r.width), lanes: r.lanes, oneway: !!r.oneway,

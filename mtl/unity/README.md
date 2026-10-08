@@ -2,9 +2,12 @@
 
 1. Installer **glTFast** (`com.unity.cloud.gltfast`) depuis le Package Manager.
 2. Générer l'export : `node mtl/tools/export.mjs` (options `--zone`,
-   `--echelle`, `--tuiles`), ou la touche **E** dans le navigateur, qui
-   télécharge un `.zip` et garde les textures générées. La zone et l'échelle
-   exportées sont celles de la carte construite.
+   `--echelle`, `--tuiles`, `--carte f.json`, `--forme <code>`), ou la touche
+   **E** dans le navigateur, qui télécharge un `.zip` et garde les textures
+   générées. La zone et l'échelle exportées sont celles de la carte construite.
+   Une zone dessinée dans `zones.html` (polygones et routes gardées) se
+   sauvegarde en `carte.json`, que l'export lit ; elle est recopiée dans
+   `map.json` sous `settings.forme`, en mètres dans le repère du jeu.
 3. Glisser les `.glb` de `mtl/export/` dans `Assets/`. Un fichier par couche :
    `sol`, `eau`, `rues`, `trottoirs`, `routes`, `ouvrages` (murs, glissières,
    piliers, tunnels), `marquage`, `reperes`, `arbres`, `mobilier`,
