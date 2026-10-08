@@ -68,9 +68,12 @@ export function compile(map) {
   taperJunctions(roads);
   tl = lap('pin', tl);
   separateCrossings(roads);
+  levelTwins(roads);
   tl = lap('cross', tl);
   settleEnds(roads, map.streets, terrain);
   relaxSamples(roads);
+  // Relaxing each carriageway on its own lets the twins drift apart again.
+  for (const r of levelTwins(roads)) relaxRoad(r, r.hard || new Set());
   bindSideJoins(roads);
   tl = lap('relax', tl);
   carve(terrain, roads);
@@ -593,10 +596,15 @@ function separateCrossings(roads) {
       open.delete(o);
       const dy = run.dy / run.k;
       if (Math.abs(dy) > 0.45 && Math.abs(dy) < HEADROOM) {
-        const delta = Math.abs(dy) < 2.5 ? -dy : Math.sign(dy) * HEADROOM - dy;
+        // A piece of street meets a road at grade only where the data joins
+        // them; otherwise it passes over or under. Upper Lachine's two
+        // carriageways crossed the same Turcot ramp 2.40 and 2.55 m above it:
+        // one came down onto it, the other went over, side by side.
+        const atGrade = Math.abs(dy) < 2.5 && (!r.street || joined(r, o, run));
+        const delta = atGrade ? -dy : (dy < 0 ? -1 : 1) * HEADROOM - dy;
         shifts.push({ s0: run.s0, s1: run.s1, delta });
         // Crossing at grade: those samples stand on the major road.
-        if (Math.abs(dy) < 2.5) for (const i of run.idx) (r.hard ||= new Set()).add(i);
+        if (atGrade) for (const i of run.idx) (r.hard ||= new Set()).add(i);
       }
     };
     for (const p of S) {
@@ -613,6 +621,7 @@ function separateCrossings(roads) {
         run.dy += p.y - h.y;
         run.k++;
         run.idx.push(p.i);
+        run.x = p.x; run.n = p.n;
       }
       for (const o of [...open.keys()]) if (!seen.has(o)) close(o);
     }
@@ -631,6 +640,61 @@ function separateCrossings(roads) {
     }
     for (let i = 0; i < S.length; i++) S[i].y += add[i];
   }
+}
+
+/**
+ * The two carriageways of a divided street, lifted or sunk as separate pieces
+ * side by side, share one height: the higher of the two where they overlap
+ * (a carriageway raised over a ramp leaves its twin a wall's height below it
+ * otherwise). Never raised into something passing above.
+ */
+function levelTwins(roads) {
+  const pieces = roads.filter((r) => r.street && r.oneway && r.name);
+  const changed = [];
+  if (pieces.length < 2) return changed;
+  const index = createRoadIndex(roads);
+  const tmp = [];
+  for (const r of pieces) {
+    const raise = new Float64Array(r.samples.length);
+    let any = false;
+    const L = r.samples[r.samples.length - 1].s;
+    r.samples.forEach((p, i) => {
+      // Near its ends a carriageway meets the next piece, not its twin.
+      if (p.s < 15 || p.s > L - 15) return;
+      let top = p.y;
+      // Within reach of this carriageway's own edge: the twin's footprint overlaps or touches it.
+      for (const h of index.surfacesAt(p.x, p.n, (p.h ?? r.half) + 1, tmp)) {
+        const o = h.road;
+        if (o === r || !o.street || o.name !== r.name || !o.oneway) continue;
+        const q = o.samples[h.i];
+        if (p.tx * q.tx + p.tn * q.tn > -0.8) continue;      // the other way, alongside
+        if (h.y > top) top = h.y;
+      }
+      if (top - p.y < 0.3) return;
+      // Room above: nothing within a headroom over the new height.
+      for (const h of index.surfacesAt(p.x, p.n, 0, tmp)) {
+        if (h.road !== r && h.road.name !== r.name && h.y > p.y + 0.5 && h.y < top + HEADROOM) return;
+      }
+      raise[i] = top - p.y;
+      any = true;
+    });
+    if (!any) continue;
+    r.samples.forEach((p, i) => { p.y += raise[i]; });
+    changed.push(r);
+  }
+  return changed;
+}
+
+/** Whether two roads share a point of the data near where `run` crossed. */
+function joined(r, o, run) {
+  const R = 40;
+  const P = r.path || r.pts, Q = o.path || o.pts;
+  if (!P || !Q) return true;
+  for (const a of P) {
+    if (Math.abs(a[0] - run.x) > R || Math.abs(a[1] - run.n) > R) continue;
+    for (const b of Q) if (Math.abs(a[0] - b[0]) < 0.3 && Math.abs(a[1] - b[1]) < 0.3) return true;
+  }
+  return false;
 }
 
 /**

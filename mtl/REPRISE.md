@@ -305,3 +305,22 @@ pas le sol.
 - Outil de diagnostic : un lancer de rayons vertical dans la page
   (`window.__mtl.scene`) qui imprime une carte de lettres par maillage touché ;
   c'est ce qui a montré le vide au pied de la bretelle de la Montagne.
+
+## Turcot : chaussées jumelles (8 octobre)
+
+Chemin Upper Lachine passe au-dessus des bretelles de Turcot en deux
+chaussées à sens unique (`s526`, `s527`) qui se chevauchent. Elles croisaient
+la même bretelle à 2,40 et 2,55 m au-dessus d'elle ; le seuil de 2,5 m de
+`separateCrossings` en faisait descendre une au niveau de la bretelle
+(« croisement à niveau ») et monter l'autre au gabarit : 3 m de mur entre
+deux voies côte à côte.
+
+- Un bout de rue ne rejoint une route à niveau que si les données les relient
+  (un sommet commun à 40 m près, `joined`) ; sinon il passe dessus ou dessous.
+- `levelTwins` : deux chaussées d'une même rue divisée, côte à côte en sens
+  inverse, prennent la plus haute des deux hauteurs (jamais dans quelque chose
+  qui passe au-dessus, jamais à moins de 15 m d'un bout), avant et après le
+  lissage des pentes.
+
+Cœur : obstacles 78 → 70 (365 → 265 m), trous 39 → 37 ; profils à revoir :
+pente 6 → 5, gabarit 30 → 24. Anneau : gabarit 38 → 32, obstacles 171 → 163.
