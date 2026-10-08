@@ -242,7 +242,7 @@ function roadStructures(r, index, ground, layout, out) {
         // Split where a road passes over.
         let run = [], deep = false;
         const flush = () => {
-          if (run.length >= 2 && deep) out.fences.push({ height: 1.6, pts: run });
+          if (run.length >= 2 && deep) out.fences.push({ height: 1.6, pts: run, road: r.id });
           run = []; deep = false;
         };
         seg.forEach((p, j) => {
@@ -315,11 +315,11 @@ function roadStructures(r, index, ground, layout, out) {
   // Where the zone cuts a road, a barrier says so.
   if (r.closedEnd) {
     const p = S[Math.max(0, S.length - 5)];
-    out.closures.push({ x: p.x, n: p.n, y: p.y, tx: p.tx, tn: p.tn, lx: p.lx, ln: p.ln, width: r.width, text: r.closure || 'Fin de la zone' });
+    out.closures.push({ x: p.x, n: p.n, y: p.y, tx: p.tx, tn: p.tn, lx: p.lx, ln: p.ln, width: r.width, text: r.closure || 'Fin de la zone', road: r.id });
   }
   if (r.closedStart) {
     const p = S[Math.min(S.length - 1, 4)];
-    out.closures.push({ x: p.x, n: p.n, y: p.y, tx: -p.tx, tn: -p.tn, lx: -p.lx, ln: -p.ln, width: r.width, text: r.closure || 'Fin de la zone' });
+    out.closures.push({ x: p.x, n: p.n, y: p.y, tx: -p.tx, tn: -p.tn, lx: -p.lx, ln: -p.ln, width: r.width, text: r.closure || 'Fin de la zone', road: r.id });
   }
 }
 
@@ -442,14 +442,14 @@ function covers(roads, out, index, layout) {
         if (o.y - o.gs > -0.3) continue;       // the road came up to street level
         const w = p.h + WALL_OFFSET + 0.6;
         const a = [p.x + p.lx * w, p.n + p.ln * w], b = [p.x - p.lx * w, p.n - p.ln * w];
-        out.fascias.push({ a, b, y0: ceilingY(p), y1: p.gs + 0.05, face: io > ic ? 1 : -1, tx: p.tx, tn: p.tn });
+        out.fascias.push({ a, b, y0: ceilingY(p), y1: p.gs + 0.05, face: io > ic ? 1 : -1, tx: p.tx, tn: p.tn, road: r.id });
         // No railing where another road runs across the cover at street level.
         const m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
         // Nor inside a street's lanes: a street crossing the trench askew, or
         // only partly over this cover, would have the railing across it.
         const crossed = [a, m, b].some(([x, n]) => index.surfacesAt(x, n, 1.5).some((q) => q.road !== r && Math.abs(q.y - p.gs) < 2.5))
           || onStreet(layout, a, b);
-        if (!crossed) out.fences.push({ height: 1.3, pts: [[a[0], a[1], p.gs + 0.05], [b[0], b[1], p.gs + 0.05]] });
+        if (!crossed) out.fences.push({ height: 1.3, pts: [[a[0], a[1], p.gs + 0.05], [b[0], b[1], p.gs + 0.05]], road: r.id });
       }
     });
   }

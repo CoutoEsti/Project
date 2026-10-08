@@ -5,6 +5,7 @@
 //   node mtl/tools/export.mjs --tuiles   → un fichier par couche et par tuile de 1 km
 //   node mtl/tools/export.mjs --carte f.json   → the carte.json saved by zones.html
 //   node mtl/tools/export.mjs --forme <code>   → a drawn zone, as in the address
+//   node mtl/tools/export.mjs --fusionne  → roads, streets and structures merged, as the page draws them
 //
 // Same code as the E key in the page. Without a canvas in node the textures
 // are left out: Unity maps the materials by name (see unity/README.md).
@@ -42,7 +43,7 @@ if (arg('--echelle', null)) params.set('echelle', arg('--echelle', null));
 const settings = resolveSettings(file, params);
 console.log(`zone ${settings.zone}, échelle ${settings.echelle} %`);
 const world = await buildWorld(THREE, await loadSourceNode(), { settings });
-const files = await exportZones(THREE, world, { tiles: args.includes('--tuiles') });
+const files = await exportZones(THREE, world, { tiles: args.includes('--tuiles'), split: !args.includes('--fusionne') });
 await fs.mkdir(OUT, { recursive: true });
 let total = 0;
 for (const f of files) {
