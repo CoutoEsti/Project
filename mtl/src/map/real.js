@@ -23,6 +23,7 @@ import { createTerrain } from './terrain.js';
 import * as G from './geom.js';
 import { ROAD_CLASS } from './layout.js';
 import OVERLAY from './montreal.js';
+import { WIDTH, LINK_WIDTH } from './routes.js';
 
 /** Real metres above (below) the ground for an OSM layer. */
 const LEVEL_Y = { 1: 7.6, 2: 14.2, 3: 20.8, 4: 27.4, [-1]: -8, [-2]: -13, [-3]: -18, [-4]: -22 };
@@ -36,13 +37,6 @@ const SINK = 7.4;
 // is allowed back to the ground, per class, real metres: a highway does not
 // dive between two overpasses 200 m apart, it stays on its embankment.
 const HOLD = { highway: 400, bridge: 400, ramp: 90, road: 30 };
-
-/** Street widths in real metres: [two-way, one-way]. */
-const WIDTH = {
-  motorway: [23, 12.4], trunk: [18, 9], primary: [19, 11], secondary: [15, 9.5], tertiary: [13, 8.5],
-  residential: [11, 8], unclassified: [10, 7.5], living_street: [7, 6], pedestrian: [8, 8], alley: [5, 5],
-};
-const LINK_WIDTH = 6.8;
 
 /** How a street is drawn and furnished (markings, lamps, trees). */
 function streetClass(r, width) {

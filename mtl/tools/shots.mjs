@@ -54,6 +54,7 @@ async function main() {
   const q = new URLSearchParams();
   if (DAY) q.set('day', '1');
   if (arg('--zone', null)) q.set('zone', arg('--zone', null));
+  if (arg('--forme', null)) q.set('forme', arg('--forme', null));
   if (arg('--echelle', null)) q.set('echelle', arg('--echelle', null));
   await page.goto(`${url}/index.html?${q}`);
   await page.waitForFunction(() => window.__mtl && window.__mtl.ready, null, { timeout: 300000 });

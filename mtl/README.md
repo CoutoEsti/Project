@@ -53,9 +53,21 @@ pour un polygone, se déforme sommet par sommet (« En polygone » pour un
 rectangle ou une ellipse). Plusieurs formes = leur union. La page donne la
 surface en km² et une **estimation** des bâtiments et des rues gardés.
 
+**Outil Route** (touche T) : pour garder une route précise et rien autour —
+l'autoroute entre deux quartiers, un pont, une rue de liaison. Un clic sur la
+rue où elle commence, puis un clic à chaque endroit où elle passe : le tracé
+suit les rues réelles (graphe des rues, sens uniques respectés, il reste sur la
+même route quand il peut) et, sur une route à chaussées séparées, prend aussi
+l'autre sens. Échap termine. Le nom de la rue sous le curseur s'affiche avant
+le clic ; zoomer pour viser juste dans les échangeurs. Chaque tronçon devient un
+couloir : la chaussée plus 9 m de chaque côté (`map/routes.js`). Les rues qui le
+croisent sont coupées à son bord comme à n'importe quel contour. En ville, hors
+des formes, on ne voit que le décor en blocs.
+
 - **Jouer cette zone** ouvre `index.html?forme=…` ; le code est un polygone
-  arrondi au mètre, en base64url, donc le lien de la page se partage tel quel.
-- **Exporter** télécharge `{ "zone": { "nom", "poly" }, "echelle": 100 }` : à
+  arrondi au mètre (et les routes : ligne centrale et demi-largeur), en
+  base64url, donc le lien de la page se partage tel quel.
+- **Exporter** télécharge `{ "zone": { "nom", "poly", "routes" }, "echelle": 100 }` : à
   coller dans `carte.json` pour en faire la zone de départ.
 - La zone est aussi gardée dans `localStorage`.
 

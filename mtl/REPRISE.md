@@ -245,3 +245,25 @@ tabliers de la Concorde au-dessus de l'avenue Pierre-Dupuy (s5411 et s5417,
 rubans qui se chevauchent à 3 m d'écart), les bretelles de l'île sous le bord
 du pont Jacques-Cartier. Les plazas (rues piétonnes, largeur par défaut de
 8 m) ne comptent pas.
+
+## Routes gardées une par une (8 octobre)
+
+Ko veut le centre-ville en grande partie, d'autres petites zones, et à
+certains endroits seulement certaines routes. `zones.html` a maintenant un
+outil **Route** : deux clics sur le plan, le chemin par les rues entre les deux
+(Dijkstra sur le graphe des rues, `map/routes.js`), plus l'autre chaussée
+d'une route divisée. Une zone dessinée devient `{ nom, poly, routes: [{ h, pts }] }` ;
+`routes` = ligne centrale arrondie au mètre et demi-largeur du couloir (chaussée
++ 9 m). `makeZone` fait l'union des polygones et des couloirs ; tout le reste
+(coupe des rues, murs invisibles, décor) ne voit qu'un multipolygone. Le code
+`?forme=` passe en version 2 seulement s'il y a des routes ; la version 1 se lit
+toujours. `WIDTH` a déménagé de `map/real.js` à `map/routes.js` (une seule
+table des largeurs).
+
+Vérifié : une zone de test (un carré au centre-ville + la Ville-Marie jusqu'à
+Turcot, les deux sens) passe `check.mjs --forme … --browser` (22/22). Les outils
+`check`, `artefacts`, `plan` et `shots` prennent `--forme <code>`.
+
+Limites : le graphe est celui des données (`rues.json`) — une bretelle mal
+reliée dans OSM ne se suit pas ; hors des formes, la route traverse le décor en
+blocs, pas de vrais bâtiments.

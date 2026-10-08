@@ -7,6 +7,7 @@
 //   node mtl/tools/check.mjs --browser    → plus the real page in headless
 //                                           Chromium: loads, no errors, drives
 //   node mtl/tools/check.mjs --zone centre --echelle 85
+//   node mtl/tools/check.mjs --forme <code>   → a drawn zone (?forme= of zones.html)
 //
 // Driving is measured, not eyeballed: an autopilot follows each motorway from
 // one OpenStreetMap way to the next in the right-hand lane, and every impact,
@@ -27,12 +28,14 @@ import { Driver } from '../src/game/drive.js';
 import { loadSourceNode } from './lib/source-node.mjs';
 import { serve } from './lib/serve.mjs';
 import { loadPlaywright } from './lib/playwright.mjs';
+import { decodeShape } from '../src/map/zones.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
 const arg = (k, d) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : d; };
 const BROWSER = args.includes('--browser');
 const settings = { zone: arg('--zone', 'anneau'), echelle: Number(arg('--echelle', 100)) };
+if (arg('--forme', null)) Object.assign(settings, { zone: 'perso', forme: decodeShape(arg('--forme', null)) });
 const STEP = 1 / 120;
 const TRACE = !!process.env.TRACE;
 const ONLY = arg('--only', null);
@@ -549,7 +552,7 @@ if (BROWSER) {
     errors.push(m.text());
   });
   const tl = Date.now();
-  await page.goto(`${url}/index.html?spawn=decarie&zone=${settings.zone}&echelle=${settings.echelle}`);
+  await page.goto(`${url}/index.html?spawn=decarie&${settings.forme ? `forme=${arg('--forme', '')}` : `zone=${settings.zone}`}&echelle=${settings.echelle}`);
   await page.waitForFunction(() => window.__mtl && window.__mtl.ready, null, { timeout: 300000 });
   await page.waitForFunction(() => window.__mtl.frames() > 3, null, { timeout: 120000 });
   const load = (Date.now() - tl) / 1000;

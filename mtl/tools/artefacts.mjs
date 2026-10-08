@@ -6,6 +6,7 @@
 //   node mtl/tools/artefacts.mjs                       → counts, the worst places
 //   node mtl/tools/artefacts.mjs --zone coeur --all    → every place
 //   node mtl/tools/artefacts.mjs --json f              → every place, written to f
+//   node mtl/tools/artefacts.mjs --forme <code>        → a drawn zone (zones.html)
 //
 // Obstacles: every wall, barrier, fence, pillar and building edge, sampled
 // every metre. A sample counts when it stands more than a metre inside a
@@ -24,10 +25,12 @@ import { createSurface } from '../src/map/surface.js';
 import { pillarColumns } from '../src/map/structures.js';
 import { segDist2 } from '../src/map/geom.js';
 import { loadSourceNode } from './lib/source-node.mjs';
+import { decodeShape } from '../src/map/zones.js';
 
 const args = process.argv.slice(2);
 const arg = (k, d) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : d; };
 const settings = { zone: arg('--zone', 'anneau'), echelle: Number(arg('--echelle', 100)) };
+if (arg('--forme', null)) Object.assign(settings, { zone: 'perso', forme: decodeShape(arg('--forme', null)) });
 const ALL = args.includes('--all');
 const IN = Number(arg('--in', 1.0));   // metres inside a ribbon before something counts
 const CAR_BOTTOM = 0.28, CAR_TOP = 1.45;

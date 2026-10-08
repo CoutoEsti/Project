@@ -33,6 +33,7 @@ const GRID = Number(arg('--grid', 0));          // metres between grid lines (re
 const file = JSON.parse(await fs.readFile(path.join(ROOT, 'carte.json'), 'utf8').catch(() => '{}'));
 const params = new URLSearchParams();
 if (arg('--zone', null)) params.set('zone', arg('--zone', null));
+if (arg('--forme', null)) params.set('forme', arg('--forme', null));
 if (arg('--echelle', null)) params.set('echelle', arg('--echelle', null));
 const settings = resolveSettings(file, params);
 
