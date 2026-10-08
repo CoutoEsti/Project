@@ -24,6 +24,7 @@ import { projectOnRoad, SPACING } from '../src/map/layout.js';
 import { resolveSpawn } from '../src/game/spawn.js';
 import { pointInRing, ringBBox, hash01, segDist2 } from '../src/map/geom.js';
 import { Driver } from '../src/game/drive.js';
+import { mixWeights, parseTable } from '../src/game/engine-loops.js';
 import { loadSourceNode } from './lib/source-node.mjs';
 import { serve } from './lib/serve.mjs';
 import { loadPlaywright } from './lib/playwright.mjs';
@@ -525,6 +526,31 @@ drive('circuit Gilles-Villeneuve', ['Circuit Gilles-Villeneuve', 2300, -3200, 18
   check('rues au hasard', bad.length <= Math.ceil(tried * 0.03), `${tried - bad.length}/${tried} sans obstacle${bad.length ? ` — ${bad.slice(0, 6).join(' ; ')}` : ''}`);
 }
 
+// ------------------------------------------------------------ engine loops --
+// The mix is the part another engine has to copy, so it is checked here on a
+// made-up table: between two recorded revs both loops play, at the recorded
+// revs only one, throttle hands over from the coasting set to the pulling set,
+// and no loop is pitched past twice its recording.
+{
+  const loops = parseTable({ loops: [
+    { file: 'a', rpm: 1000, load: 'off' }, { file: 'b', rpm: 3000, load: 'off' },
+    { file: 'c', rpm: 1000, load: 'on' }, { file: 'd', rpm: 3000, load: 'on' },
+    { file: 'e', rpm: 6000, load: 'on' },
+  ] });
+  const g = (rpm, th) => mixWeights(loops, rpm, th).map((w) => w.gain);
+  const near = (a, b) => Math.abs(a - b) < 1e-6;
+  const mid = g(2000, 1);
+  const power = mid[2] ** 2 + mid[3] ** 2;
+  const exact = g(3000, 1);
+  const coast = g(2000, 0);
+  const top = mixWeights(loops, 13000, 1)[4];
+  let badTable = '';
+  try { parseTable({ loops: [{ file: 'x', rpm: 0 }] }); } catch (e) { badTable = e.message; }
+  check('sons moteur : mixage', near(power, 1) && near(exact[3], 1) && exact[4] === 0 && near(exact[2], 0)
+    && near(coast[2], 0) && coast[0] > 0 && near(mid[0] + mid[1], 0) && top.rate === 2 && badTable !== '',
+  `2000 tr/min : ${mid.map((x) => x.toFixed(2)).join(' ')} ; à fond à 13000 : ×${top.rate}`);
+}
+
 // ---------------------------------------------------------------- browser --
 
 if (BROWSER) {
@@ -540,8 +566,10 @@ if (BROWSER) {
     // checkout by design — game/gltf-car.js probes it with a HEAD request and
     // falls back silently, but Chromium still logs the failed HTTP request
     // itself to the console; no amount of catching in page JS suppresses
-    // that. Expected, not a bug — only swallow this one exact 404.
-    if (/Failed to load resource.*404/.test(m.text()) && /\/models\/civic\.glb$/.test(m.location().url || '')) return;
+    // that. Expected, not a bug — only swallow this one exact 404, and its
+    // twin for a car without recorded engine loops (mtl/sons/LISEZMOI.md).
+    if (/Failed to load resource.*404/.test(m.text())
+      && /\/(models\/civic\.glb|sons\/voiture-\d+\/moteur\.json)$/.test(m.location().url || '')) return;
     errors.push(m.text());
   });
   const tl = Date.now();

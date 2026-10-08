@@ -97,6 +97,7 @@ const CAR_KEY = 'mtl.voiture';
 function storedCar() {
   try { return Number(localStorage.getItem(CAR_KEY)); } catch (e) { return 0; }
 }
+const audio = new EngineAudio();
 let carIndex = [Number(params.get('voiture')), storedCar()]
   .map((id) => CARS.findIndex((c) => c.id === id)).find((i) => i >= 0) ?? 0;
 let car = null;
@@ -113,6 +114,8 @@ async function setCar(index, announce = false) {
   const def = CARS[index];
   carIndex = index;
   driver.vehicle.setSpec(def.spec);
+  // Recorded engine if sons/voiture-<id>/ has one; otherwise the synthesis.
+  audio.setEngineSounds(params.get('sons') || `sons/voiture-${def.id}/moteur.json`);
   for (const b of garage.children) b.classList.toggle('on', Number(b.dataset.car) === index);
   try { localStorage.setItem(CAR_KEY, String(def.id)); } catch (e) { /* private mode: not remembered */ }
   if (announce) toast(`${def.name} — ${def.topKmh} km/h`, 1.8);
@@ -137,7 +140,6 @@ await setCar(carIndex);
 // intensity: adding and removing a light recompiles every material.
 const headlight = new THREE.SpotLight(0xfff1d6, 0, 110, 0.52, 0.55, 1.1);
 scene.add(headlight, headlight.target);
-const audio = new EngineAudio();
 
 const chase = new ChaseCamera(camera, game);
 const input = new Input(window);

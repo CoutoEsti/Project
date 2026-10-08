@@ -1,5 +1,6 @@
-// Copied from Ruelle (hop/src/vehicle/audio.js), unchanged: the engine, tyres and
-// wind are synthesised, so there is nothing to download.
+// Copied from Ruelle (hop/src/vehicle/audio.js). Tyres and wind are
+// synthesised; the engine is too, unless the car has recorded loops
+// (sons/voiture-<id>/moteur.json, see engine-loops.js), which then replace it.
 //
 // Engine, tyres and wind, synthesised in the Web Audio graph.
 //
@@ -30,6 +31,8 @@ const LAYOUT = {
   12: { warmth: 1.38, rough: 0.03 },
 };
 
+import { loadEngineLoops } from './engine-loops.js';
+
 export class EngineAudio {
   constructor() {
     this.ctx = null;
@@ -38,6 +41,32 @@ export class EngineAudio {
     this.volume = 0.7;
     this._nodes = null;
     this._wasOn = 0;        // last frame's throttle, for the blow-off
+    this._loopsUrl = null;  // recorded engine wanted for the current car
+    this._loops = null;     // EngineLoops once loaded
+    this._loadToken = 0;
+    this._missing = new Set();  // tables already found absent: not fetched again
+  }
+
+  /**
+   * Recorded engine for the current car, or null for the synthesised one.
+   * Safe before the first gesture: loading waits for the AudioContext.
+   */
+  setEngineSounds(url) {
+    if (url === this._loopsUrl) return;
+    this._loopsUrl = url;
+    if (this._loops) { this._loops.dispose(); this._loops = null; }
+    if (this.ctx && this._nodes) this._loadLoops();
+  }
+
+  async _loadLoops() {
+    const token = ++this._loadToken;
+    const url = this._loopsUrl;
+    if (!url || this._missing.has(url)) return;
+    const loops = await loadEngineLoops(this.ctx, url, this._nodes.master);
+    if (!loops) this._missing.add(url);
+    // The car changed again while this one was decoding.
+    if (token !== this._loadToken || !this._nodes) { if (loops) loops.dispose(); return; }
+    this._loops = loops;
   }
 
   /** Must be called from a user gesture; browsers refuse otherwise. */
@@ -51,6 +80,8 @@ export class EngineAudio {
         return false;
       }
       this._build();
+      // Not awaited: iOS only honours resume() inside the gesture.
+      this._loadLoops();
     }
     if (this.ctx.state === 'suspended') {
       try { await this.ctx.resume(); } catch { /* ignore */ }
@@ -182,7 +213,13 @@ export class EngineAudio {
     // A big engine is not just lower — it is louder, and it keeps more of its
     // low end, which is what the exhaust term and the layout warmth do here.
     const exhaust = state.exhaust ?? 1;
-    n.engineGain.gain.setTargetAtTime((0.10 + load * 0.30) * (0.75 + exhaust * 0.35), t, smooth);
+    if (this._loops) {
+      // A recording already carries its own load and exhaust character.
+      n.engineGain.gain.setTargetAtTime(0, t, smooth);
+      this._loops.update(state.rpm, Math.min(1, state.throttle), 0.55 + 0.25 * state.throttle, t, smooth);
+    } else {
+      n.engineGain.gain.setTargetAtTime((0.10 + load * 0.30) * (0.75 + exhaust * 0.35), t, smooth);
+    }
     // The filter is the muffler. Open it and the harmonics come through, which
     // is exactly what a straight pipe does and exactly what people buy.
     n.engineFilter.frequency.setTargetAtTime(
@@ -335,5 +372,7 @@ export class EngineAudio {
     this.ctx = null;
     this.ready = false;
     this._nodes = null;
+    this._loops = null;
+    this._loadToken++;
   }
 }
