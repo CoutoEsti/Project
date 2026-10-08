@@ -169,9 +169,20 @@ function drawBase() {
   c.fillStyle = d ? 'rgba(255,255,255,.5)' : 'rgba(0,0,0,.55)';
   c.font = '11px system-ui, sans-serif';
   for (const z of Object.values(ZONES)) {
-    const [a, b, e, f] = z.box;
-    c.strokeRect(sx(a), sy(f), (e - a) * ppm, (f - b) * ppm);
-    c.fillText(z.nom, sx(a) + 4, sy(f) + 13);
+    if (z.box) {
+      const [a, b, e, f] = z.box;
+      c.strokeRect(sx(a), sy(f), (e - a) * ppm, (f - b) * ppm);
+      c.fillText(z.nom, sx(a) + 4, sy(f) + 13);
+      continue;
+    }
+    for (const ring of z.poly) {
+      c.beginPath();
+      ring.forEach(([x, n], i) => (i ? c.lineTo(sx(x), sy(n)) : c.moveTo(sx(x), sy(n))));
+      c.closePath();
+      c.stroke();
+    }
+    const [x, n] = z.poly[0].reduce((m, p) => (p[1] > m[1] ? p : m));
+    c.fillText(z.nom, sx(x) + 4, sy(n) + 13);
   }
   c.setLineDash([]);
   c.beginPath();
@@ -595,9 +606,12 @@ $('clear').addEventListener('click', () => {
 });
 document.querySelectorAll('[data-preset]').forEach((b) => b.addEventListener('click', () => {
   const z = ZONES[b.dataset.preset];
-  const [x0, n0, x1, n1] = z.box;
   snapshot();
-  S.shapes = [paramShape('rect', (x0 + x1) / 2, (n0 + n1) / 2, x1 - x0, n1 - n0)];
+  if (z.poly) S.shapes = z.poly.map((pts) => ({ kind: 'poly', pts: pts.map((p) => p.slice()) }));
+  else {
+    const [x0, n0, x1, n1] = z.box;
+    S.shapes = [paramShape('rect', (x0 + x1) / 2, (n0 + n1) / 2, x1 - x0, n1 - n0)];
+  }
   S.sel = 0;
   if (!S.nom) { S.nom = z.nom; $('nom').value = S.nom; }
   changed();
@@ -706,7 +720,10 @@ function load() {
   const params = new URLSearchParams(location.search);
   let init = null;
   if (params.get('forme')) init = decodeShape(params.get('forme'));
-  else if (params.get('zone') && ZONES[params.get('zone')]) init = { nom: ZONES[params.get('zone')].nom, box: ZONES[params.get('zone')].box };
+  else if (params.get('zone') && ZONES[params.get('zone')]) {
+    const z = ZONES[params.get('zone')];
+    init = { nom: z.nom, box: z.box, poly: z.poly && z.poly.map((r) => r.map((p) => p.slice())) };
+  }
   if (init) {
     S.nom = init.nom || '';
     S.shapes = init.box

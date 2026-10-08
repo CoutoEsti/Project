@@ -4,6 +4,7 @@
 //   node mtl/tools/plan.mjs                 → mtl/docs/plan.svg (several Mo)
 //   node mtl/tools/plan.mjs --zone centre --echelle 85
 //   node mtl/tools/plan.mjs --crop x0,n0,x1,n1 --out FILE --scale 1.2
+//   node mtl/tools/plan.mjs --zone anneau --contour coeur --grid 500   (another zone's outline, a grid)
 //
 // Montréal north is up. The relief in bands, the water, the parks, the
 // streets in grey, and the roads by level: blue below the street, dashed in
@@ -15,7 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildMap } from '../src/map/real.js';
 import { compile } from '../src/map/layout.js';
-import { resolveSettings } from '../src/map/zones.js';
+import { resolveSettings, ZONES, makeZone, scaleZone } from '../src/map/zones.js';
 import { resolveSpawn } from '../src/game/spawn.js';
 import { loadSourceNode } from './lib/source-node.mjs';
 import { loadPlaywright } from './lib/playwright.mjs';
@@ -27,6 +28,7 @@ const PNG = args.includes('--png');
 const OUT = path.resolve(arg('--out', path.join(ROOT, 'docs', 'plan.svg')));
 const CROP = arg('--crop', null);
 const LABELS = !args.includes('--no-labels');
+const GRID = Number(arg('--grid', 0));          // metres between grid lines (real metres), 0 = none
 
 const file = JSON.parse(await fs.readFile(path.join(ROOT, 'carte.json'), 'utf8').catch(() => '{}'));
 const params = new URLSearchParams();
@@ -119,6 +121,26 @@ for (const r of L.roads) {
     const p = r.samples[i];
     out.push(`<circle cx="${X(p.x)}" cy="${Y(p.n)}" r="3" fill="#c62828" stroke="#fff" stroke-width="0.8"/>`);
   }
+}
+
+// The zone outline, for a drawn zone: where the walls are.
+const outlined = [map.zone && !map.zone.box ? map.zone : null];
+if (ZONES[arg('--contour', '')]) outlined.push(scaleZone(makeZone(ZONES[arg('--contour', '')]), s));
+for (const z of outlined.filter(Boolean)) {
+  out.push(`<path d="${z.multi.map(polyPath).join('')}" fill="none" stroke="#ff4fd8" stroke-width="${CROP ? 2.5 : 5}" stroke-dasharray="14,7"/>`);
+}
+if (GRID > 0) {
+  const g = [];
+  const step = GRID * s;
+  for (let x = Math.ceil(x0 / step) * step; x <= x1; x += step) {
+    g.push(`<line x1="${X(x)}" y1="0" x2="${X(x)}" y2="${h.toFixed(0)}"/>`);
+    g.push(`<text x="${(Number(X(x)) + 3).toFixed(1)}" y="12" stroke="none" fill="#fff">${Math.round(x / s)}</text>`);
+  }
+  for (let n = Math.ceil(n0 / step) * step; n <= n1; n += step) {
+    g.push(`<line x1="0" y1="${Y(n)}" x2="${w.toFixed(0)}" y2="${Y(n)}"/>`);
+    g.push(`<text x="3" y="${(Number(Y(n)) - 3).toFixed(1)}" stroke="none" fill="#fff">${Math.round(n / s)}</text>`);
+  }
+  out.push(`<g stroke="#ffffff" stroke-opacity="0.35" stroke-width="1" font-size="11">${g.join('')}</g>`);
 }
 
 if (LABELS) {

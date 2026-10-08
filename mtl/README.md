@@ -23,8 +23,16 @@ Deux réglages, dans le bouton **Carte…** en haut (la page se reconstruit) :
 
 | Zone | Contenu |
 |---|---|
+| `coeur` (par défaut) | la carte de jeu : centre-ville, Vieux-Montréal, Vieux-Port, mont Royal, Saint-Henri, Turcot, les îles, la tête du pont Jacques-Cartier à Longueuil (36 km²) |
 | `centre` | centre-ville, Vieux-Montréal, Vieux-Port, Plateau, mont Royal, Ville-Marie, les îles (~7 × 7 km) |
 | `anneau` | le centre, plus Décarie, la Métropolitaine (A-40), Turcot, le Stade (~12 × 11 km) |
+
+`coeur` est un polygone, pas un rectangle : une forme qu'on lit d'un coup
+d'œil, comme la carte d'un monde ouvert. Le fleuve au sud et à l'est, le mont
+Royal au nord, Turcot à l'ouest, le canal de Lachine sous Saint-Henri. Les
+ponts qui mènent aux îles et à la rive sud restent entiers ; ceux qui sortent
+de la carte (Victoria, Champlain par Bonaventure) s'arrêtent sur une barrière.
+Décarie, la 40 et le Stade n'y sont pas : ils restent dans `anneau`.
 
 **Échelle** : 100 % (la vraie ville), 85 % ou 70 %. En dessous de 100 %,
 tout rapetisse d'autant — rues, bâtiments, relief — sauf la voiture et les

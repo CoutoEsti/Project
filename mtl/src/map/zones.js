@@ -11,6 +11,31 @@
 import * as G from './geom.js';
 
 export const ZONES = {
+  // The playable map: a closed shape you can read at a glance, like an
+  // open-world game's. The river on the south, the mountain on the north,
+  // Turcot on the west; the Lachine canal under Saint-Henri, the islands and
+  // the foot of the Jacques-Cartier bridge in Longueuil, so no bridge stops
+  // in mid-river. About 30 km², a quarter of `anneau`.
+  coeur: {
+    nom: 'Cœur',
+    description: 'Centre-ville, Vieux-Montréal, Vieux-Port, mont Royal, Saint-Henri, Turcot, les îles et la tête du pont à Longueuil',
+    poly: [[
+      // West: Turcot, from the foot of the Décarie trench to the canal.
+      [-4700, 700], [-4700, -560],
+      // South-west: the south bank of the Lachine canal.
+      [-4000, -850], [-3000, -1120], [-2500, -1230], [-1500, -1400], [-700, -1750], [-350, -1800],
+      // Bonaventure down to the Cité du Havre, then the river (the Victoria
+      // bridge stays outside: it leads nowhere in this zone).
+      [-400, -2000], [-350, -2600], [-250, -3000], [150, -2950], [1100, -3250], [1650, -3800], [3000, -3800],
+      // Longueuil, at the foot of the bridge.
+      [3200, -3250], [3700, -3150], [4300, -3150], [4700, -2700], [4700, -2100], [4100, -1600],
+      // Back across the river, then up De Lorimier.
+      [3800, -900], [3550, -450], [3550, 1050],
+      // North: Sherbrooke, the Avenue du Parc, around the mountain.
+      [1150, 650], [1000, 1300], [950, 2300], [300, 2950], [-1000, 3150], [-2000, 3100],
+      [-2900, 2700], [-3100, 1800], [-3000, 750],
+    ]],
+  },
   centre: {
     nom: 'Centre',
     description: 'Centre-ville, Vieux-Montréal, Vieux-Port, Plateau, mont Royal, la Ville-Marie et les îles',
@@ -25,7 +50,7 @@ export const ZONES = {
 
 export const ECHELLES = [100, 85, 70];
 
-export const DEFAUTS = { zone: 'anneau', echelle: 100 };
+export const DEFAUTS = { zone: 'coeur', echelle: 100 };
 
 /** The id a drawn zone goes by in `settings.zone`. */
 export const PERSO = 'perso';

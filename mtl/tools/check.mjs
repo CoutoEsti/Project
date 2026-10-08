@@ -376,10 +376,13 @@ function autopilot(road, { vmax = 30, aLat = 6, pedals = null, maxTime = 600 } =
 
 function drive(label, [name, x, n, heading, max], opts = {}, limits = {}) {
   if (ONLY && !label.includes(ONLY)) return null;
-  const road = route(name, x, n, heading, max);
+  // Outside this zone: nothing to drive (a drawn zone's bounding box is not
+  // the zone: the start of Décarie lies in the box of `coeur`, not in it).
+  const Z = layout.map.zone;
+  const inZone = Z ? Z.contains(x * s, n * s)
+    : x * s >= layout.map.world.x0 && x * s <= layout.map.world.x1 && n * s >= layout.map.world.n0 && n * s <= layout.map.world.n1;
+  const road = inZone ? route(name, x, n, heading, max) : null;
   if (!road) {
-    // Outside this zone: nothing to drive.
-    const inZone = x * s >= layout.map.world.x0 && x * s <= layout.map.world.x1 && n * s >= layout.map.world.n0 && n * s <= layout.map.world.n1;
     check(label, !inZone, inZone ? `${name} introuvable` : 'hors de la zone');
     return null;
   }
@@ -486,7 +489,8 @@ drive('circuit Gilles-Villeneuve', ['Circuit Gilles-Villeneuve', 2300, -3200, 18
       }
     }
   }
-  check('les rues passent sous la 40', tried > 10 && low === 0 && bad.length === 0,
+  if (!viaduct.length) check('les rues passent sous la 40', true, 'hors de la zone');
+  else check('les rues passent sous la 40', tried > 10 && low === 0 && bad.length === 0,
     `${tried} rues sous le viaduc, ${low} avec moins de 6,8 m sous le tablier${bad.length ? ` ; ${bad.length} accrochent : ${bad.slice(0, 4).join(' ; ')}` : ''}`);
 }
 
