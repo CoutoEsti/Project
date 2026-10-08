@@ -56,6 +56,36 @@ l'impression que la ville continue : les vrais bâtiments hors zone (de 25 à
 décor coûte 2 appels de rendu et ~10 triangles par bloc (`world/backdrop.js`),
 sans collision. Les zones `centre` et `anneau` restent des rectangles.
 
+### Mes objets : bâtiments et objets faits à la main
+
+`objets.html` (lien « Mes objets… » dans **Carte…**) place tes propres modèles
+`.glb` sur le plan : un bâtiment fait dans Blender, un banc téléchargé.
+
+1. **Ajouter des .glb…** (ou glisser le fichier sur le plan). glTF **binaire**,
+   sans compression Draco ; idéalement moins de 5 Mo. Un modèle de plus de
+   400 m de large est pris pour des centimètres et posé à l'échelle 0,01.
+2. **Placer**, puis glisser l'objet pour le déplacer, la poignée ronde pour le
+   tourner (crans de 15°, Maj pour tourner librement), la poignée carrée pour
+   l'agrandir ; ou taper X, N, rotation, échelle et hauteur dans le panneau.
+   Flèches : 1 m (Maj : 10 m), Q / E : 15°, Ctrl+D dupliquer, Ctrl+Z annuler.
+   Les bâtiments générés qu'il va remplacer sont en rouge.
+3. **Voir dans le jeu** ouvre `index.html?objets=local&voir=x,n` : le jeu avec
+   tes objets, sur ce navigateur seulement (copie de travail dans
+   `localStorage` et IndexedDB).
+4. **Exporter (.zip)** : `objets.json` et le dossier `objets/`, à mettre dans
+   `mtl/`. C'est ce que tous les joueurs chargent ; le même fichier pour tout
+   le monde, donc compatible avec le multijoueur.
+
+Ce que le jeu fait de chaque objet (`map/objets.js`, `world/objets.js`) :
+il aplanit le sol dessous (case « Aplanir le sol »), avant que les rues et les
+routes ne lisent le relief ; il retire les bâtiments générés et les arbres
+qu'il recouvre ; il lui donne des collisions, mesurées sur le modèle entre
+0,35 et 4 m au-dessus de sa base (comme les repères). Ces contours sont
+calculés par l'éditeur et écrits dans `objets.json` : le jeu n'a pas besoin
+d'ouvrir le modèle pour construire la carte, et `check.mjs` le vérifie sous
+node. Un objet ne glisse jamais hors d'une rue : il reste où on l'a mis.
+Sans `objets.json`, ou avec un modèle illisible, le monde se construit sans.
+
 ## Contrôles
 
 | Touche | Action |

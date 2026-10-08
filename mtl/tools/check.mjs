@@ -19,7 +19,9 @@ import * as THREE from '../vendor/three.module.min.js';
 import { buildWorld } from '../src/world/build.js';
 import { validate } from '../src/map/validate.js';
 import { createSurface } from '../src/map/surface.js';
-import { buildSolids } from '../src/map/collide.js';
+import { buildSolids, Solids, resolveCollisions } from '../src/map/collide.js';
+import { buildMap } from '../src/map/real.js';
+import { objetFootprints } from '../src/map/objets.js';
 import { projectOnRoad, SPACING } from '../src/map/layout.js';
 import { resolveSpawn } from '../src/game/spawn.js';
 import { pointInRing, ringBBox, hash01, segDist2 } from '../src/map/geom.js';
@@ -150,6 +152,8 @@ console.log(`zone ${settings.zone} à ${settings.echelle} % construite en ${((pe
   // A landmark's footprint must leave every street and every road free.
   const bad = [];
   for (const f of world.footprints) {
+    // Custom objects stand where they were put, on a plaza if need be.
+    if (f.objet) continue;
     const hits = new Set();
     const bb = ringBBox(f.ring);
     const reach = Math.hypot(bb.x1 - bb.x0, bb.n1 - bb.n0) / 2;
@@ -525,6 +529,46 @@ drive('circuit Gilles-Villeneuve', ['Circuit Gilles-Villeneuve', 2300, -3200, 18
   check('rues au hasard', bad.length <= Math.ceil(tried * 0.03), `${tried - bad.length}/${tried} sans obstacle${bad.length ? ` — ${bad.slice(0, 6).join(' ; ')}` : ''}`);
 }
 
+{
+  // A custom object (objets.json): the ground under it is level, the
+  // generated building it covers is gone, and a car stops at its wall.
+  let target = null, bd = Infinity;
+  for (const b of source.buildings) {
+    let x = 0, n = 0;
+    for (const p of b.ring) { x += p[0]; n += p[1]; }
+    x /= b.ring.length; n /= b.ring.length;
+    const d = Math.hypot(x - 300, n - 300);
+    if (d < bd) { bd = d; target = [x, n]; }
+  }
+  const box = [[-15, -10], [15, -10], [15, 10], [-15, 10]];
+  const objets = { objets: [{ id: 'essai', modele: 'objets/essai.glb', x: target[0], n: target[1], cap: 30, echelle: 1,
+    origine: [0, 0, 0], emprise: box, solides: [{ ring: box, y0: 0, y1: 12 }], hauteur: 12 }] };
+  const plain = buildMap(source, settings);
+  const map = buildMap(source, settings, { objets });
+  const o = map.objets[0];
+  const T = map.terrain;
+  let spread = 0;
+  for (const [x, n] of o.emprise) for (const [u, v] of o.emprise) spread = Math.max(spread, Math.abs(T.height(x, n) - T.height(u, v)));
+  const cleared = plain.buildings.length - map.buildings.length;
+  // Drive at it from 12 m off its centre, at 50 km/h.
+  const S2 = new Solids();
+  for (const f of objetFootprints(map.objets)) {
+    for (let i = 0; i < f.ring.length; i++) {
+      const a = f.ring[i], c = f.ring[(i + 1) % f.ring.length];
+      S2.add(a[0], a[1], c[0], c[1], f.y0, f.y1, 0);
+    }
+  }
+  const car = { x: o.x - 22 * s, n: o.n, vx: 14, vn: 0, yawRate: 0 };
+  let inside = false;
+  for (let i = 0; i < 240; i++) {
+    car.x += car.vx * STEP; car.n += car.vn * STEP;
+    resolveCollisions(S2, car, Math.PI / 2, o.y);
+    if (pointInRing(car.x, car.n, o.emprise)) inside = true;
+  }
+  check('objet placé (objets.json)', spread < 0.02 && cleared >= 1 && !inside,
+    `sol à ${(spread * 100).toFixed(1)} cm près, ${cleared} bâtiment(s) retiré(s), ${inside ? 'la voiture le traverse' : 'la voiture s’y arrête'}`);
+}
+
 // ---------------------------------------------------------------- browser --
 
 if (BROWSER) {
@@ -593,6 +637,35 @@ if (BROWSER) {
       `monté de ${(h1 - h0).toFixed(0)} m, voiture posée à ${d.toFixed(1)} m du centre de la vue (${st.where ? st.where.name : '?'})`);
   }
   check('aucune erreur dans la page', errors.length === 0, errors.slice(0, 5).join(' | ') || '0');
+  {
+    // The objects editor: a .glb made on the spot, placed on the plan, then
+    // the game's local preview builds it, levelled and solid.
+    errors.length = 0;
+    await page.goto(`${url}/objets.html`);
+    await page.waitForFunction(() => window.__objets && window.__objets.ready, null, { timeout: 120000 });
+    const placed = await page.evaluate(async () => {
+      const THREE = await import('three');
+      const { GLTFExporter } = await import('three/addons/exporters/GLTFExporter.js');
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(24, 12, 16), new THREE.MeshStandardMaterial({ color: 0xff8800 }));
+      const glb = await new GLTFExporter().parseAsync(mesh, { binary: true });
+      const O = window.__objets;
+      O.state.objets.length = 0;
+      await O.importFiles([new File([glb], 'Essai bloc.glb')], [300, 300]);
+      await new Promise((r) => setTimeout(r, 400));     // the save is debounced
+      const o = O.state.objets[0];
+      return o ? { solides: o.solides.length, w: Math.round(o.emprise.reduce((m, p) => Math.max(m, p[0]), 0) * 2) } : null;
+    });
+    await page.goto(`${url}/index.html?objets=local&voir=300,300&zone=centre&echelle=${settings.echelle}`);
+    await page.waitForFunction(() => window.__mtl && window.__mtl.ready, null, { timeout: 300000 });
+    const seen = await page.evaluate(() => {
+      const W = window.__mtl.world;
+      let model = null;
+      W.root.traverse((o) => { if (o.userData.objet) model = o; });
+      return { model: !!model, solids: W.footprints.filter((f) => f.objet).length, flying: document.body.classList.contains('fly') };
+    });
+    check('éditeur d’objets et aperçu dans le jeu', placed && placed.solides > 0 && placed.w === 24 && seen.model && seen.solids > 0 && seen.flying && !errors.length,
+      `${placed ? `bloc de ${placed.w} m, ${placed.solides} emprise(s) solide(s)` : 'rien de placé'} ; dans le jeu : ${seen.model ? 'modèle posé' : 'pas de modèle'}, ${seen.solids} collision(s)${errors.length ? ` ; ${errors.slice(0, 3).join(' | ')}` : ''}`);
+  }
   await browser.close();
   server.close();
 }
