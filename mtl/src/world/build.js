@@ -54,7 +54,7 @@ export async function buildWorld(THREE, source, opts = {}) {
   map.signs = (map.signs || []).concat(exitSigns(layout));
   const tiles = tiling(map);
   const styleAt = (x, n) => map.styleNear(x, n);
-  let buildings = await step('bâtiments', () => clearRoads(prepareBuildings(map, layout, tiles, styleAt), structures.index, map.scale).buildings);
+  let buildings = await step('bâtiments', () => clearRoads(prepareBuildings(map, layout, tiles, styleAt), structures.index, layout.streetsAt, layout.terrain, map.scale).buildings);
   const M = await step('matériaux', () => createMaterials(THREE, opts));
 
   const root = new THREE.Group();

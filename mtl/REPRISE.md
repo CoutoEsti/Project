@@ -217,3 +217,31 @@ son rez-de-chaussée. Zone `coeur` : 2 coupés, 3 entaillés.
 
 Bouts ouverts (`bouts.mjs`) : anneau 87 → 81, coeur 76 → 70. `check.mjs`
 anneau : 11 → 7 chevauchements, 11 → 10 pentes, 41 → 38 dégagements.
+
+## Artefacts sur la chaussée (8 octobre)
+
+`tools/artefacts.mjs` compte ce qui est solide *sur* une chaussée (à plus
+d'un mètre du bord, à hauteur de voiture : mur, glissière, clôture, pilier,
+bâtiment) et les trous (sondes en travers des routes et des rues, la surface
+de `map/surface.js` vide ou 0,6 m plus bas). Places regroupées à 15 m près.
+
+| | main, coeur | après, coeur | main, anneau | après, anneau |
+|---|---|---|---|---|
+| obstacles | 549 (5 556 m) | 78 (364 m) | 1 988 (19 878 m) | 171 (853 m) |
+| dont bâtiments | 408 | 22 | 1 615 | 33 |
+| dont clôtures | 59 | 0 | 144 | 0 |
+| trous | 62 (570 m²) | 62 | 200 (1 683 m²) | 200 |
+
+Corrigé : bâtiments entaillés par les rues et routes qui traversent leur
+rez-de-chaussée (`clearRoads`, ~640 bâtiments, 0,2 % de la surface bâtie) ;
+clôtures de tranchée et garde-corps de couverture plus jamais dans les voies
+d'une rue ; pas de mur ni de glissière au bord d'une route là où une rue est
+juste à côté, à son niveau (elle s'y pose) ; muret central de deux chaussées
+coupé là où une rue ou une troisième route les traverse au même niveau.
+
+Restent surtout des profils à revoir (pas des murs mal placés) : Turcot
+(Upper Lachine s526/s527, bretelles r504/r895/r505 sur Tanneries), les deux
+tabliers de la Concorde au-dessus de l'avenue Pierre-Dupuy (s5411 et s5417,
+rubans qui se chevauchent à 3 m d'écart), les bretelles de l'île sous le bord
+du pont Jacques-Cartier. Les plazas (rues piétonnes, largeur par défaut de
+8 m) ne comptent pas.

@@ -246,6 +246,7 @@ node mtl/tools/shots.mjs --day                   # captures → mtl/.shots/
 node mtl/tools/plan.mjs --png                    # régénère docs/plan.png
 node mtl/tools/export.mjs                        # export Unity → mtl/export/
 node mtl/tools/voitures.mjs                      # pointes des trois voitures (±5 %) et changement en roulant
+node mtl/tools/artefacts.mjs --zone coeur        # murs, glissières, bâtiments plantés sur la chaussée, et trous
 ```
 
 `check.mjs` fait rouler un pilote automatique, voie de droite, sur Décarie
