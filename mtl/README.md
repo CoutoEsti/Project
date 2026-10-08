@@ -295,9 +295,6 @@ Voir [`unity/README.md`](unity/README.md).
   rue qui passe sous un tablier sans vrai tunnel, souvent à 5-6 m au lieu de
   6,2. Ça ne bloque pas la voiture ; les pires (routes en escalier, rues qui
   plongeaient dans la tranchée) sont corrigés.
-- Les bretelles de l'île Sainte-Hélène qui montent au pont Jacques-Cartier
-  sont trop courtes dans les données pour atteindre le tablier : elles
-  finissent sur une barrière « Fermé ».
 - À 70 %, les voies sont étroites (la voiture ne rapetisse pas).
 - Premier chargement lourd : ~25 s pour `anneau` sur un bon ordinateur. Au
   volant, 400 à 750 appels de rendu et 3 à 5 M triangles au centre-ville ;

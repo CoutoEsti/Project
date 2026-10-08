@@ -585,15 +585,29 @@ function profile(r, terrain, waterAt, s, done, spec, onStreet, highways) {
   }
   if (spec && spec.peak) {
     // A named bridge with a known silhouette (Jacques-Cartier over the
-    // river and Île Sainte-Hélène): a parabola from its first wet span to
-    // its last, peaking at `peak` metres.
-    let i0 = -1, i1 = -1;
-    for (let i = 0; i < m - 1; i++) if (wt[i]) { if (i0 < 0) i0 = i; i1 = i + 1; }
-    if (i0 >= 0) {
+    // river, Île Sainte-Hélène and the seaway): one parabola per channel,
+    // peaking at `peak` metres, and between two channels the deck `island`
+    // metres over the land, where the island's ramps meet it. A single
+    // parabola from the first wet span to the last put the top of the bridge
+    // on the island, 30 m over its ramps.
+    const runs = [];
+    for (let i = 0; i < m - 1; i++) {
+      if (!wt[i]) continue;
+      const last = runs[runs.length - 1];
+      // A pier, a dike or a quay a few metres wide does not split a channel.
+      if (last && cum[i] - cum[last[1]] < 120 * s) last[1] = i + 1;
+      else runs.push([i, i + 1]);
+    }
+    for (const [i0, i1] of runs) {
       for (let k = i0; k <= i1; k++) {
         const t = (cum[k] - cum[i0]) / ((cum[i1] - cum[i0]) || 1);
         const y = g[k] + spec.peak * s * (1 - (2 * t - 1) ** 2) + 8 * s;
         target[k] = Math.max(target[k] ?? -Infinity, y);
+      }
+    }
+    if (spec.island) {
+      for (let r0 = 0; r0 + 1 < runs.length; r0++) {
+        for (let k = runs[r0][1] + 1; k < runs[r0 + 1][0]; k++) target[k] = g[k] + spec.island * s;
       }
     }
   }
@@ -638,8 +652,10 @@ function profile(r, terrain, waterAt, s, done, spec, onStreet, highways) {
     let best = null;
     for (const o of done) {
       // A street's lifted piece continues as the street at both ends: it
-      // lands on the next piece of a street, never on a highway it crosses.
-      if (r.street && !o.street) continue;
+      // lands on the next piece of a street, never on a highway it crosses —
+      // unless the data joins them there (a node they share: the ramps of
+      // Île Sainte-Hélène end on the Jacques-Cartier deck).
+      if (r.street && !o.street && !sharesNode(o.path, x, n, 0.3 * s)) continue;
       const hit = nearestOnPath(o.path, x, n, 1.2 * s + o.width / 2);
       if (hit && (!best || hit.d < best.d)) best = hit;
     }
@@ -887,6 +903,12 @@ function meetLiftedStreets(roads, s, reprofile) {
     if (!better || closed || steep > LINK_GRADE) Object.assign(r, keep);
     else if (steep > (ROAD_CLASS[r.cls] || ROAD_CLASS.road).maxGrade) r.maxGrade = steep + 0.005;
   }
+}
+
+/** Whether a vertex of `path` is at (x, n): a node two ways share. */
+function sharesNode(path, x, n, tol) {
+  for (const p of path) if (Math.abs(p[0] - x) <= tol && Math.abs(p[1] - n) <= tol) return true;
+  return false;
 }
 
 function nearestOnPath(path, x, n, reach) {

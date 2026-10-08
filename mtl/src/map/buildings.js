@@ -8,7 +8,7 @@
 // Facades: the district's style decides — grey stone in Old Montréal, brick
 // and outdoor staircases on the Plateau, curtain wall downtown.
 
-import { hash01 } from './geom.js';
+import { hash01, ringBBox, pointInRing, bufferPolyline, closeRing, openRing, pc } from './geom.js';
 
 // District styles: facades to pick from, floor height, whether plexes get the
 // outdoor staircase. Referenced by name from map/montreal.js (QUARTIERS).
@@ -76,6 +76,96 @@ export function prepareBuildings(map, layout, tiles, styleAt) {
     });
   }
   return out;
+}
+
+/**
+ * Buildings out of the way of the roads. OpenStreetMap draws what stands
+ * under a bridge (a pavilion under Jacques-Cartier on Île Sainte-Hélène, a
+ * depot under a ramp) with the ground's footprint only, and the roads'
+ * heights are inferred: a building can come up through a deck, or a street
+ * piece run through a wall. A road over a building keeps it, cut 1.5 m under
+ * the deck (the deck's own thickness). A road through its ground floor, where
+ * the car would drive into it, takes its ribbon out of the footprint: what is
+ * left on either side stays a building. Tunnels, covered roads and trenches
+ * below the base are left alone.
+ * @param index  the road index (map/query.js createRoadIndex)
+ * @returns { buildings, cut, notched, removed }
+ */
+export function clearRoads(buildings, index, s = 1) {
+  const out = [];
+  const hits = [];
+  let cut = 0, notched = 0, removed = 0;
+  const step = 4 * s;
+  for (const b of buildings) {
+    const bb = ringBBox(b.ring);
+    const pts = b.ring.slice();
+    pts.push([b.cx, b.cn]);
+    const nx = Math.ceil((bb.x1 - bb.x0) / step), nn = Math.ceil((bb.n1 - bb.n0) / step);
+    if (nx * nn <= 900) {
+      for (let i = 1; i < nx; i++) {
+        for (let j = 1; j < nn; j++) {
+          const x = bb.x0 + i * step, n = bb.n0 + j * step;
+          if (pointInRing(x, n, b.ring)) pts.push([x, n]);
+        }
+      }
+    }
+    const top0 = b.base + b.h, floor = b.base + (b.minH || 0);
+    let top = top0;
+    const through = new Set();
+    for (const [x, n] of pts) {
+      for (const h of index.surfacesAt(x, n, -0.5, hits)) {
+        if (h.covered || h.tunnel) continue;
+        if (h.y < floor + 0.5 * s || h.y > top + 0.5 * s) continue;
+        if (h.y - floor < 5 * s) through.add(h.road);
+        else top = Math.min(top, h.y - 1.5 * s);
+      }
+    }
+    let parts = [b];
+    if (through.size) {
+      parts = notch(b, [...through], bb, s);
+      if (!parts.length) { removed++; continue; }
+      notched++;
+    }
+    if (top < top0) {
+      if (top - floor < 2.2 * s) { removed++; continue; }
+      cut++;
+      parts = parts.map((q) => ({ ...q, h: top - q.base }));
+    }
+    out.push(...parts);
+  }
+  return { buildings: out, cut, notched, removed };
+}
+
+// The footprint less the ribbons of the roads running through it, a metre
+// wider than the road: the pieces big enough to be a building.
+function notch(b, roads, bb, s) {
+  const ribbons = [];
+  for (const r of roads) {
+    const S = r.samples, reach = r.half + 30 * s;
+    const pts = [];
+    for (const p of S) {
+      const inBox = p.x > bb.x0 - reach && p.x < bb.x1 + reach && p.n > bb.n0 - reach && p.n < bb.n1 + reach;
+      if (inBox) pts.push([p.x, p.n]);
+      else if (pts.length) { ribbons.push(bufferPolyline(pts.splice(0), (r.maxHalf ?? r.half) + 1 * s, 2 * s)); }
+    }
+    if (pts.length) ribbons.push(bufferPolyline(pts, (r.maxHalf ?? r.half) + 1 * s, 2 * s));
+  }
+  let left;
+  try {
+    left = pc.difference([closeRing(b.ring)], ...ribbons.filter((m) => m.length));
+  } catch (e) {
+    return [];
+  }
+  const parts = [];
+  for (const poly of left) {
+    const ring = openRing(poly[0]);
+    const area = Math.abs(ringArea(ring));
+    if (ring.length < 3 || area < 25 * s * s) continue;
+    let cx = 0, cn = 0;
+    for (const [x, n] of ring) { cx += x; cn += n; }
+    parts.push({ ...b, ring, cx: cx / ring.length, cn: cn / ring.length, front: null, stairs: false });
+  }
+  return parts;
 }
 
 function guessHeight(b, area, style, seed) {

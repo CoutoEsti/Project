@@ -192,3 +192,28 @@ bouts ; `check.mjs` 18/18, à revoir 11 grade, 41 clearance, 11 overlap,
 `main` (commit de fusion, pas de force-push). Partir de `main`. **Faire
 `git fetch` avant de commencer** : c'est faute de l'avoir fait que la session
 du 28 a refait du travail existant.
+
+## Zone Cœur et tête du pont Jacques-Cartier (8 octobre)
+
+Ko trouvait la carte bien trop grande. La zone de départ est maintenant
+`coeur` (`map/zones.js`), un polygone de 36 km² au lieu des 127 de `anneau` :
+le fleuve, le mont Royal, Turcot, le canal de Lachine, les îles et la tête du
+pont à Longueuil. `anneau` et `centre` restent dans le menu ; `check.mjs`
+tourne toujours sur `anneau` par défaut (`--zone coeur` pour l'autre).
+
+Pont Jacques-Cartier sur l'île Sainte-Hélène : une parabole par chenal
+(`map/real.js`, champ `island` de `BRIDGES`), le tablier à 8 m au-dessus de
+l'île entre les deux, le treillis seulement au-dessus de l'eau
+(`world/landmarks.js`). OSM ne donne que la couche 1, aucune hauteur : 8 m,
+c'est ce qui laisse les bretelles, telles que dessinées, atteindre le tablier
+sans dépasser leur pente (à 10 m, s6044 monte à 25 %), avec 10 à 12 m au-dessus
+de la boucle et du chemin qui passent dessous. Les morceaux de rue se posent
+sur une route quand OSM les y raccorde (nœud partagé, `sharesNode`).
+
+Un bâtiment de l'île (« Pavillon ») traversait le nouveau tablier.
+`clearRoads` (`map/buildings.js`) coupe un bâtiment 1,5 m sous un tablier qui
+le survole et retire du plan au sol le ruban d'une route qui passe au niveau de
+son rez-de-chaussée. Zone `coeur` : 2 coupés, 3 entaillés.
+
+Bouts ouverts (`bouts.mjs`) : anneau 87 → 81, coeur 76 → 70. `check.mjs`
+anneau : 11 → 7 chevauchements, 11 → 10 pentes, 41 → 38 dégagements.

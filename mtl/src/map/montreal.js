@@ -8,8 +8,13 @@
 
 // Roads built whole as a structure of their own rather than as streets.
 export const BRIDGES = {
-  // The main span clears the seaway by some 49 m.
-  'Pont Jacques-Cartier': { cls: 'bridge', peak: 30, structure: 'jacques-cartier' },
+  // The main span clears the river by some 49 m. On Île Sainte-Hélène the
+  // deck comes down to meet the island's ramps, 8 m over the ground under
+  // it (~29.5 m above sea level at the ramps, 10 to 12 m over the loop ramp
+  // and the island's road that pass under it). OpenStreetMap gives the bridge
+  // and its ramps layer 1 throughout, no height: the 8 m is where the ramps,
+  // drawn as they are, meet the deck within their grade.
+  'Pont Jacques-Cartier': { cls: 'bridge', peak: 30, island: 8, structure: 'jacques-cartier' },
   // The Formula 1 track: barriers and floodlights instead of sidewalks.
   'Circuit Gilles-Villeneuve': { cls: 'circuit' },
 };

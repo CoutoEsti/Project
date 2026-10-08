@@ -717,44 +717,58 @@ function mansardRoof(ctx, w, d, h, mat, y) {
 export function buildJacquesCartier(THREE, layout, M) {
   const r = layout.roads.find((o) => o.structure === 'jacques-cartier');
   if (!r) return null;
-  // The truss spans the seaway: the stretch over the water.
-  const S = r.samples.filter((p) => p.gk === 'water');
-  if (S.length < 2) return null;
+  // The truss spans the channels: each stretch over the water, its own truss.
+  // The deck comes down between them, on Île Sainte-Hélène: one truss from
+  // the first wet sample to the last would float over the island's ramps.
+  const wet = r.samples.filter((p) => p.gk === 'water');
+  const runs = [];
+  for (const p of wet) {
+    const last = runs[runs.length - 1];
+    if (last && p.s - last[last.length - 1].s < 120) last.push(p);
+    else runs.push([p]);
+  }
+  const spans = runs.filter((S) => S.length >= 2 && S[S.length - 1].s - S[0].s > 150);
+  if (!spans.length) return null;
   const g = new THREE.Group();
   g.name = 'Pont Jacques-Cartier';
   g.userData.zone = 'reperes';
-  const s0 = S[0].s, s1 = S[S.length - 1].s, L = s1 - s0;
   const glowMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(0x66d9ff).multiplyScalar(1.6), name: 'Connexions_vivantes' });
   const members = [];
   const lights = [];
-  const at = (s) => {
-    let k = 0;
-    while (k < S.length - 2 && S[k + 1].s < s) k++;
-    const a = S[k], b = S[k + 1];
-    const t = Math.min(1, Math.max(0, (s - a.s) / Math.max(0.01, b.s - a.s)));
-    return { x: a.x + (b.x - a.x) * t, n: a.n + (b.n - a.n) * t, y: a.y + (b.y - a.y) * t, lx: a.lx, ln: a.ln, tx: a.tx, tn: a.tn };
-  };
+  const piers = [];
   // Top chord height: tall over the piers, lower at mid-span (cantilevers).
   const topH = (u) => 12 + 22 * Math.pow(Math.abs(Math.cos(u * Math.PI)), 1.4);
   const off = r.half + 0.6;
   const step = 10;
-  for (let s = s0; s <= s1 + 0.01; s += step) {
-    const u = (s - s0) / L;
-    const p = at(s), q = at(Math.min(s1, s + step));
-    const h0 = topH(u), h1 = topH(Math.min(1, (s + step - s0) / L));
-    for (const side of [1, -1]) {
-      const bx = p.x + p.lx * off * side, bn = p.n + p.ln * off * side;
-      const cx = q.x + q.lx * off * side, cn = q.n + q.ln * off * side;
-      members.push([[bx, bn, p.y], [bx, bn, p.y + h0], 0.7]);           // vertical
-      if (s + step <= s1 + 0.01) {
-        members.push([[bx, bn, p.y + h0], [cx, cn, q.y + h1], 0.8]);     // top chord
-        members.push([[bx, bn, p.y + 0.5], [cx, cn, q.y + 0.5], 0.8]);   // bottom chord
-        members.push([[bx, bn, p.y], [cx, cn, q.y + h1], 0.45]);         // diagonal
-        lights.push([bx, bn, p.y + h0 + 0.8]);
+  for (const S of spans) {
+    const s0 = S[0].s, s1 = S[S.length - 1].s, L = s1 - s0;
+    const at = (s) => {
+      let k = 0;
+      while (k < S.length - 2 && S[k + 1].s < s) k++;
+      const a = S[k], b = S[k + 1];
+      const t = Math.min(1, Math.max(0, (s - a.s) / Math.max(0.01, b.s - a.s)));
+      return { x: a.x + (b.x - a.x) * t, n: a.n + (b.n - a.n) * t, y: a.y + (b.y - a.y) * t, lx: a.lx, ln: a.ln, tx: a.tx, tn: a.tn };
+    };
+    for (let s = s0; s <= s1 + 0.01; s += step) {
+      const u = (s - s0) / L;
+      const p = at(s), q = at(Math.min(s1, s + step));
+      const h0 = topH(u), h1 = topH(Math.min(1, (s + step - s0) / L));
+      for (const side of [1, -1]) {
+        const bx = p.x + p.lx * off * side, bn = p.n + p.ln * off * side;
+        const cx = q.x + q.lx * off * side, cn = q.n + q.ln * off * side;
+        members.push([[bx, bn, p.y], [bx, bn, p.y + h0], 0.7]);           // vertical
+        if (s + step <= s1 + 0.01) {
+          members.push([[bx, bn, p.y + h0], [cx, cn, q.y + h1], 0.8]);     // top chord
+          members.push([[bx, bn, p.y + 0.5], [cx, cn, q.y + 0.5], 0.8]);   // bottom chord
+          members.push([[bx, bn, p.y], [cx, cn, q.y + h1], 0.45]);         // diagonal
+          lights.push([bx, bn, p.y + h0 + 0.8]);
+        }
       }
+      // Cross bracing over the deck.
+      members.push([[p.x + p.lx * off, p.n + p.ln * off, p.y + h0], [p.x - p.lx * off, p.n - p.ln * off, p.y + h0], 0.5]);
     }
-    // Cross bracing over the deck.
-    members.push([[p.x + p.lx * off, p.n + p.ln * off, p.y + h0], [p.x - p.lx * off, p.n - p.ln * off, p.y + h0], 0.5]);
+    // Piers at both ends of the channel span.
+    piers.push(at(s0), at(s1));
   }
   const geo = new THREE.BoxGeometry(1, 1, 1);
   geo.translate(0, 0, 0.5);
@@ -777,9 +791,7 @@ export function buildJacquesCartier(THREE, layout, M) {
   lights.forEach(([x, n, y], i) => { m.makeTranslation(x, y, -n); lmesh.setMatrixAt(i, m); });
   lmesh.name = 'Eclairage';
   g.add(lmesh);
-  // Piers at both ends of the channel span.
-  for (const s of [s0, s1]) {
-    const p = at(s);
+  for (const p of piers) {
     const pier = new THREE.Mesh(new THREE.BoxGeometry(r.width + 6, p.y + 8, 10), M.Concrete);
     pier.position.set(p.x, (p.y - 8) / 2 - 1.2, -p.n);
     pier.rotation.y = Math.atan2(p.tx, p.tn);
