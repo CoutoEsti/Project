@@ -1,8 +1,9 @@
 // MTL — the map, driven. Loads real Montréal, builds the chosen zone at the
 // chosen scale, puts a car in it, and lets you drive it or fly over it.
 //
-// Settings come from carte.json, then the address overrides them:
-//   ?zone=centre|anneau  &echelle=100|85|70   (or #centre-85 in the preview)
+// Settings come from carte.json, then the last map played on this browser
+// (localStorage), then the address overrides them:
+//   ?zone=coeur|centre|anneau  &echelle=100|85|70   (or #centre-85 in the preview)
 //   ?forme=<code>         a zone drawn in zones.html (the address that tool gives)
 // Other parameters:
 //   ?spawn=<id>           start driving at a spawn point (see map/montreal.js)
@@ -74,7 +75,16 @@ try {
   const r = await fetch('carte.json');
   if (r.ok) fileSettings = await r.json();
 } catch (e) { /* no file: the defaults */ }
-const settings = resolveSettings(fileSettings, params);
+// The map you chose last time — a named zone or one you drew — until you
+// pick another: the address only when it names one.
+const MAP_KEY = 'mtl.carte.v1';
+let remembered = null;
+try { remembered = JSON.parse(localStorage.getItem(MAP_KEY) || 'null'); } catch (e) { /* private mode */ }
+const named = ['zone', 'forme', 'echelle'].some((k) => params.has(k));
+const settings = resolveSettings(!named && remembered ? { ...fileSettings, ...remembered } : fileSettings, params);
+try {
+  localStorage.setItem(MAP_KEY, JSON.stringify({ zone: settings.zone === 'perso' ? settings.forme : settings.zone, echelle: settings.echelle }));
+} catch (e) { /* private mode: not remembered */ }
 stepLabel.textContent = 'données';
 const source = await loadSource(fetchReader('data/'));
 const world = await buildWorld(THREE, source, {

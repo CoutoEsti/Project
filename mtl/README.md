@@ -38,8 +38,10 @@ Décarie, la 40 et le Stade n'y sont pas : ils restent dans `anneau`.
 tout rapetisse d'autant — rues, bâtiments, relief — sauf la voiture et les
 dégagements sous les ponts et dans les tunnels, qui restent en vrais mètres.
 
-La valeur de départ est dans `carte.json` ; l'adresse la remplace :
-`?zone=centre&echelle=85` (ou `#centre-85`).
+La valeur de départ est dans `carte.json`. Le jeu se souvient ensuite de la
+dernière carte jouée sur ce navigateur (zone nommée ou dessinée, et échelle)
+et la recharge tant qu'on n'en choisit pas une autre. L'adresse l'emporte sur
+les deux : `?zone=centre&echelle=85` (ou `#centre-85`).
 
 ### Dessiner sa propre zone
 
