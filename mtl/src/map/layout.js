@@ -125,9 +125,13 @@ export function compile(map) {
     }
   }
   const sunken = [], tunnels = [];
+  // Under a street, a trench opens no wider than its road: the half metre left
+  // around it elsewhere, so the ground stops short of the walls, would be a
+  // strip of void across the street where it meets or crosses the road.
+  const margin = (r, p) => (streetsAt(p.x, p.n, r.half + 0.5, tmp).some((st) => st.cls !== 'plaza') ? 0 : 0.5);
   for (const r of roads) {
-    sunken.push(...runs(r, (p) => p.y - p.gs < SUNKEN && !p.tunnel, 0.5));
-    tunnels.push(...runs(r, (p) => p.tunnel, 0.5));
+    sunken.push(...runs(r, (p) => p.y - p.gs < SUNKEN && !p.tunnel, (p) => margin(r, p)));
+    tunnels.push(...runs(r, (p) => p.tunnel, () => 0.5));
   }
   let holes = G.unionAll(sunken);
   if (coverers.size && holes.length) {
@@ -771,19 +775,32 @@ function nearestIndex(samples, [x, n]) {
  * half-width plus `margin`. Runs are simplified before buffering so a 9 km
  * carriageway costs a few hundred quads, not five thousand.
  */
+/**
+ * Footprints of the stretches of a road where `test` holds, each widened by
+ * margin(sample) beyond the road's half width. Where the margin changes, the
+ * two pieces share a sample so they meet.
+ */
 function runs(road, test, margin) {
   const out = [];
-  let cur = [];
+  let cur = [], m = 0;
   const flush = () => {
     if (cur.length >= 2) {
       const pts = G.simplify(cur.map((p) => [p.x, p.n]), 0.25);
-      const fp = G.bufferPolyline(pts, road.half + margin, 0);
+      const fp = G.bufferPolyline(pts, road.half + m, 0);
       if (fp.length) out.push(fp);
     }
     cur = [];
   };
   for (const p of road.samples) {
-    if (test(p)) cur.push(p); else flush();
+    if (!test(p)) { flush(); continue; }
+    const mp = margin(p);
+    if (cur.length && mp !== m) {
+      const last = cur[cur.length - 1];
+      flush();
+      cur.push(last);
+    }
+    m = mp;
+    cur.push(p);
   }
   flush();
   return out;

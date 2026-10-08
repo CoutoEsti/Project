@@ -267,3 +267,19 @@ Turcot, les deux sens) passe `check.mjs --forme … --browser` (22/22). Les outi
 Limites : le graphe est celui des données (`rues.json`) — une bretelle mal
 reliée dans OSM ne se suit pas ; hors des formes, la route traverse le décor en
 blocs, pas de vrais bâtiments.
+
+## Trous sous les rues (8 octobre)
+
+Les « vides » d'`artefacts.mjs` venaient tous de la même chose : une tranchée
+s'ouvre 0,5 m plus large que sa route (le sol s'arrête avant les murs), et
+cette bande passait sous les rues qui croisent ou longent la route. Sous une
+rue, la marge tombe à 0 (`layout.js`, `runs` avec une marge par échantillon).
+Cœur : 62 trous (570 m²) → 42 (318 m²), plus aucun « vide » ; anneau : 200
+(1 683 m²) → 154 (1 242 m²). Coût : +35 ms de compilation sur Cœur.
+
+Ce qui reste, ce sont des marches de 0,6 à 6,6 m entre une rue au niveau du sol
+et une route abaissée qui se chevauchent dans les données : Rue Bridge (les
+deux chaussées n'ont pas le même profil sous la voie ferrée), Avenue Girouard
+(une voie parallèle au niveau du sol déborde d'un mètre sur la trémie),
+Taschereau, Gosford, des Lacquiers. Chaque cas demande de corriger le profil,
+pas le sol.
