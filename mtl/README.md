@@ -275,6 +275,44 @@ recentré, posé au sol, et ses roues sont retrouvées par leur nom
 `rear`/`arrière`) pour le braquage et la rotation. Sans nœud reconnu comme
 roue, le modèle reste statique plutôt que de planter.
 
+## La circulation
+
+Des voitures dans une bulle de ~260 m autour du joueur (90 au plus, 45 sur
+téléphone ; `?trafic=0` pour des rues vides, `?trafic=40` pour en fixer le
+nombre). Code dans `src/traffic/`, sans IA au sens « modèle de langage » :
+des règles de jeu classiques, quelques microsecondes par voiture.
+
+- **Le réseau** (`network.js`) vient des rues et des routes de la carte :
+  un nœud là où OpenStreetMap partage un point entre deux voies, un tronçon
+  entre deux nœuds, des voies latérales selon la classe et la largeur (les
+  mêmes que le marquage). Ruelles et places piétonnes exclues.
+- **Les carrefours** : un feu là où les données ont un feu à moins de 20 m
+  (~2 000 carrefours), sinon un arrêt — sur la petite rue seulement si une
+  rue plus importante la croise, à toutes les approches sinon (l'arrêt
+  toutes directions montréalais). Rien là où une bretelle rejoint
+  l'autoroute. Les feux proches (les deux chaussées d'un boulevard) tournent
+  ensemble ; pas de virage à droite au feu rouge, comme sur l'île.
+- **La conduite** (`sim.js`) : chaque voiture suit sa voie, choisit sa
+  sortie au carrefour suivant, change de voie avant de tourner, ralentit
+  dans les virages, garde ses distances (modèle IDM), s'arrête au rouge et
+  marque l'arrêt. Elle freine pour le joueur, klaxonne s'il la bloque ou
+  s'il la percute, et elle est solide (`map/collide.js`, `solids.dynamic`).
+- **Multijoueur, prévu dès le départ** : une seule simulation, chez
+  l'hôte, pour la bulle de chaque joueur ; à 20 Hz, fixe, découplée de la
+  physique. Les feux sont une fonction de l'horloge commune : rien à
+  envoyer. `encode()` donne toutes les voitures en ~4 Ko (120 voitures,
+  ~75 Ko/s à 20 Hz) et `TrafficReplica` les redessine chez les autres
+  joueurs, sans rien simuler. Même graine et mêmes joueurs, même trafic au
+  pas près (vérifié). Ce qu'il manque pour jouer à plusieurs, c'est le
+  transport entre joueurs : un site statique ne suffit pas, il faut au moins
+  un petit serveur de mise en relation (WebRTC) ou de relais.
+- **Rendu** (`render.js`) : 5 appels de rendu en tout (voitures, phares,
+  poteaux, boîtiers, lampes des feux).
+
+`check.mjs` le vérifie : 5 minutes de trafic avec deux joueurs (aucun feu
+rouge brûlé, aucune voiture coincée), déterminisme, aller-retour hôte →
+joueur, une voiture qui s'arrête devant le joueur, et le choc contre elle.
+
 ## Unity
 
 Voir [`unity/README.md`](unity/README.md).
@@ -295,5 +333,7 @@ Voir [`unity/README.md`](unity/README.md).
   volant, 400 à 750 appels de rendu et 3 à 5 M triangles au centre-ville ;
   la vue d'ensemble de l'anneau, ~1 400 appels et 6,7 M. Sur téléphone,
   utiliser la zone `centre` (non mesuré sur un vrai téléphone).
-- Les voitures, piétons et le trafic manquent : les rues sont vides.
-- Pas encore de trafic, de piétons, ni de course jouable.
+- La circulation est une première version (voir « La circulation ») : pas
+  de dépassement, les virages à gauche ne cèdent pas aux voitures d'en
+  face, et les bretelles s'insèrent sans regarder à côté.
+- Pas encore de piétons, ni de course jouable.

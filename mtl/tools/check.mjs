@@ -24,6 +24,8 @@ import { projectOnRoad, SPACING } from '../src/map/layout.js';
 import { resolveSpawn } from '../src/game/spawn.js';
 import { pointInRing, ringBBox, hash01, segDist2 } from '../src/map/geom.js';
 import { Driver } from '../src/game/drive.js';
+import { buildNetwork, span, pointOn } from '../src/traffic/network.js';
+import { Traffic, TrafficReplica, TICK } from '../src/traffic/sim.js';
 import { loadSourceNode } from './lib/source-node.mjs';
 import { serve } from './lib/serve.mjs';
 import { loadPlaywright } from './lib/playwright.mjs';
@@ -523,6 +525,96 @@ drive('circuit Gilles-Villeneuve', ['Circuit Gilles-Villeneuve', 2300, -3200, 18
     }
   }
   check('rues au hasard', bad.length <= Math.ceil(tried * 0.03), `${tried - bad.length}/${tried} sans obstacle${bad.length ? ` — ${bad.slice(0, 6).join(' ; ')}` : ''}`);
+}
+
+// ---------------------------------------------------------------- traffic --
+
+{
+  const t1 = performance.now();
+  const net = buildNetwork(layout);
+  const ms = performance.now() - t1;
+  const by = {};
+  for (const o of net.nodes) by[o.control] = (by[o.control] || 0) + 1;
+  check('réseau de circulation', net.edges.length > 1000 && (by.signal || 0) > 50 && (by.stop || 0) > 50,
+    `${net.edges.length} tronçons, ${by.signal || 0} carrefours à feux, ${by.stop || 0} arrêts, ${by.merge || 0} bretelles, en ${ms.toFixed(0)} ms`);
+
+  // Two players far apart: the host keeps one bubble around each.
+  const at = (id) => { const p = resolveSpawn(layout, layout.map.spawns.find((q) => q.id === id)); return { x: p.x, n: p.n, y: p.y, heading: p.heading, speed: 0 }; };
+  const players = ['centre-ville', 'plateau'].map(at);
+  const run = (seconds, seed = 1) => {
+    const tr = new Traffic(net, { seed, max: 120 });
+    const still = new Map();
+    let worst = 0, nan = 0, steps = 0, spent = 0, speed = 0, samples = 0;
+    for (let i = 0; i < seconds / TICK; i++) {
+      const a = performance.now();
+      tr.step(TICK, players);
+      spent += performance.now() - a;
+      steps++;
+      for (const c of tr.cars) {
+        if (!Number.isFinite(c.x + c.n + c.y)) nan++;
+        // A player standing on the road holds up a queue: that is the point.
+        const near = players.some((p) => Math.hypot(p.x - c.x, p.n - c.n) < 100);
+        const t = c.v < 0.3 && !near ? (still.get(c.id) || 0) + TICK : 0;
+        still.set(c.id, t);
+        if (t > worst) worst = t;
+        speed += c.v; samples++;
+      }
+    }
+    return { tr, worst, nan, ms: spent / steps, speed: speed / Math.max(1, samples) };
+  };
+  const r = run(300);
+  const C = r.tr.count;
+  check('trafic : 5 minutes, deux joueurs', r.nan === 0 && C.red === 0 && r.worst < 60 && r.speed > 3 && r.tr.cars.length > 60 && r.ms < 2,
+    `${r.tr.cars.length} autos, ${C.through} carrefours franchis, ${C.red} feu rouge brûlé, plus long arrêt ${r.worst.toFixed(0)} s, `
+    + `${(r.speed * 3.6).toFixed(0)} km/h en moyenne, ${(r.ms * 1000).toFixed(0)} µs par pas`);
+
+  // Same seed, same players: the same traffic, step for step.
+  const a = run(40, 7).tr.digest(), b = run(40, 7).tr.digest();
+  check('trafic déterministe', a === b, `${a} / ${b}`);
+
+  // What another player receives: every car, a few floats each.
+  const host = r.tr, rep = new TrafficReplica(net);
+  const buf = host.encode();
+  rep.apply(buf);
+  rep.apply(buf);
+  const hp = host.poses(1), rp = rep.poses(1);
+  let err = 0;
+  for (let i = 0; i < hp.length; i++) err = Math.max(err, Math.hypot(hp[i].x - rp[i].x, hp[i].n - rp[i].n), Math.abs(hp[i].y - rp[i].y));
+  check('trafic en réseau (hôte → joueurs)', rp.length === hp.length && err < 0.01,
+    `${buf.byteLength} octets pour ${hp.length} autos (${(buf.byteLength * 20 / 1024).toFixed(0)} Ko/s à 20 Hz), écart ${(err * 1000).toFixed(1)} mm`);
+
+  // A car brakes for a player standing in its lane, and stops short of the car.
+  const tr = new Traffic(net, { seed: 3, max: 60 });
+  const P0 = [players[0]];
+  for (let i = 0; i < 200; i++) tr.step(TICK, P0);
+  const sp = {};
+  const c = tr.cars.find((o) => !o.conn && o.v > 5 && (span(net, o.ed, sp), sp.s1 - o.s > 90));
+  let detail = 'aucune auto sur une ligne droite', ok = false;
+  if (c) {
+    span(net, c.ed, sp);
+    const q = pointOn(net, c.ed, c.s + 45, c.lat, {});
+    const me = [{ x: q.x, n: q.n, y: q.y, heading: q.h, speed: 0 }];
+    for (let i = 0; i < 20 / TICK; i++) tr.step(TICK, me);
+    const d = Math.hypot(c.x - q.x, c.n - q.n);
+    ok = tr.cars.includes(c) && c.v < 0.2 && d > 4.8 && d < 12;
+    detail = `arrêtée à ${d.toFixed(1)} m (centre à centre) à ${c.v.toFixed(1)} m/s`;
+  }
+  check('les autos s’arrêtent devant le joueur', ok, detail);
+
+  // And the player's car hits them: they are solid.
+  if (c) {
+    solids.dynamic = { near: (x, n, rr, out) => tr.near(x, n, rr, out) };
+    const back = pointOn(net, c.ed, c.s - 25, c.lat, {});
+    driver.place(back.x, back.n, back.h, back.y);
+    let hit = 0;
+    for (let i = 0; i < 4 / STEP; i++) {
+      driver.step(STEP, { throttle: 1, brake: 0, steer: 0, handbrake: false });
+      hit = Math.max(hit, driver.impact); driver.impact = 0;
+    }
+    const along = (driver.x - back.x) * Math.sin(back.h) + (driver.n - back.n) * Math.cos(back.h);
+    solids.dynamic = null;
+    check('les autos sont solides', hit > 1 && along < 25, `choc à ${(hit * 3.6).toFixed(0)} km/h, arrêtée ${(25 - along).toFixed(1)} m avant le centre de l’auto`);
+  }
 }
 
 // ---------------------------------------------------------------- browser --
