@@ -141,7 +141,9 @@ export function compile(map) {
       const run = [], on = new Set();
       for (let k = k0; k >= 0 && k < S.length; k += dir) {
         const p = S[k];
-        if (Math.abs(p.y - p.gs) > 1) break;
+        // Only where the ramp is at the street's level: deeper, keeping the
+        // ground laid it over the ramp (Jacques-Cartier on Sainte-Hélène).
+        if (Math.abs(p.y - p.gs) > 0.35) break;
         const here = streetsAt(p.x, p.n, 0, tmp).filter((st) => st.cls !== 'plaza');
         if (!here.length) break;
         for (const st of here) on.add(st);
@@ -150,7 +152,12 @@ export function compile(map) {
       if (!on.size) continue;
       if (run.length === 1) run.push([run[0][0] + S[k0].tx * dir, run[0][1] + S[k0].tn * dir]);
       try {
-        const local = G.bufferPolyline(run, r.half + 1, r.half + 1);
+        // Past the road's end by a little, but not past the run inward: there
+        // the road goes down into its trench, and closing the trench over it
+        // laid the ground on top of the road.
+        const out = r.half + 1;
+        const tip = [run[0][0] - S[k0].tx * dir * out, run[0][1] - S[k0].tn * dir * out];
+        const local = G.bufferPolyline([tip, ...run], r.half + 1, 0);
         // Only the stretch of each street near the landing: buffering whole
         // streets costs more than all the rest of the trenches.
         const bb = G.ringBBox(run), pad = r.half + 1;
@@ -895,21 +902,35 @@ function nearRuns(path, x0, n0, x1, n1) {
  */
 function runs(road, test, margin) {
   const out = [];
-  let cur = [], m = 0;
-  const flush = () => {
+  let cur = [], m = 0, joinStart = false;
+  // Where the margin changes the run is cut in two pieces that share a
+  // sample. Square ends there left a wedge of ground on the outside of any
+  // bend, over the road: each piece reaches a metre into the next.
+  const JOIN = 1;
+  const flush = (joinEnd = false) => {
     if (cur.length >= 2) {
       const pts = G.simplify(cur.map((p) => [p.x, p.n]), 0.25);
-      const fp = G.bufferPolyline(pts, road.half + m, 0);
+      const reach = (i, j, d) => {
+        const a = pts[i], b = pts[j], l = Math.hypot(a[0] - b[0], a[1] - b[1]) || 1;
+        return [a[0] + ((a[0] - b[0]) / l) * d, a[1] + ((a[1] - b[1]) / l) * d];
+      };
+      if (joinStart) pts[0] = reach(0, 1, JOIN);
+      if (joinEnd) pts[pts.length - 1] = reach(pts.length - 1, pts.length - 2, JOIN);
+      // As wide as the road is drawn: wider where it tapers into a fork.
+      let half = road.half;
+      for (const p of cur) if (p.h > half) half = p.h;
+      const fp = G.bufferPolyline(pts, half + m, 0);
       if (fp.length) out.push(fp);
     }
     cur = [];
+    joinStart = joinEnd;
   };
   for (const p of road.samples) {
     if (!test(p)) { flush(); continue; }
     const mp = margin(p);
     if (cur.length && mp !== m) {
       const last = cur[cur.length - 1];
-      flush();
+      flush(true);
       cur.push(last);
     }
     m = mp;
