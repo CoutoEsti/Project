@@ -11,6 +11,7 @@
 //   ?voiture=1|2|3       the car: 180, 250 or 350 km/h (V or 1 2 3 in the game)
 //   ?day=1                start by day
 //   ?low=1                phone settings: no bloom, lower resolution
+//   ?rendu=webgl|webgpu   force a renderer (default: WebGPU where there is one, WebGL on phones)
 //   ?trafic=0             empty streets (?trafic=40: 40 cars at full density)
 //   ?heure=17:30          time of day for the traffic (trafic.json says "reelle": the clock)
 
@@ -21,6 +22,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { buildWorld } from './world/build.js';
 import { createSky } from './world/sky.js';
+import { applyMaterialNodes, applySkyNodes } from './world/nodes.js';
 import { loadSource, fetchReader } from './map/source.js';
 import { ZONES, ECHELLES, resolveSettings } from './map/zones.js';
 import { resolveSpawn } from './game/spawn.js';
@@ -54,8 +56,14 @@ const STEP = 1 / 120;           // physics rate, independent of the display
 const MAX_STEPS = 8;            // at most this much catch-up per frame
 const $ = (id) => document.getElementById(id);
 
-const canvas = $('view');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: !LOW, powerPreference: 'high-performance' });
+let canvas = $('view');
+
+// The renderer: WebGPU where the browser has it, the WebGL one otherwise, on
+// phones, or with ?rendu=webgl. Same scene either way; WebGPU only needs the
+// custom shaders written again in TSL (world/nodes.js) and its own bloom.
+const gpu = await startWebGPU();
+const renderer = gpu ? gpu.renderer
+  : new THREE.WebGLRenderer({ canvas, antialias: !LOW, powerPreference: 'high-performance' });
 renderer.setPixelRatio(Math.min(devicePixelRatio, LOW ? 1.25 : 2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -64,13 +72,81 @@ renderer.info.autoReset = false;       // the composer renders several passes
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.3, 12000);
-const sky = createSky(THREE, scene, renderer);
+// The WebGPU namespace brings its own PMREMGenerator for the sky's reflections.
+const sky = createSky(gpu ? gpu.THREE : THREE, scene, renderer);
+if (gpu) applySkyNodes(gpu.THREE, gpu.TSL, sky);
 
-const composer = new EffectComposer(renderer);
-composer.addPass(new RenderPass(scene, camera));
-const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.7, 0.4, 0.88);
-composer.addPass(bloom);
-composer.addPass(new OutputPass());
+const composer = gpu ? gpuComposer(gpu, scene, camera) : glComposer();
+const bloom = composer.bloom;
+
+function glComposer() {
+  const c = new EffectComposer(renderer);
+  c.addPass(new RenderPass(scene, camera));
+  c.bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.7, 0.4, 0.88);
+  c.addPass(c.bloom);
+  c.addPass(new OutputPass());
+  return c;
+}
+
+/** The same chain on WebGPU: scene, bloom (night only), tone mapping. */
+function gpuComposer({ THREE: G, TSL, bloomNode }, scene, camera) {
+  const color = TSL.pass(scene, camera).getTextureNode('output');
+  const glow = bloomNode(color, 0.7, 0.4, 0.88);
+  const pipeline = new G.RenderPipeline(renderer, color.add(glow));
+  let on = true;
+  return {
+    bloom: {
+      get enabled() { return on; },
+      set enabled(v) {
+        if (v === on) return;
+        on = v;
+        pipeline.outputNode = v ? color.add(glow) : color;
+        pipeline.needsUpdate = true;
+      },
+    },
+    render() { pipeline.render(); },
+    setSize() { /* the pass follows the renderer */ },
+  };
+}
+
+async function startWebGPU() {
+  // Phones stay on WebGL until WebGPU is measured on one (?rendu=webgpu to try).
+  const want = params.get('rendu') || (LOW ? 'webgl' : 'webgpu');
+  if (want !== 'webgpu' || !navigator.gpu) return null;
+  let renderer = null;
+  try {
+    const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+    if (!adapter) return null;
+    const [G, TSL, { bloom: bloomNode }] = await Promise.all([
+      import('three/webgpu'), import('three/tsl'), import('three/addons/tsl/display/BloomNode.js'),
+    ]);
+    renderer = new G.WebGPURenderer({ canvas, antialias: !LOW, powerPreference: 'high-performance' });
+    await renderer.init();
+    // Without a usable device three.js quietly drops to WebGL 2: then the
+    // proven WebGL renderer is the better one.
+    if (renderer.backend.isWebGPUBackend) {
+      // One textured quad first: a browser whose WebGPU disagrees with this
+      // three.js fails here, before the world is built for it.
+      const probe = new G.Scene();
+      const tex = new G.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
+      tex.needsUpdate = true;
+      probe.add(new G.Mesh(new G.PlaneGeometry(), new G.MeshBasicMaterial({ map: tex })));
+      renderer.render(probe, new G.PerspectiveCamera());
+      tex.dispose();
+      return { renderer, THREE: G, TSL, bloomNode };
+    }
+  } catch (e) {
+    console.warn('WebGPU indisponible, rendu WebGL :', e);
+  }
+  // The canvas may hold a WebGPU context by now: start again on a new one.
+  if (renderer) {
+    try { renderer.dispose(); } catch (e) { /* gone anyway */ }
+    const fresh = canvas.cloneNode(false);
+    canvas.replaceWith(fresh);
+    canvas = fresh;
+  }
+  return null;
+}
 
 // --- the world ---------------------------------------------------------------
 const stepLabel = $('loading-step');
@@ -86,6 +162,7 @@ const source = await loadSource(fetchReader('data/'));
 const world = await buildWorld(THREE, source, {
   settings, onStep: (s) => { stepLabel.textContent = s; }, pause: nextFrame,
 });
+if (gpu) applyMaterialNodes(gpu.THREE, gpu.TSL, world.materials);
 scene.add(world.root);
 stepLabel.textContent = 'collisions';
 await nextFrame();
@@ -558,6 +635,7 @@ window.__mtl = {
   driver,
   traffic,
   renderer,
+  rendu: gpu ? 'webgpu' : 'webgl',
   camera,
   scene,
   setNight,
@@ -603,6 +681,7 @@ window.__mtl = {
   },
   stats() {
     const i = renderer.info;
-    return { calls: i.render.calls, triangles: i.render.triangles, geometries: i.memory.geometries, textures: i.memory.textures, timings: world.timings };
+    // WebGPU counts its draws apart from its render() calls.
+    return { calls: i.render.drawCalls ?? i.render.calls, triangles: i.render.triangles, geometries: i.memory.geometries, textures: i.memory.textures, timings: world.timings };
   },
 };
