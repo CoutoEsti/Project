@@ -19,8 +19,10 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { buildWorld } from './world/build.js';
 import { createSky } from './world/sky.js';
+import { GradeShader } from './world/grade.js';
 import { loadSource, fetchReader } from './map/source.js';
 import { ZONES, ECHELLES, resolveSettings } from './map/zones.js';
 import { resolveSpawn } from './game/spawn.js';
@@ -66,11 +68,20 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.3, 12000);
 const sky = createSky(THREE, scene, renderer);
 
-const composer = new EffectComposer(renderer);
+// The composer renders into its own targets, which ignore the canvas's
+// `antialias`: without samples here every edge in the city is a staircase.
+const pixels = new THREE.Vector2();
+renderer.getDrawingBufferSize(pixels);
+const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(pixels.x, pixels.y, {
+  type: THREE.HalfFloatType, samples: LOW ? 0 : 4,
+}));
 composer.addPass(new RenderPass(scene, camera));
 const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.7, 0.4, 0.88);
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
+const grade = new ShaderPass(GradeShader);
+grade.enabled = !LOW;
+composer.addPass(grade);
 
 // --- the world ---------------------------------------------------------------
 const stepLabel = $('loading-step');
@@ -156,6 +167,18 @@ async function setCar(index, announce = false) {
   car = model || createCar(THREE, { color: def.color, lowering: def.lowering, spoiler: def.spoiler });
   car.group.name = 'Voiture';
   scene.add(car.group);
+  dressCar();
+}
+/** Give the car its own reflections (see carEnvironment in world/sky.js). */
+function dressCar() {
+  const env = sky.carEnvironment();
+  if (!car || !env) return;
+  car.group.traverse((o) => {
+    if (!o.material || !o.material.isMeshStandardMaterial) return;
+    o.material.envMap = env;
+    o.material.envMapIntensity = night ? 0.9 : 1;
+    o.material.needsUpdate = true;
+  });
 }
 const garage = $('garage');
 for (const [i, def] of CARS.entries()) {
@@ -202,6 +225,7 @@ function setNight(v) {
   if (trafficView) trafficView.setNight(night);
   renderer.toneMappingExposure = night ? 1.15 : 1.0;
   fogBase = scene.fog.density;
+  dressCar();
 }
 setNight(night);
 
