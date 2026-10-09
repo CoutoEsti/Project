@@ -284,6 +284,22 @@ export function water(THREE) {
   return t;
 }
 
+/**
+ * Balcony railing, for the alpha map: a top rail, a bottom rail and square
+ * balusters. One repeat is 0.6 m wide; v runs 0 (deck) to 1 (handrail).
+ */
+export function railing(THREE) {
+  const W = 64, H = 64, c = canvas(W, H), g = c.getContext('2d');
+  g.clearRect(0, 0, W, H);
+  g.fillStyle = '#ffffff';
+  g.fillRect(0, 0, W, 6);               // handrail (canvas top = v 1)
+  g.fillRect(0, H - 9, W, 5);           // bottom rail, just above the deck
+  for (let i = 0; i < 5; i++) g.fillRect(i * (W / 5) + 4, 0, 3, H);
+  const t = tex(THREE, c, 0.6);
+  t.wrapT = THREE.ClampToEdgeWrapping;
+  return t;
+}
+
 /** Chain-link fence: alpha-tested diamond mesh. */
 export function chainlink(THREE) {
   const S = 128, c = canvas(S, S), g = c.getContext('2d');
@@ -337,6 +353,13 @@ export const FACADES = [
   'brick_red', 'brick_brown', 'brick_buff', 'brick_dark', 'brick_old', 'stone', 'stone_dark',
   'concrete', 'panel', 'panel_dark', 'glass_blue', 'glass_dark', 'glass_green', 'glass_silver',
 ];
+
+/** Width of one window bay, metres, per facade (world/buildings.js). */
+export const FACADE_BAY = {
+  brick_red: 2.7, brick_brown: 2.7, brick_buff: 2.9, brick_dark: 2.7, brick_old: 3.6, stone: 3.2,
+  stone_dark: 3.2, concrete: 3.4, panel: 6.5, panel_dark: 6.5, glass_blue: 3.0, glass_dark: 3.0,
+  glass_green: 3.0, glass_silver: 3.0,
+};
 
 const FACADE_LOOK = {
   brick_red: { wall: '#8e4634', mortar: '#a57b68', brick: true, win: [0.28, 0.2, 0.44, 0.62], frame: '#e8e1d2', glass: '#1b2530' },
