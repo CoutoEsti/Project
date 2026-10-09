@@ -3,6 +3,7 @@
 //
 //   node mtl/tools/shots.mjs                    → mtl/.shots/*.png
 //   node mtl/tools/shots.mjs --out DIR --only decarie,plateau --day --zone centre --echelle 85
+//   node mtl/tools/shots.mjs --rendu webgpu     → the WebGPU renderer (default: WebGL)
 //
 // Chromium runs headless on SwiftShader when there is no GPU: slow, but the
 // pictures are the real renderer's.
@@ -19,6 +20,7 @@ const arg = (k, d) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] :
 const OUT = path.resolve(arg('--out', path.join(ROOT, '.shots')));
 const ONLY = arg('--only', null);
 const DAY = args.includes('--day');
+const RENDU = arg('--rendu', 'webgl');
 const W = Number(arg('--w', 1280)), H = Number(arg('--h', 720));
 
 // [name, camera x, n, h, target x, n, h]: real metres in the street-grid
@@ -44,7 +46,8 @@ async function main() {
   await fs.mkdir(OUT, { recursive: true });
   const { server, url } = await serve(ROOT);
   const { chromium } = await loadPlaywright();
-  const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+  const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist',
+    '--enable-unsafe-webgpu', '--enable-features=Vulkan', '--use-vulkan=swiftshader', '--use-webgpu-adapter=swiftshader'] });
   const page = await browser.newPage({ viewport: { width: W, height: H } });
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
@@ -52,10 +55,12 @@ async function main() {
   const t0 = Date.now();
   const q = new URLSearchParams();
   if (DAY) q.set('day', '1');
+  q.set('rendu', RENDU);
   if (arg('--zone', null)) q.set('zone', arg('--zone', null));
   if (arg('--echelle', null)) q.set('echelle', arg('--echelle', null));
   await page.goto(`${url}/index.html?${q}`);
   await page.waitForFunction(() => window.__mtl && window.__mtl.ready, null, { timeout: 300000 });
+  console.log(`rendu ${await page.evaluate(() => window.__mtl.rendu)}`);
   console.log(`chargé en ${((Date.now() - t0) / 1000).toFixed(1)} s`, JSON.stringify(await page.evaluate(() => window.__mtl.world.timings)));
   for (const [name, ...v] of VIEWS) {
     if (ONLY && !ONLY.split(',').includes(name)) continue;
