@@ -144,6 +144,10 @@ Montréal humide d'un soir d'été, où les enseignes gagnent sur le sodium.
 - **Fenêtres en creux** : la vitre est lue 7 à 24 cm derrière le mur, selon
   l'angle de vue (parallaxe dans le shader des façades, aucune géométrie) ;
   de biais, le tableau et le dessous du linteau apparaissent.
+- **Portes et relief** : sur la brique et la pierre, environ un rez-de-chaussée
+  sur trois a une porte peinte (cadre, panneaux, imposte vitrée, poignée),
+  en creux comme les fenêtres. Joints, cadres et allèges sont en relief
+  (normale perturbée dans le shader, s'efface au loin) : aucun triangle de plus.
 - **Plex** : galeries à chaque étage avec garde-corps ajourés, escalier
   extérieur quand la cour le permet, corniche avant. Les galeries peuvent
   surplomber le trottoir, jamais la chaussée ; l'escalier, qui touche le sol,
@@ -153,7 +157,9 @@ Montréal humide d'un soir d'été, où les enseignes gagnent sur le sodium.
 - **Sol** (textures générées) : asphalte à granulat fin dont la répétition
   est cassée par un second échantillon plus large ; trottoirs en dalles de
   1,5 m bordés d'une bordure plus claire (même maillage, couleurs de sommet :
-  aucun appel de rendu en plus) ; toits en mosaïque de gris.
+  aucun appel de rendu en plus) ; toits en mosaïque de gris. Le trottoir est
+  12 cm au-dessus de la chaussée (`KERB_H`, `layout.js`), avec une face de
+  bordure verticale ; la physique le voit aussi (`sidewalkAt`, `surface.js`).
 - **Ouvrages** : carreaux des tunnels et dessous de tabliers légèrement
   éclairés la nuit ; houppiers des arbres ombrés par-dessous, sans facettes.
 

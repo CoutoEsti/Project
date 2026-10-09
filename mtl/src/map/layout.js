@@ -16,6 +16,10 @@ import * as G from './geom.js';
 import { createRoadIndex } from './query.js';
 
 export const SPACING = 2;         // metres between road samples
+/** Sidewalk width per street class, real metres (world/streets.js draws them). */
+export const SIDEWALK = { boulevard: 3.6, avenue: 3.2, street: 2.6, narrow: 1.8, plaza: 0, alley: 0 };
+/** How far a sidewalk stands above the carriageway: a kerb. */
+export const KERB_H = 0.12;
 
 // Per-class construction rules. `smooth` is the vertical-curve radius in
 // metres; `deck` the structural depth under the running surface.
@@ -84,7 +88,7 @@ export function compile(map) {
   for (const st of streets) {
     for (let i = 0; i + 1 < st.path.length; i++) {
       const a = st.path[i], b = st.path[i + 1];
-      const r = st.half + 1;
+      const r = st.half + 1 + SIDEWALK.boulevard * map.scale;   // reach of its sidewalks too
       streetGrid.insert({ st, a, b }, Math.min(a[0], b[0]) - r, Math.min(a[1], b[1]) - r,
         Math.max(a[0], b[0]) + r, Math.max(a[1], b[1]) + r);
     }
@@ -138,8 +142,24 @@ export function compile(map) {
   T.streets = now() - t1;
   T.total = now() - t0;
 
+  // On a sidewalk: off every street's asphalt, within a sidewalk's width of
+  // one that has them. Same rule as the drawn sidewalks (world/streets.js),
+  // which another street's carriageway always cuts.
+  const wTmp = [];
+  const sidewalkAt = (x, n) => {
+    let hit = false;
+    for (const c of streetGrid.query(x, n, 0, wTmp)) {
+      const { d2 } = G.segDist2(x, n, c.a[0], c.a[1], c.b[0], c.b[1]);
+      const h = c.st.half;
+      if (d2 <= h * h) return false;
+      const w = (SIDEWALK[c.st.cls] ?? 2.4) * map.scale;
+      if (w > 0 && d2 <= (h + w) * (h + w)) hit = true;
+    }
+    return hit;
+  };
+
   const layout = {
-    map, terrain, roads, streets, streetsAt, holes,
+    map, terrain, roads, streets, streetsAt, sidewalkAt, holes,
     water: map.waterMulti, waterBodies: map.water, waterAt, groundAt,
     greens: map.greens, grounds: map.grounds, quartiers: map.quartiers,
     timings: T,

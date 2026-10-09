@@ -10,13 +10,16 @@
 
 import { GeoBuilder, meshOf } from './builder.js';
 import * as G from '../map/geom.js';
+import { SIDEWALK, KERB_H } from '../map/layout.js';
 
-const LIFT = { asphalt: 0.07, sidewalk: 0.05, kerb: 0.06 };
-// The kerb: a lighter band of the sidewalk along the carriageway, a hair above
-// the sidewalk and still under any crossing street's asphalt. Same mesh as the
-// sidewalk (vertex colours), so it costs no draw call.
-const KERB = { width: 0.3, tint: 1.45 };
-const SIDEWALK = { boulevard: 3.6, avenue: 3.2, street: 2.6, narrow: 1.8, plaza: 0, alley: 0 };
+// The sidewalk stands a kerb (KERB_H) above the asphalt, as every sidewalk
+// does. Another street's carriageway cuts it, so in a crossing the asphalt
+// is all there is.
+const LIFT = { asphalt: 0.07, sidewalk: 0.07 + KERB_H, kerb: 0.075 + KERB_H };
+// The kerb: a lighter granite band along the carriageway, its face dropping
+// to the asphalt. Same mesh as the sidewalk (vertex colours), so it costs no
+// draw call.
+const KERB = { width: 0.3, tint: 1.45, face: 0.95 };
 const STEP = 4;            // metres between height probes
 const ROAD_OVER = 0.6;
 const SHARP = 0.85;        // below this cosine of half the turn, a joint is rounded, not mitred     // a road this close to the street's level replaces it
@@ -93,6 +96,8 @@ export function buildStreets(THREE, layout, M, tiles) {
       const kw = Math.min(KERB.width * s, walk * 0.5);
       ribbon(t.sidewalk, line, half, half + kw, LIFT.kerb, cutWalk, T, KERB.tint, fineWalk);
       ribbon(t.sidewalk, line, -half - kw, -half, LIFT.kerb, cutWalk, T, KERB.tint, fineWalk);
+      kerbFace(t.sidewalk, line, half, 1, cutWalk, T);
+      kerbFace(t.sidewalk, line, -half, -1, cutWalk, T);
     }
   }
   const meshes = [];
@@ -246,6 +251,39 @@ function ribbon(b, line, o0, o1, lift, cut, T, tint = 1, fine = null) {
       else if (!cut(cx, cn)) b.quad(prev.i1, prev.i0, i0, i1);
     }
     prev = { x, n, i0, i1, p, a: [ax, an], b: [bx, bn] };
+  }
+}
+
+/**
+ * The kerb's face: a vertical strip from the asphalt up to the sidewalk, at
+ * offset `o` from the axis, facing the carriageway. Pieces of at most 2.5 m,
+ * each kept only where the sidewalk beside it is, so a face never stands in
+ * a crossing.
+ */
+function kerbFace(b, line, o, side, cut, T) {
+  const tint = KERB.face;
+  for (let i = 1; i < line.length; i++) {
+    const a = line[i - 1], c = line[i];
+    const along = Math.max(1, Math.ceil(Math.hypot(c[0] - a[0], c[1] - a[1]) / 2.5));
+    for (let k = 0; k < along; k++) {
+      const u0 = k / along, u1 = (k + 1) / along;
+      const pt = (u, off) => {
+        const lx = a[5] + (c[5] - a[5]) * u, ln = a[6] + (c[6] - a[6]) * u;
+        return [a[0] + (c[0] - a[0]) * u + lx * off, a[1] + (c[1] - a[1]) * u + ln * off, lx, ln];
+      };
+      const m = pt((u0 + u1) / 2, o + side * 0.4);
+      if (cut(m[0], m[1])) continue;
+      const p0 = pt(u0, o), p1 = pt(u1, o);
+      // Facing the axis: against the side's outward normal.
+      const nx = -side * (p0[2] + p1[2]) / 2, nn = -side * (p0[3] + p1[3]) / 2;
+      const y0 = T.height(p0[0], p0[1]), y1 = T.height(p1[0], p1[1]);
+      const i0 = b.v(p0[0], p0[1], y0 + LIFT.asphalt - 0.02, nx, nn, 0, p0[0], p0[1], tint, tint, tint);
+      const i1 = b.v(p1[0], p1[1], y1 + LIFT.asphalt - 0.02, nx, nn, 0, p1[0], p1[1], tint, tint, tint);
+      const i2 = b.v(p1[0], p1[1], y1 + LIFT.kerb, nx, nn, 0, p1[0], p1[1] + 0.1, tint, tint, tint);
+      const i3 = b.v(p0[0], p0[1], y0 + LIFT.kerb, nx, nn, 0, p0[0], p0[1] + 0.1, tint, tint, tint);
+      // Wound to face the carriageway on either side.
+      if (side > 0) b.quad(i1, i0, i3, i2); else b.quad(i0, i1, i2, i3);
+    }
   }
 }
 
