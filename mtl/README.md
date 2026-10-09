@@ -284,6 +284,8 @@ compare à une référence commitée (`tools/filet/anneau.json`,
 | `bout` | bout de route qui donne sur le vide (nombre) |
 | `sol` | relief dessiné au-dessus d'une route ouverte (m) |
 | `niveau` | point de route où la voiture ne tient pas à la hauteur de la route |
+| `troué` | point de route où un rayon vers le bas ne touche pas l'asphalte dessiné |
+| `fuite` | dans un tunnel, rayon (haut, côtés) qui ne touche ni mur ni plafond à 40 m |
 | `mur …`, `glissière …`, `dalle`, `pilier` | longueur de chaque genre de structure (m) |
 
 Il échoue si une cellule change **hors** des zones nommées par `--vise` (dans

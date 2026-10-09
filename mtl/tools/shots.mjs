@@ -3,7 +3,8 @@
 //
 //   node mtl/tools/shots.mjs                    → mtl/.shots/*.png
 //   node mtl/tools/shots.mjs --out DIR --only decarie,plateau --day --zone centre --echelle 85
-//   node mtl/tools/shots.mjs --views vues.json   (a list of [name, x, n, h, tx, tn, th], as VIEWS)
+//   node mtl/tools/shots.mjs --views vues.json   (a list of [name, x, n, h, tx, tn, th], as VIEWS,
+//                                                or [name, 'car', x, n, heading°, y]: the drive view)
 //   node mtl/tools/shots.mjs --jonctions         → the junctions of JUNCTIONS instead
 //
 // Chromium runs headless on SwiftShader when there is no GPU: slow, but the
@@ -93,6 +94,9 @@ export async function shoot({ root, views, out, day = false, query = {}, w = 128
       await page.evaluate((v) => {
         const m = window.__mtl;
         if (v[0] === null) { m.act('overview'); m.fly.overview(false); return; }
+        // ['car', x, n, heading in degrees, y]: the drive view, the car put
+        // there — the only way into a tunnel (free flight stays above ground).
+        if (v[0] === 'car') { const s = m.game.layout.map.scale; m.place(v[1] * s, v[2] * s, v[3], v[4] * s); return; }
         const L = m.game.layout, s = L.map.scale, T = L.terrain;
         const [x, n, h, tx, tn, th] = v;
         m.look(x * s, n * s, T.height(x * s, n * s) + h, tx * s, tn * s, T.height(tx * s, tn * s) + th);

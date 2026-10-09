@@ -1,6 +1,7 @@
 // The safety net for changes to the map: everything a driver would see wrong
 // (holes, slits between carriageways, solid things on the asphalt, road ends
-// open on the void, relief over a road, points of a road at the wrong height)
+// open on the void, relief over a road, points of a road at the wrong height,
+// asphalt missing from the meshes, holes in tunnel walls and ceilings)
 // and every wall, barrier and median deck, summed per 40 m cell over the
 // whole map, then compared with the reference committed next to this file.
 //
@@ -21,7 +22,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { artefacts, openEnds, slits, groundOver, offLevel, walls } from './lib/mesures.mjs';
+import { artefacts, openEnds, slits, groundOver, offLevel, walls, leaks } from './lib/mesures.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REF = (zone) => path.join(HERE, 'filet', `${zone}.json`);
@@ -46,6 +47,8 @@ const DEFECTS = {
   bout: { unit: '', tol: 1, what: 'bouts de route ouverts' },
   sol: { unit: 'm', tol: 4, what: 'relief au-dessus de la route' },
   niveau: { unit: '', tol: 1, what: 'points de route mal posés' },
+  'troué': { unit: '', tol: 1, what: 'points sans asphalte dessiné' },
+  fuite: { unit: '', tol: 1, what: 'trous dans les tunnels' },
 };
 const WALL_TOL = 2;       // metres of wall in a cell
 const DRIFT = 25;         // metres of wall, summed over every cell outside the boxes
@@ -67,6 +70,7 @@ export function measure(world) {
   for (const p of groundOver(world)) add('sol', p.x, p.n, p.len);
   for (const p of offLevel(world)) add('niveau', p.x, p.n, p.len);
   for (const w of walls(world)) add(w.kind, w.x, w.n, w.len);
+  for (const l of leaks(world)) add(l.kind, l.x, l.n, l.len);
   const totals = {};
   for (const [m, c] of Object.entries(cells)) {
     for (const k of Object.keys(c)) c[k] = Math.round(c[k] * 10) / 10;

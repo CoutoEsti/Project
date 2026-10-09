@@ -328,3 +328,133 @@ export function walls(world) {
   for (const poly of world.layout.holes || []) for (const ring of poly) pieces('bord de tranchée', ring, null);
   return out;
 }
+
+// ------------------------------------------------------------------- leaks --
+// What the eye sees, not what the wheels find: rays cast through the meshes
+// as drawn. In a tunnel (and under a street over a trench), from the car's
+// eye every 10 m, rays up, to the sides and in between must all meet a wall
+// or the ceiling within 40 m; one that meets nothing looks out through a
+// hole into the void or the sky (`fuite`). Over every road every 4 m, at the
+// centre and 70 % of the way to each edge, a ray down from 3 m above must
+// meet the road's own surface within 0.3 m (`troué`): the asphalt as drawn,
+// not the surface the physics believes in.
+// Amount: rays (each one a direction where the hole shows).
+const CELL3 = 8;
+
+export function triangles(world, wanted) {
+  const grid = new Map(), P = [];
+  const key = (i, j) => i * 100003 + j;
+  const v = [0, 0, 0].map(() => ({ x: 0, y: 0, z: 0 }));
+  world.root.updateMatrixWorld(true);
+  world.root.traverse((o) => {
+    if (!o.isMesh || o.isInstancedMesh || !o.visible) return;
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    if (mats.every((m) => m.transparent && m.opacity < 0.5)) return;
+    const pos = o.geometry.attributes.position, idx = o.geometry.index, e = o.matrixWorld.elements;
+    const n = idx ? idx.count : pos.count;
+    const get = (k, out) => {
+      const x = pos.getX(k), y = pos.getY(k), z = pos.getZ(k);
+      out.x = e[0] * x + e[4] * y + e[8] * z + e[12];
+      out.y = e[1] * x + e[5] * y + e[9] * z + e[13];
+      out.z = e[2] * x + e[6] * y + e[10] * z + e[14];
+    };
+    for (let t = 0; t + 2 < n; t += 3) {
+      for (let c = 0; c < 3; c++) get(idx ? idx.getX(t + c) : t + c, v[c]);
+      // (x, y, z) with z = -n: cells in (x, n).
+      const xs = [v[0].x, v[1].x, v[2].x], ns = [-v[0].z, -v[1].z, -v[2].z];
+      const i0 = Math.floor(Math.min(...xs) / CELL3), i1 = Math.floor(Math.max(...xs) / CELL3);
+      const j0 = Math.floor(Math.min(...ns) / CELL3), j1 = Math.floor(Math.max(...ns) / CELL3);
+      // A straight wall is one long quad: kept. Only the sky dome and the
+      // far backdrop span more, and they close nothing.
+      if ((i1 - i0 + 1) * (j1 - j0 + 1) > 20000) continue;
+      let id = -1;
+      for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) {
+        const k = key(i, j);
+        if (!wanted.has(k)) continue;
+        if (id < 0) { id = P.length / 9; P.push(v[0].x, -v[0].z, v[0].y, v[1].x, -v[1].z, v[1].y, v[2].x, -v[2].z, v[2].y); }
+        let c = grid.get(k);
+        if (!c) grid.set(k, c = []);
+        c.push(id);
+      }
+    }
+  });
+  const T = Float64Array.from(P);
+  // Nearest hit along (o + t d), t in (0, max]: Möller–Trumbore, both faces.
+  function cast(ox, on, oy, dx, dn, dy, max) {
+    let best = Infinity;
+    const seen = new Set();
+    const steps = Math.max(1, Math.ceil((max * Math.hypot(dx, dn)) / (CELL3 / 2)));
+    for (let s = 0; s <= steps; s++) {
+      const t = (max * s) / steps;
+      if (t > best) break;
+      const c = grid.get(key(Math.floor((ox + dx * t) / CELL3), Math.floor((on + dn * t) / CELL3)));
+      if (!c) continue;
+      for (const id of c) {
+        if (seen.has(id)) continue;
+        seen.add(id);
+        const b = id * 9;
+        const e1x = T[b + 3] - T[b], e1n = T[b + 4] - T[b + 1], e1y = T[b + 5] - T[b + 2];
+        const e2x = T[b + 6] - T[b], e2n = T[b + 7] - T[b + 1], e2y = T[b + 8] - T[b + 2];
+        // In (x, n, y) order: p = d × e2.
+        const px = dn * e2y - dy * e2n, pn = dy * e2x - dx * e2y, py = dx * e2n - dn * e2x;
+        const det = e1x * px + e1n * pn + e1y * py;
+        if (Math.abs(det) < 1e-12) continue;
+        const inv = 1 / det;
+        const sx = ox - T[b], sn = on - T[b + 1], sy = oy - T[b + 2];
+        const u = (sx * px + sn * pn + sy * py) * inv;
+        if (u < 0 || u > 1) continue;
+        const qx = sn * e1y - sy * e1n, qn = sy * e1x - sx * e1y, qy = sx * e1n - sn * e1x;
+        const w = (dx * qx + dn * qn + dy * qy) * inv;
+        if (w < 0 || u + w > 1) continue;
+        const tt = (e2x * qx + e2n * qn + e2y * qy) * inv;
+        if (tt > 1e-4 && tt <= max && tt < best) best = tt;
+      }
+    }
+    return best;
+  }
+  return { cast };
+}
+
+export function leaks(world) {
+  const { layout } = context(world);
+  const key = (i, j) => i * 100003 + j;
+  const wanted = new Set();
+  const want = (x, n, r) => {
+    for (let i = Math.floor((x - r) / CELL3); i <= Math.floor((x + r) / CELL3); i++) {
+      for (let j = Math.floor((n - r) / CELL3); j <= Math.floor((n + r) / CELL3); j++) wanted.add(key(i, j));
+    }
+  };
+  const inside = [];   // tunnel probes: [x, n, y, lx, ln, what]
+  const down = [];     // [x, n, y, what]
+  for (const r of layout.roads) {
+    const S = r.samples;
+    for (let i = 0; i < S.length; i++) {
+      const p = S[i];
+      if (p.s % 4 > 1 && i) continue;
+      const h = p.h ?? r.half;
+      if (p.covered) {
+        // Clear of the portals: there the tunnel opens, as it should.
+        const far = (k) => { for (let j = Math.max(0, i - k); j <= Math.min(S.length - 1, i + k); j++) if (!S[j].covered) return false; return true; };
+        if (p.s % 10 < 2 && far(6)) { inside.push([p.x, p.n, p.y + 1.5, p.lx, p.ln, roadName(r)]); want(p.x, p.n, 42); }
+      }
+      for (const o of [0, 0.7, -0.7]) {
+        const x = p.x + p.lx * h * o, n = p.n + p.ln * h * o;
+        down.push([x, n, p.y, roadName(r)]);
+        want(x, n, 1);
+      }
+    }
+  }
+  const { cast } = triangles(world, wanted);
+  const out = [];
+  const DIRS = [[0, 1], [0.5, 0.87], [-0.5, 0.87], [0.87, 0.5], [-0.87, 0.5], [1, 0], [-1, 0]];   // [across, up]
+  for (const [x, n, y, lx, ln, what] of inside) {
+    for (const [a, u] of DIRS) {
+      if (cast(x, n, y, lx * a, ln * a, u, 40) === Infinity) out.push({ kind: 'fuite', x, n, y, road: what, len: 1, dir: [a, u] });
+    }
+  }
+  for (const [x, n, y, what] of down) {
+    const t = cast(x, n, y + 3, 0, 0, -1, 3.3);
+    if (t === Infinity || Math.abs(y + 3 - t - y) > 0.3) out.push({ kind: 'troué', x, n, y, road: what, len: 1 });
+  }
+  return out;
+}
