@@ -46,6 +46,9 @@ export const VIEWS = [
 // after a change to the map.
 export const JUNCTIONS = [
   ['decarie-centre', -3830, 3600, 30, -3845, 3100, 0],
+  // Down in the trench, over the median: heights are above the relief, so
+  // negative ones are below the trench's rim.
+  ['decarie-terre-plein', -3830, 3430, -2, -3830, 3395, -7.5],
   ['decarie-nord', -3700, 4700, 40, -3770, 4550, 0],
   ['decarie-savane', -3580, 5820, 45, -3634, 5700, 0],
   ['turcot', -4150, -250, 90, -4300, -500, 0],

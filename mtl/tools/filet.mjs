@@ -7,6 +7,7 @@
 //   node mtl/tools/filet.mjs                       → anneau and coeur against the reference
 //   node mtl/tools/filet.mjs --vise decarie        → changes allowed in Décarie only
 //   node mtl/tools/filet.mjs --vise -4000,3000,-3600,4500   (x0,n0,x1,n1, metres)
+//   node mtl/tools/filet.mjs --vise decarie --permet fente   → and the slits may shrink anywhere
 //   node mtl/tools/filet.mjs --zone coeur
 //   node mtl/tools/filet.mjs --accepter            → the new numbers become the reference
 //
@@ -99,10 +100,12 @@ function inside(targets, k) {
 }
 
 /**
- * Compares a measure with the reference.
+ * Compares a measure with the reference. `allowed`: metrics that may change
+ * anywhere (a rule meant for the whole map: every slit between twins); a
+ * defect among them still may not grow.
  * @returns { ok, lines: [string], changes } — lines: the report, in French
  */
-export function compare(ref, now, targets = [], world = null) {
+export function compare(ref, now, targets = [], world = null, allowed = []) {
   const lines = [], fails = [];
   const metrics = new Set([...Object.keys(ref.cells), ...Object.keys(now.cells)]);
   const changed = [];   // { k, metric, a, b, in }
@@ -113,7 +116,7 @@ export function compare(ref, now, targets = [], world = null) {
     for (const k of new Set([...Object.keys(A), ...Object.keys(B)])) {
       const a = A[k] || 0, b = B[k] || 0, d = b - a;
       if (!d) continue;
-      const tin = inside(targets, k);
+      const tin = allowed.includes(m) || inside(targets, k);
       if (!DEFECTS[m] && !tin) drift += Math.abs(d);
       if (Math.abs(d) < tol) continue;
       changed.push({ k, metric: m, a, b, in: tin });
@@ -208,6 +211,7 @@ async function main() {
   const arg = (k, d) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : d; };
   const zones = arg('--zone', 'anneau,coeur').split(',');
   const targets = parseTargets(arg('--vise', null));
+  const allowed = (arg('--permet', '') || '').split(',').filter(Boolean);
   const ACCEPT = args.includes('--accepter');
   const THREE = await import('../vendor/three.module.min.js');
   const { buildWorld } = await import('../src/world/build.js');
@@ -220,15 +224,15 @@ async function main() {
     const world = await buildWorld(THREE, source, { settings, outside: false });
     const now = measure(world);
     const ref = readRef(zone);
-    console.log(`\n${zone} — mesuré en ${((performance.now() - t0) / 1000).toFixed(0)} s${targets.length ? `, zone visée : ${targets.map((t) => t.name).join(', ')}` : ''}`);
+    console.log(`\n${zone} — mesuré en ${((performance.now() - t0) / 1000).toFixed(0)} s${targets.length ? `, zone visée : ${targets.map((t) => t.name).join(', ')}` : ''}${allowed.length ? `, partout : ${allowed.join(', ')}` : ''}`);
     if (ACCEPT) {
-      if (ref) for (const l of compare(ref, now, targets, world).lines) console.log(l);
+      if (ref) for (const l of compare(ref, now, targets, world, allowed).lines) console.log(l);
       writeRef(zone, settings, now);
       console.log(`  référence écrite : ${path.relative(process.cwd(), REF(zone))}`);
       continue;
     }
     if (!ref) { console.log(`  pas de référence : node mtl/tools/filet.mjs --accepter --zone ${zone}`); ok = false; continue; }
-    const res = compare(ref, now, targets, world);
+    const res = compare(ref, now, targets, world, allowed);
     for (const l of res.lines) console.log(l);
     console.log(res.ok ? '\n  ok' : `\n  ÉCHEC — ${res.fails.join(' ; ')}`);
     ok = ok && res.ok;

@@ -545,7 +545,7 @@ drive('circuit Gilles-Villeneuve', ['Circuit Gilles-Villeneuve', 2300, -3200, 18
   // other side of town is a rule too broad (tools/filet.mjs).
   const ref = !settings.forme && readRef(settings.zone);
   if (ref && ref.echelle === settings.echelle) {
-    const res = compare(ref, measure(world), parseTargets(arg('--vise', null)), world);
+    const res = compare(ref, measure(world), parseTargets(arg('--vise', null)), world, (arg('--permet', '') || '').split(',').filter(Boolean));
     if (!res.ok || res.changed.length) for (const l of res.lines) console.log(l);
     check('filet : rien ne bouge hors de la zone visée, aucun défaut en plus', res.ok,
       res.ok ? `${res.changed.length} changements de cellule, tous visés` : res.fails.join(' ; '));
