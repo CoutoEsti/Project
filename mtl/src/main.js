@@ -9,7 +9,10 @@
 //   ?fly=1  or  #vol      start in free flight, over the whole map
 //   ?cam=x,n,h,tx,tn,th   start in free flight, camera and target (map frame)
 //   ?voiture=1|2|3       the car: 180, 250 or 350 km/h (V or 1 2 3 in the game)
-//   ?day=1                start by day
+//   ?day=1  ?nuit=1       a fixed sky: day or night (by default the sky follows
+//                         the shared clock: 15 min of night, 3 min 30 of day)
+//   ?cycle=<seconds>      the sky frozen that far into the cycle (1000: dusk)
+//   ?pluie=0..1           how hard it rains, whatever the clock says
 //   ?low=1                phone settings: no bloom, lower resolution
 //   ?trafic=0             empty streets (?trafic=40: 40 cars at full density)
 //   ?heure=17:30          time of day for the traffic (trafic.json says "reelle": the clock)
@@ -19,8 +22,13 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { buildWorld } from './world/build.js';
 import { createSky } from './world/sky.js';
+import { GradeShader } from './world/grade.js';
+import { SpeedBlurShader, blurAt } from './world/speedblur.js';
+import { createRain } from './world/rain.js';
+import { skyAt, sharedClock } from './world/daycycle.js';
 import { loadSource, fetchReader } from './map/source.js';
 import { ZONES, ECHELLES, resolveSettings } from './map/zones.js';
 import { resolveSpawn } from './game/spawn.js';
@@ -48,6 +56,7 @@ for (const t of hashTokens) {
   else if (/^\d+$/.test(t)) params.set('echelle', t);
   else if (t === 'vol') params.set('fly', '1');
   else if (t === 'jour') params.set('day', '1');
+  else if (t === 'nuit') params.set('nuit', '1');
 }
 const LOW = params.has('low') || /iPhone|iPad|Android/i.test(navigator.userAgent);
 const STEP = 1 / 120;           // physics rate, independent of the display
@@ -66,11 +75,24 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.3, 12000);
 const sky = createSky(THREE, scene, renderer);
 
-const composer = new EffectComposer(renderer);
+// The composer renders into its own targets, which ignore the canvas's
+// `antialias`: without samples here every edge in the city is a staircase.
+const pixels = new THREE.Vector2();
+renderer.getDrawingBufferSize(pixels);
+const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(pixels.x, pixels.y, {
+  type: THREE.HalfFloatType, samples: LOW ? 0 : 4,
+}));
 composer.addPass(new RenderPass(scene, camera));
 const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.7, 0.4, 0.88);
 composer.addPass(bloom);
+const speedBlur = new ShaderPass(SpeedBlurShader);
+speedBlur.uniforms.centre.value = new THREE.Vector2(0.5, 0.45);
+speedBlur.enabled = false;
+composer.addPass(speedBlur);
 composer.addPass(new OutputPass());
+const grade = new ShaderPass(GradeShader);
+grade.enabled = !LOW;
+composer.addPass(grade);
 
 // --- the world ---------------------------------------------------------------
 const stepLabel = $('loading-step');
@@ -156,6 +178,18 @@ async function setCar(index, announce = false) {
   car = model || createCar(THREE, { color: def.color, lowering: def.lowering, spoiler: def.spoiler });
   car.group.name = 'Voiture';
   scene.add(car.group);
+  dressCar();
+}
+/** Give the car its own reflections (see carEnvironment in world/sky.js). */
+function dressCar() {
+  const env = sky.carEnvironment();
+  if (!car || !env) return;
+  car.group.traverse((o) => {
+    if (!o.material || !o.material.isMeshStandardMaterial) return;
+    o.material.envMap = env;
+    o.material.envMapIntensity = night ? 0.9 : 1;
+    o.material.needsUpdate = true;
+  });
 }
 const garage = $('garage');
 for (const [i, def] of CARS.entries()) {
@@ -191,19 +225,55 @@ if (wantsTouch()) {
   input.bindTouch($('touch'));
 }
 
-// --- night and day -----------------------------------------------------------
-let night = !params.has('day');
+// --- night and day, and rain --------------------------------------------------
+// The sky follows the shared clock (world/daycycle.js): every player sees the
+// same hour and the same rain without a word exchanged. The address or N can
+// fix it at night or by day instead.
+const SKY_MODES = ['cycle', 'night', 'day'];
+let skyMode = params.has('day') ? 'day' : params.has('nuit') ? 'night' : 'cycle';
+const frozenAt = params.has('cycle') ? Number(params.get('cycle')) || 0 : null;
+const forcedRain = params.has('pluie') ? Math.min(1, Math.max(0, Number(params.get('pluie')) || 0)) : null;
+let night = true;      // more night than day: for what simply switches on or off
+let nightK = 1;        // 0 by day, 1 by night, in between at dusk and dawn
+let rainK = 0;
 let fogBase = 0;
-function setNight(v) {
-  night = v;
-  sky.set(night ? 'night' : 'day');
-  world.materials.setNight(night);
-  bloom.enabled = night && !LOW;
-  if (trafficView) trafficView.setNight(night);
-  renderer.toneMappingExposure = night ? 1.15 : 1.0;
-  fogBase = scene.fog.density;
+let lastSky = null;
+const rain = createRain(THREE, { count: LOW ? 2500 : 6000 });
+scene.add(rain.object);
+
+function skyNow() {
+  let s;
+  if (skyMode === 'day') s = { daylight: 1, twilight: 0, rain: 0 };
+  else if (skyMode === 'night') s = { daylight: 0, twilight: 0, rain: 0 };
+  else s = skyAt(frozenAt ?? sharedClock());
+  if (forcedRain != null) s.rain = forcedRain;
+  return s;
 }
-setNight(night);
+function applySky(force = false) {
+  const s = skyNow();
+  const same = (k) => Math.abs(lastSky[k] - s[k]) < 0.002;
+  if (!force && lastSky && same('daylight') && same('twilight') && same('rain')) return;
+  lastSky = s;
+  const was = night;
+  // On a phone the environment is baked again less often: it costs a stall.
+  night = sky.set(s, { step: LOW ? 0.2 : 0.05 });
+  nightK = 1 - s.daylight;
+  rainK = s.rain;
+  world.materials.setNight(nightK);
+  world.materials.setWet(rainK);
+  bloom.enabled = nightK > 0.05 && !LOW;
+  bloom.strength = 0.7 * Math.min(1, nightK * 1.5);
+  if (trafficView) trafficView.setNight(nightK);
+  renderer.toneMappingExposure = 1 + 0.15 * nightK;
+  fogBase = scene.fog.density;
+  if (force || was !== night) dressCar();
+}
+/** Fix the sky at night (true) or by day (false). */
+function setNight(v) {
+  skyMode = v ? 'night' : 'day';
+  applySky(true);
+}
+applySky(true);
 
 // --- free flight -------------------------------------------------------------
 const fly = new FlyCamera(camera, canvas, game);
@@ -248,7 +318,8 @@ for (const b of document.querySelectorAll('[data-mode]')) {
     // The preview keeps only a bare #anchor; a local server keeps both.
     const tokens = [zoneSel.value, scaleSel.value];
     if (flying) tokens.push('vol');
-    if (!night) tokens.push('jour');
+    if (skyMode === 'day') tokens.push('jour');
+    else if (skyMode === 'night') tokens.push('nuit');
     location.hash = tokens.join('-');
     location.reload();
   });
@@ -334,7 +405,12 @@ function act(action) {
     case 'camera': if (!flying) chase.cycle(); break;
     case 'map': hud.toggleMap(info()); break;
     case 'close': hud.closeMap(); break;
-    case 'night': setNight(!night); break;
+    case 'night': {
+      skyMode = SKY_MODES[(SKY_MODES.indexOf(skyMode) + 1) % SKY_MODES.length];
+      applySky(true);
+      toast({ cycle: 'Ciel : suit l’horloge (15 min de nuit)', night: 'Ciel : nuit', day: 'Ciel : jour' }[skyMode]);
+      break;
+    }
     case 'fly': setFlying(!flying); break;
     case 'overview': setFlying(true); fly.overview(); break;
     case 'drop': {
@@ -470,13 +546,13 @@ function frame(now) {
   car.group.rotation.set(-(pose.pitch + v.bodyPitch), Math.PI - pose.heading, -pose.roll, 'YXZ');
   car.setSteer(-v.steerAngle);
   car.setSpin(v.wheelSpin);
-  car.setLights(night, input.brake > 0.1 && v.u > 0.5);
-  car.setUnderglow(night, 0x22ccff, 1);
+  car.setLights(nightK > 0.35, input.brake > 0.1 && v.u > 0.5);
+  car.setUnderglow(nightK > 0.15, 0x22ccff, nightK);
   const fx = Math.sin(pose.heading), fn = Math.cos(pose.heading);
   headlight.position.set(pose.x + fx * 2.1, pose.y + 0.8, -(pose.n + fn * 2.1));
   headlight.target.position.set(pose.x + fx * 28, pose.y - 0.4, -(pose.n + fn * 28));
   headlight.target.updateMatrixWorld();
-  headlight.intensity = night ? 260 : 0;
+  headlight.intensity = 260 * Math.min(1, Math.max(0, (nightK - 0.2) / 0.5));
 
   // Camera. From above, the fog thins out, or the map would vanish in it.
   if (flying) {
@@ -531,6 +607,11 @@ function frame(now) {
   }
 
   const t = clock.getElapsedTime();
+  applySky();
+  rain.update(t, camera, rainK, nightK);
+  const blur = flying || LOW ? 0 : blurAt(driver.kmh);
+  speedBlur.enabled = blur > 0.001;
+  speedBlur.uniforms.amount.value = blur;
   for (const a of world.animated) a.update(t);
   sky.follow(camera);
   composer.render();
@@ -561,6 +642,8 @@ window.__mtl = {
   camera,
   scene,
   setNight,
+  /** The sky now: { daylight, twilight, rain, phase }. */
+  sky: () => ({ ...lastSky, mode: skyMode }),
   frames: () => frames,
   /** Free-flight view from (x, n, h) towards (tx, tn, th), map frame. */
   look(x, n, h, tx, tn, th) {

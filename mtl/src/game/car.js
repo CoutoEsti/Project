@@ -195,6 +195,7 @@ export function createCar(THREE, opts = {}) {
     : new THREE.MeshPhysicalMaterial({
       color: paint, metalness: 0.15, roughness: 0.42,
       clearcoat: 1.0, clearcoatRoughness: 0.28,
+      emissive: paint, emissiveIntensity: 0,
     });
   const glassMat = ghost
     ? bodyMat
@@ -392,6 +393,9 @@ export function createCar(THREE, opts = {}) {
       // and so the night bloom pass picks them up under braking.
       tailMat.emissive.setHex(braking ? 0xff2a1c : (on ? 0x7a140f : 0x1a0503));
       tailMat.emissiveIntensity = braking ? 1.6 : (on ? 0.55 : 0.1);
+      // At night a touch of the paint's own colour stands in for the light
+      // bounced off the street: lit by the dark sky alone it reads as black.
+      bodyMat.emissiveIntensity = on ? 0.05 : 0;
     },
     dispose() {
       group.traverse((o) => {
