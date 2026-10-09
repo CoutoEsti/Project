@@ -6,7 +6,8 @@
 // the air; where none do, it stops dead. An end that only gives onto grass
 // at its own level is listed apart: no drop, but no road either.
 // For each, what lies near and what OpenStreetMap joins at its node, to tell
-// a data dead end from a junction the profiles failed to meet.
+// a data dead end from a junction the profiles failed to meet. The measure
+// itself is tools/lib/mesures.mjs.
 //
 //   node mtl/tools/bouts.mjs                 → counts and the partly open list
 //   node mtl/tools/bouts.mjs --all --json f  → every end, written to f
@@ -16,34 +17,18 @@ import * as THREE from '../vendor/three.module.min.js';
 import { buildWorld } from '../src/world/build.js';
 import { segDist2 } from '../src/map/geom.js';
 import { loadSourceNode } from './lib/source-node.mjs';
+import { openEnds } from './lib/mesures.mjs';
 
 const args = process.argv.slice(2);
 const arg = (k, d) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : d; };
 const settings = { zone: arg('--zone', 'anneau'), echelle: Number(arg('--echelle', 100)) };
 const ALL = args.includes('--all');
-const DY = 0.6;          // a step the car climbs, as in map/surface.js
 
 const source = await loadSourceNode();
 const world = await buildWorld(THREE, source, { settings, outside: false });
 const { layout } = world;
-const cover = layout.roadCover;
 const T = layout.terrain;
-const tmp = [], hs = [];
-
-const SIDEWALK = { boulevard: 3.6, avenue: 3.2, street: 2.6, narrow: 1.8, plaza: 0, alley: 0 };   // world/streets.js
 const scale = layout.map.scale || 1;
-
-function probe(x, n, y) {
-  for (const h of cover.heights(x, n, hs)) if (Math.abs(h - y) <= DY) return 'road';
-  if (Math.abs(T.height(x, n) - y) > DY) return null;
-  // A street's sidewalk is driven onto too: a kerb, not a hole.
-  for (const st of layout.streetsAt(x, n, 4 * scale, tmp)) {
-    const walk = (SIDEWALK[st.cls] ?? 2.4) * scale;
-    if (layout.streetsAt(x, n, walk, []).includes(st)) return 'street';
-  }
-  // Bare ground at the road's level: no drop, only asphalt giving onto grass.
-  return 'grass';
-}
 
 // OpenStreetMap's own answer: which ways share the node a road ends on.
 const byNode = new Map();
@@ -102,32 +87,7 @@ function around(r, p) {
   return [road && `route ${road.id} ${road.name} à ${road.d.toFixed(0)} m, ${f(road.dy)} m`, street && `rue ${street.name} à ${street.d.toFixed(0)} m, ${f(street.dy)} m`].filter(Boolean).join(' ; ');
 }
 
-const ends = [];
-for (const r of layout.roads) {
-  if (r.loop || r.cls === 'circuit') continue;
-  const S = r.samples;
-  for (const [end, k, dir] of [['start', 0, -1], ['end', S.length - 1, 1]]) {
-    const p = S[k];
-    const closed = end === 'start' ? r.closedStart : r.closedEnd;
-    const h = p.h ?? r.half;
-    let total = 0, miss = 0, grass = 0;
-    const missing = [];
-    for (let v = -h + 0.5; v <= h - 0.5 + 1e-6; v += 1) {
-      const x = p.x + p.tx * dir + p.lx * v, n = p.n + p.tn * dir + p.ln * v;
-      total++;
-      const got = probe(x, n, p.y);
-      if (got === 'grass') grass++;
-      if (!got) { miss++; missing.push(Math.round(v * 10) / 10); }
-    }
-    if (!miss && !grass) continue;
-    ends.push({
-      id: r.id, way: r.osm, name: r.name || '', cls: r.cls, end, closed,
-      x: Math.round(p.x), n: Math.round(p.n), y: Math.round(p.y * 10) / 10,
-      ground: Math.round((p.y - T.height(p.x, p.n)) * 10) / 10,
-      miss: Math.round((miss / total) * 100), grass: Math.round((grass / total) * 100), missing, near: around(r, p), osm: topology(r, end),
-    });
-  }
-}
+const ends = openEnds(world).map(({ road, p, ...e }) => ({ ...e, near: around(road, p), osm: topology(road, e.end) }));
 
 const open = ends.filter((e) => e.miss > 0);
 const partial = open.filter((e) => e.miss < 90);

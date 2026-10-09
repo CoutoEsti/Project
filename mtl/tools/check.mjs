@@ -3,11 +3,14 @@
 // Métropolitaine, the Ville-Marie tunnel, the mountain, the bridge, the
 // circuit, and a few hundred ordinary streets picked at random.
 //
-//   node mtl/tools/check.mjs              → node only (~40 s)
+//   node mtl/tools/check.mjs              → node only (~2 min)
 //   node mtl/tools/check.mjs --browser    → plus the real page in headless
 //                                           Chromium: loads, no errors, drives
 //   node mtl/tools/check.mjs --zone centre --echelle 85
 //   node mtl/tools/check.mjs --forme <code>   → a drawn zone (?forme= of zones.html)
+//   node mtl/tools/check.mjs --vise decarie   → the change aims at Décarie: the
+//                                           safety net (tools/filet.mjs) lets
+//                                           the map change there, nowhere else
 //
 // Driving is measured, not eyeballed: an autopilot follows each motorway from
 // one OpenStreetMap way to the next in the right-hand lane, and every impact,
@@ -28,6 +31,7 @@ import { Driver } from '../src/game/drive.js';
 import { loadSourceNode } from './lib/source-node.mjs';
 import { serve } from './lib/serve.mjs';
 import { loadPlaywright } from './lib/playwright.mjs';
+import { measure, compare, readRef, parseTargets } from './filet.mjs';
 import { decodeShape } from '../src/map/zones.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -530,6 +534,24 @@ drive('circuit Gilles-Villeneuve', ['Circuit Gilles-Villeneuve', 2300, -3200, 18
     }
   }
   check('rues au hasard', bad.length <= Math.ceil(tried * 0.03), `${tried - bad.length}/${tried} sans obstacle${bad.length ? ` — ${bad.slice(0, 6).join(' ; ')}` : ''}`);
+}
+
+// ----------------------------------------------------------- safety net --
+
+{
+  // The whole map measured against tools/filet/<zone>.json: nothing may change
+  // outside the boxes named by --vise, and no defect may grow anywhere. A
+  // change that passes everything else here and still moves walls on the
+  // other side of town is a rule too broad (tools/filet.mjs).
+  const ref = !settings.forme && readRef(settings.zone);
+  if (ref && ref.echelle === settings.echelle) {
+    const res = compare(ref, measure(world), parseTargets(arg('--vise', null)), world);
+    if (!res.ok || res.changed.length) for (const l of res.lines) console.log(l);
+    check('filet : rien ne bouge hors de la zone visée, aucun défaut en plus', res.ok,
+      res.ok ? `${res.changed.length} changements de cellule, tous visés` : res.fails.join(' ; '));
+  } else if (!settings.forme && settings.echelle === 100) {
+    check('filet : référence présente', false, `node mtl/tools/filet.mjs --accepter --zone ${settings.zone}`);
+  }
 }
 
 // ---------------------------------------------------------------- browser --
