@@ -144,14 +144,13 @@ export function createMaterials(THREE, opts = {}) {
   });
   pool.name = 'Light_Pool';
   if (canvasOk) pool.map = T.lightPool(THREE);
-  M.wetUniform = { value: 0 };
-  wetStreaks(pool, M.wetUniform);
+  wetStreaks(pool);
   M.Light_Pool = pool;
   // The colour a sign throws on the wet sidewalk and the street.
   const npool = pool.clone();
   npool.name = 'Neon_Pool';
   npool.opacity = 0.55;
-  wetStreaks(npool, M.wetUniform);
+  wetStreaks(npool);
   M.Neon_Pool = npool;
 
   M.setNight = (night) => setNight(M, night);
@@ -184,13 +183,10 @@ function antiTile(m) {
  * the way its reflection streaks down a wet street. Done in the vertex shader
  * per instance (pools are unrotated discs), so it follows the camera for free.
  */
-function wetStreaks(m, wet) {
-  m.customProgramCacheKey = () => 'wet-streaks-v3';
+function wetStreaks(m) {
+  m.customProgramCacheKey = () => 'wet-streaks-v2';
   m.onBeforeCompile = (shader) => {
-    shader.uniforms.wet = wet;
-    shader.vertexShader = shader.vertexShader
-      .replace('#include <common>', '#include <common>\nuniform float wet;')
-      .replace('#include <begin_vertex>', `#include <begin_vertex>
+    shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
 #ifdef USE_INSTANCING
 {
   vec3 c = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
@@ -200,8 +196,7 @@ function wetStreaks(m, wet) {
   float r = length(instanceMatrix[0].xyz);
   // Longer the lower the eye: a streak is a grazing reflection.
   float graze = clamp(dist / max(cameraPosition.y - c.y, 0.5), 1.0, 12.0);
-  // In the rain, twice as long: the street is a mirror.
-  float stretch = 1.0 + min(graze * 0.3, 2.6) * (1.0 + wet);
+  float stretch = 1.0 + min(graze * 0.3, 2.6);
   vec2 p = transformed.xz;
   float along = dot(p, d);
   vec2 perp = p - along * d;
@@ -368,8 +363,9 @@ function setNight(M, night) {
 
 /**
  * How wet the streets are, 0..1 (rain). Night alone already makes them look
- * damp — the NFSU look; rain makes them a mirror: darker, glossier, and the
- * lights' reflections stretch twice as far.
+ * damp — the NFSU look; rain makes them darker and glossier. The light
+ * pools stay as they are: longer or brighter, they overlap into one orange
+ * wash over the whole street (tried).
  */
 function setWet(M, wet) {
   M.wet = Math.min(1, Math.max(0, Number(wet)));
@@ -378,12 +374,11 @@ function setWet(M, wet) {
 
 function wetGround(M) {
   const night = M.night ?? 1, wet = M.wet ?? 0;
-  if (M.wetUniform) M.wetUniform.value = wet;
   const pools = { Light_Pool: 0.2, Neon_Pool: 0.55, Beacon: 0.1 };
   for (const [name, base] of Object.entries(pools)) {
     if (!M[name]) continue;
     M[name].visible = night > 0.02;
-    M[name].opacity = base * night * (name === 'Beacon' ? 1 : 1 + 0.7 * wet);
+    M[name].opacity = base * night;
   }
   for (const name of ['Asphalt', 'Street_Asphalt']) {
     const m = M[name];

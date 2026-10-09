@@ -154,8 +154,7 @@ Montréal humide d'un soir d'été, où les enseignes gagnent sur le sodium.
   (la même pour tous), quelques minutes après la tombée de la nuit, avec une
   entrée et une sortie de 40 s. Gouttes en traits autour de la caméra (un
   seul appel de rendu, 6 000 traits, 2 500 sur téléphone), brume plus dense
-  et plus grise, chaussée plus sombre et plus lisse, reflets des lumières
-  deux fois plus longs.
+  et plus grise, chaussée plus sombre et plus lisse.
 - **Flou de vitesse** : au-delà de 110 km/h, les bords de l'image filent
   vers l'extérieur (plein effet à 260 km/h) ; le centre reste net. Une passe
   plein écran de huit lectures, coupée sur téléphone et en vol libre.

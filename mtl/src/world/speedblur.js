@@ -24,9 +24,12 @@ export const SpeedBlurShader = {
       vec2 d = vUv - centre;
       // Nothing in the middle third, full at the corners.
       float edge = smoothstep(0.12, 0.5, length(d * vec2(1.0, 0.8)));
-      vec2 step = d * amount * edge * 0.018;
-      vec4 c = texture2D(tDiffuse, vUv);
-      for (int i = 1; i < 8; i++) c += texture2D(tDiffuse, vUv - step * float(i));
+      vec2 step = d * amount * edge * 0.014;
+      // A different start per pixel: thin lines (rain, poles) smear instead
+      // of showing eight sharp copies.
+      float j = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
+      vec4 c = vec4(0.0);
+      for (int i = 0; i < 8; i++) c += texture2D(tDiffuse, vUv - step * (float(i) + j));
       gl_FragColor = c / 8.0;
     }`,
 };
