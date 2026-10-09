@@ -27,9 +27,8 @@ const TWIN = 6;             // twin columns stand this far either side
 const HEADROOM = 6.2;       // a road this far below drives under the deck
 const MERGE = 2.0;          // closer than this in height, two roads merge
 const MEDIAN_GAP = 9;       // two carriageways closer than this share one deck
-const LEVEL = 0.45;         // closer than this in height, two carriageways are level
 // Kinds that line the road's edge with a wall or a barrier.
-const EDGED = new Set(['viaduct', 'water', 'embankment', 'over', 'void', 'sunken', 'covered', 'tunnel', 'twin-gap', 'step']);
+const EDGED = new Set(['viaduct', 'water', 'embankment', 'over', 'void', 'sunken', 'covered', 'tunnel', 'twin-gap']);
 
 export function buildStructures(layout) {
   const { roads, map } = layout;
@@ -69,52 +68,30 @@ function annotate(r, ground) {
 }
 
 /**
- * The other carriageway of a divided road, when it runs alongside on this
- * side: the Métropolitaine is two one-way ways in the data, and one deck with
- * a concrete median in the city. Returns { road, gap, D, dy, y, same, sunk } —
- * gap between the two edges, negative where the ribbons overlap; D between
- * the centrelines; dy and y the other one's height, relative and absolute;
- * sunk when both are below the ground — or null. A carriageway going the
- * same way found first means this road merges into it, and the median is
- * that one's business. One at another height counts too: a ramp climbing out
- * of the trench beside the main lanes.
+ * The other carriageway of a divided road, when it runs alongside at the same
+ * level on this side: the Métropolitaine is two one-way ways in the data, and
+ * one deck with a concrete median in the city. Returns { road, gap, D } — gap
+ * between the two edges, negative where the ribbons overlap; D between the
+ * centrelines — or null. A carriageway going the same way found first means
+ * this road merges into it, and the median is that one's business.
  */
-export function twinOf(r, p, side, index) {
+function twinOf(r, p, side, index) {
   if (!r.oneway || p.covered) return null;
   for (const d of [-r.half * 0.5, PROBE, 3, 6, MEDIAN_GAP]) {
     const qx = p.x + side * p.lx * (r.half + d), qn = p.n + side * p.ln * (r.half + d);
     for (const o of index.surfacesAt(qx, qn, 0)) {
-      const dy = o.y - p.y;
-      if (o.road === r || o.covered || Math.abs(dy) > HEADROOM) continue;
-      const level = Math.abs(dy) <= LEVEL;
-      const q = o.road.samples[o.i], q1 = o.road.samples[Math.min(o.road.samples.length - 1, o.i + 1)];
-      const dot = q.tx * p.tx + q.tn * p.tn;
+      if (o.road === r || o.covered || Math.abs(o.y - p.y) > 0.45) continue;
       // A two-way road in between (Pierre-Dupuy between the Concorde's
-      // approaches), or one at an angle (crossing, branching off): not this
-      // road's other carriageway. Above or below, it is just passing.
-      if (!o.road.oneway || Math.abs(dot) < 0.85) { if (level) return null; continue; }
+      // approaches): these are not one road's carriageways.
+      if (!o.road.oneway) return null;
+      const q = o.road.samples[o.i], q1 = o.road.samples[Math.min(o.road.samples.length - 1, o.i + 1)];
+      if (q.tx * p.tx + q.tn * p.tn > -0.85) return null;
       const cx = q.x + (q1.x - q.x) * o.t, cn = q.n + (q1.n - q.n) * o.t;
       const D = Math.abs((cx - p.x) * p.lx + (cn - p.n) * p.ln);
-      const sunk = p.y - p.gs < -0.12 && o.y - q.gs < -0.12;
-      return { road: o.road, gap: D - (p.h ?? r.half) - (q.h ?? o.road.half), D, dy, y: o.y, same: dot > 0, sunk };
+      return { road: o.road, gap: D - r.half - o.road.half, D };
     }
   }
   return null;
-}
-
-/**
- * The road alongside this sample when the two are sunk together closely
- * enough to share one trench: map/layout.js opens the ground between them,
- * and roadStructures paves the gap and walls any step. Null otherwise.
- */
-export function trenchMate(r, p, side, index) {
-  const t = twinOf(r, p, side, index);
-  return t && t.sunk && t.gap >= 0.15 && t.gap < MEDIAN_GAP ? t : null;
-}
-
-/** Whether `r` is the one of a pair sharing a trench that builds between them. */
-export function pavesGap(r, t) {
-  return Math.abs(t.dy) <= LEVEL ? r.id < t.road.id : t.dy > 0;
 }
 
 function classify(r, p, side, index, ground, layout) {
@@ -122,21 +99,7 @@ function classify(r, p, side, index, ground, layout) {
   // apart: each keeps its barrier on the inside and a slab closes the gap,
   // or the car would find a slot to fall through.
   const twin = twinOf(r, p, side, index);
-  // A ramp running alongside the carriageway it is about to join, the same
-  // way: one deck, the gap between them paved — a slot there showed the
-  // ground or the trench through the road.
-  if (twin && Math.abs(twin.dy) <= LEVEL) {
-    if (twin.same) {
-      if (twin.gap < 0.15) return { kind: 'merge' };
-      if (twin.gap < MEDIAN_GAP) return { kind: 'merge-gap', ...twin };
-    } else if (twin.gap < MEDIAN_GAP) return { kind: twin.gap <= 1.2 && Math.abs(twin.dy) < 0.2 ? 'twin' : 'twin-gap', ...twin };
-  } else if (twin && twin.sunk && twin.gap >= 0.15 && twin.gap < MEDIAN_GAP) {
-    // Two roads in one trench at different heights (a ramp climbing out
-    // beside the main lanes): the trench is one (map/layout.js), the lower
-    // one walls the step up to the other, as tall as the step is. A wall up
-    // to the street there stood full height from the ramp's first metre.
-    return { kind: twin.dy > 0 ? 'step' : 'ledge', ...twin };
-  }
+  if (twin && twin.gap < MEDIAN_GAP) return { kind: twin.gap <= 1.2 ? 'twin' : 'twin-gap', ...twin };
   const qx = p.x + side * p.lx * (p.h + PROBE);
   const qn = p.n + side * p.ln * (p.h + PROBE);
   let merge = false, lower = null, higher = null, aboveInTunnel = false;
@@ -224,17 +187,6 @@ function roadStructures(r, index, ground, layout, out) {
       }
     }
     const at = (p, off) => [p.x + side * p.lx * off, p.n + side * p.ln * off];
-    // The deck between this road's edge and the one alongside, at the higher one's level.
-    const slab = (seg, ks) => ({ road: r.id, depth: deck, lifted: seg.map((p) => p.carry !== 'none'), pts: seg.map((p, j) =>
-      [...at(p, p.h - 0.05), ...at(p, p.h + Math.max(0, ks[j].gap) + 0.05), Math.max(p.y, ks[j].y ?? p.y)]) });
-    // Where the trench they share ends and the ground between them begins,
-    // a wall across the gap: the end of that strip of ground was open.
-    const closeGap = (p, k) => {
-      if (!(k.gap > 0.3)) return;
-      out.walls.push({ kind: 'retaining', road: r.id, side, thickness: 0.6, pts: [
-        [...at(p, p.h - 0.3), Math.min(p.y, k.y) - 0.5, p.gs + 0.05],
-        [...at(p, p.h + k.gap + 0.3), Math.min(p.y, k.y) - 0.5, p.gs + 0.05]] });
-    };
 
     // Under a street crossing the trench the wall is the trench's own: same
     // concrete, same line, one piece. Tiles are for real tunnels.
@@ -264,23 +216,14 @@ function roadStructures(r, index, ground, layout, out) {
             for (const run of clearRuns(pts, (q) => standsOnLanes(layout, index, q, [r, ks[0].road]))) {
               out.barriers.push({ kind: 'median', road: r.id, pts: run });
             }
-            // Under the barrier, the few decimetres between the two decks.
-            if (ks.some((k) => k.gap > 0.05)) out.medians.push(slab(seg, ks));
           }
         } else {
           out.barriers.push({ kind: 'jersey', road: r.id, pts: seg.map((p) => [...at(p, p.h - 0.35), p.y]) });
-          if (mine) out.medians.push(slab(seg, ks));
+          if (mine) {
+            out.medians.push({ road: r.id, depth: deck, lifted: seg.map((p) => p.carry !== 'none'), pts: seg.map((p, j) =>
+              [...at(p, p.h - 0.05), ...at(p, p.h + ks[j].gap + 0.05), p.y]) });
+          }
         }
-      } else if (kind === 'merge-gap') {
-        if (r.id < ks[0].road.id) out.medians.push(slab(seg, ks));
-      } else if (kind === 'step') {
-        // The lower road: a wall up to the other's level, and the gap paved there.
-        out.walls.push({ kind: 'skirt', road: r.id, side, thickness: 0.4,
-          pts: seg.map((p, j) => [...at(p, p.h - 0.2), p.y - 0.5, Math.max(p.y, ks[j].y) + 0.02]) });
-        if (!ks[0].same) out.barriers.push({ kind: 'jersey', road: r.id, pts: seg.map((p) => [...at(p, p.h - 0.35), p.y]) });
-        out.medians.push(slab(seg, ks));
-      } else if (kind === 'ledge') {
-        out.barriers.push({ kind: barrierKind, road: r.id, pts: seg.map((p) => [...at(p, p.h - 0.35), p.y]) });
       } else if (kind === 'viaduct' || kind === 'water') {
         out.walls.push({ kind: 'fascia', road: r.id, side, thickness: 0.35,
           pts: seg.map((p) => [...at(p, p.h - 0.17), p.y - deck, p.y + 0.02]) });
@@ -322,13 +265,6 @@ function roadStructures(r, index, ground, layout, out) {
       }
       if (barrier) {
         out.barriers.push({ kind: barrierKind, road: r.id, pts: seg.map((p) => [...at(p, p.h - 0.35), p.y]) });
-      }
-      const paves = kind === 'step' || (['twin', 'twin-gap', 'merge-gap'].includes(kind) && r.id < ks[0].road.id);
-      if (paves && kinds[i0].sunk) {
-        // Or a street's deck: under it the ground between them is a pier.
-        const ridge = (k) => k.kind === 'sunken' || k.kind === 'covered';
-        if (i0 > 0 && ridge(kinds[i0 - 1])) closeGap(S[i0], kinds[i0]);
-        if (i1 + 1 < S.length && ridge(kinds[i1 + 1])) closeGap(S[i1], kinds[i1]);
       }
     });
   }
