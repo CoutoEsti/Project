@@ -295,5 +295,8 @@ Voir [`unity/README.md`](unity/README.md).
   volant, 400 à 750 appels de rendu et 3 à 5 M triangles au centre-ville ;
   la vue d'ensemble de l'anneau, ~1 400 appels et 6,7 M. Sur téléphone,
   utiliser la zone `centre` (non mesuré sur un vrai téléphone).
-- Les voitures, piétons et le trafic manquent : les rues sont vides.
+- Piétons et trafic manquent. Des voitures stationnées bordent les rues assez
+  larges (`placeParkedCars` dans `map/props.js`) : 13 m et plus pour une rue à
+  double sens, sinon la voie de droite ne serait plus libre. Les rues de 11 m
+  du Plateau n'en ont donc pas encore.
 - Pas encore de trafic, de piétons, ni de course jouable.

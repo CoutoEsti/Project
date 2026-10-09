@@ -73,6 +73,8 @@ export function buildSolids(layout, structures, buildings, extras = {}) {
   }
   for (const l of extras.lamps || []) S.add(l.x, l.n, l.x, l.n, l.y - 0.2, l.y + 6, 0.18);
   for (const t of extras.trees || []) S.add(t.x, t.n, t.x, t.n, t.y - 0.2, t.y + 3, 0.28 * (t.s || 1));
+  // Parked cars: a capsule along the body, 4.3 m long and 1.8 m wide.
+  for (const c of extras.parked || []) S.add(c.x - c.fx * 1.25, c.n - c.fn * 1.25, c.x + c.fx * 1.25, c.n + c.fn * 1.25, c.y - 0.2, c.y + 1.4, 0.85);
   // Landmarks: the footprint of their lowest few metres (see
   // world/landmarks.js), so the collision follows the model.
   for (const f of extras.footprints || []) {
