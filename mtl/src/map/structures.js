@@ -325,8 +325,10 @@ function roadStructures(r, index, ground, layout, out) {
       }
       const paves = kind === 'step' || (['twin', 'twin-gap', 'merge-gap'].includes(kind) && r.id < ks[0].road.id);
       if (paves && kinds[i0].sunk) {
-        if (i0 > 0 && kinds[i0 - 1].kind === 'sunken') closeGap(S[i0], kinds[i0]);
-        if (i1 + 1 < S.length && kinds[i1 + 1].kind === 'sunken') closeGap(S[i1], kinds[i1]);
+        // Or a street's deck: under it the ground between them is a pier.
+        const ridge = (k) => k.kind === 'sunken' || k.kind === 'covered';
+        if (i0 > 0 && ridge(kinds[i0 - 1])) closeGap(S[i0], kinds[i0]);
+        if (i1 + 1 < S.length && ridge(kinds[i1 + 1])) closeGap(S[i1], kinds[i1]);
       }
     });
   }

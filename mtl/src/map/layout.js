@@ -31,6 +31,7 @@ export const ROAD_CLASS = {
 const SUNKEN = -0.12;             // below the ground by this much, a road needs a hole
 const COVER_DEPTH = -1.0;         // a street only covers a road deeper than this
 const TUNNEL_DEPTH = -5.0;        // a tunnel needs this much ground over the road
+const BRIDGE_GAP = 10;            // two street decks closer than this over a trench make one
 
 export function compile(map) {
   const T = {};
@@ -128,6 +129,24 @@ export function compile(map) {
       }
     }
   }
+  // Two streets crossing a trench a few metres apart (the two carriageways of
+  // Rue de la Savane): the strip between their decks stayed open, the trench
+  // showing through the median island. One deck spans both.
+  const bridged = [];
+  for (const r of roads) {
+    const S = r.samples;
+    let last = -1;
+    for (let i = 0; i < S.length; i++) {
+      if (!S[i].covered || S[i].tunnel) { if (S[i].tunnel) last = -1; continue; }
+      const gap = i - last - 1;
+      if (last >= 0 && gap > 0 && gap * SPACING <= BRIDGE_GAP && S[last].coverBy != null && S[i].coverBy != null
+        && S.slice(last + 1, i).every((p) => p.y - p.gs <= COVER_DEPTH && !p.tunnel)) {
+        for (let k = last + 1; k < i; k++) { S[k].covered = true; S[k].coverBy = S[last].coverBy; }
+        bridged.push(G.bufferPolyline(S.slice(last, i + 1).map((p) => [p.x, p.n]), r.half + 1, 0));
+      }
+      last = i;
+    }
+  }
   // Where a ramp comes down onto a street (map/junctions.js streetLandings),
   // its deck stops at the street's edge and the street carries it the rest of
   // the way: no trench may open inside that street, however shallow the
@@ -205,6 +224,7 @@ export function compile(map) {
   if (coverers.size && holes.length) {
     holes = G.pc.difference(holes, ...[...coverers].map((st) => G.bufferPolyline(st.path, st.half, 0)));
   }
+  if (bridged.length && holes.length) holes = G.pc.difference(holes, G.unionAll(bridged));
   if (tunnels.length && holes.length) holes = G.pc.difference(holes, G.unionAll(tunnels));
   holes = G.dropSlivers(holes, 4);
   T.streets = now() - t1;
