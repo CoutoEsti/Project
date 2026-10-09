@@ -69,9 +69,13 @@ export function prepareBuildings(map, layout, tiles, styleAt) {
     else if (real > 55 && hash01(seed * 1000, 3) < 0.6) roof = 'crown';
     // The outdoor staircase: plexes facing a street.
     let front = null;
-    if (style.stairs && real <= 13 && area < 320 && b.kind !== 'outbuilding') front = facing(layout, b, tmp);
+    let yard = 0;
+    if (style.stairs && real <= 13 && area < 320 && b.kind !== 'outbuilding') {
+      const f = facing(layout, b, ring, tmp);
+      if (f) { front = f.dir; yard = f.yard; }
+    }
     out.push({
-      id: b.id, name: b.name, ring, base, h, minH: b.minH || 0, facade, roof, floorH, front, stairs: !!front,
+      id: b.id, name: b.name, ring, base, h, minH: b.minH || 0, facade, roof, floorH, front, yard, stairs: !!front,
       tile: tiles.key(b.cx, b.cn), cx: b.cx, cn: b.cn, kind: b.kind, scale: s,
     });
   }
@@ -92,10 +96,15 @@ function guessHeight(b, area, style, seed) {
 }
 
 /** Outward direction of the wall that faces the nearest street, or null. */
-function facing(layout, b, tmp) {
+/**
+ * The nearest street's direction from the building, and the yard: the
+ * distance from the front wall to the edge of that street's asphalt
+ * (sidewalk included). Balconies and stairs must fit in it.
+ */
+function facing(layout, b, ring, tmp) {
   const near = layout.streetsAt(b.cx, b.cn, 16, tmp);
   if (!near.length) return null;
-  let best = null, bd = Infinity;
+  let best = null, bd = Infinity, bst = null;
   for (const st of near) {
     const P = st.path;
     for (let i = 0; i + 1 < P.length; i++) {
@@ -104,12 +113,15 @@ function facing(layout, b, tmp) {
       const t = Math.max(0, Math.min(1, ((b.cx - a[0]) * dx + (b.cn - a[1]) * dn) / l2));
       const px = a[0] + dx * t, pn = a[1] + dn * t;
       const d = Math.hypot(px - b.cx, pn - b.cn);
-      if (d < bd) { bd = d; best = [px - b.cx, pn - b.cn]; }
+      if (d < bd) { bd = d; best = [px - b.cx, pn - b.cn]; bst = st; }
     }
   }
   if (!best) return null;
   const l = Math.hypot(best[0], best[1]) || 1;
-  return [best[0] / l, best[1] / l];
+  const dir = [best[0] / l, best[1] / l];
+  let wall = 0;
+  for (const [x, n] of ring) wall = Math.max(wall, (x - b.cx) * dir[0] + (n - b.cn) * dir[1]);
+  return { dir, yard: bd - wall - bst.half };
 }
 
 function ringArea(ring) {

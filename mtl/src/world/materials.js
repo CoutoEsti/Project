@@ -93,6 +93,11 @@ export function createMaterials(THREE, opts = {}) {
   std('Metal_Black', { color: 0x1c1c1c, roughness: 0.6, metalness: 0.4 });
   const fence = std('Fence', { color: 0xaeb2b4, roughness: 0.5, metalness: 0.6, side: THREE.DoubleSide, alphaTest: 0.4 });
   if (canvasOk) fence.alphaMap = T.chainlink(THREE);
+  const rail = std('Railing', { color: 0x1a1a1c, roughness: 0.55, metalness: 0.5, side: THREE.DoubleSide, alphaTest: 0.5 });
+  if (canvasOk) {
+    rail.alphaMap = T.railing(THREE);
+    rail.alphaMap.repeat.set(1 / 0.6, 1);
+  }
   fence.transparent = false;
   std('Glass', { color: 0x2a3d4d, roughness: 0.08, metalness: 0.3 });
   std('Copper', { color: 0x5c8f7a, roughness: 0.55, metalness: 0.35 });
@@ -229,10 +234,11 @@ function facadeMaterial(THREE, atlas) {
     night: { value: 1 },
     litRatio: { value: 0.3 },
     winRect: { value: T.facadeWindows().map(([x, y, w, h]) => new THREE.Vector4(x, y, w, h)) },
+    bayWidth: { value: T.FACADES.map((f) => T.FACADE_BAY[f] || 3) },
   };
   m.userData.uniforms = uniforms;
   if (!atlas) return m;
-  m.customProgramCacheKey = () => 'facades-v4';
+  m.customProgramCacheKey = () => 'facades-v5';
   m.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
     shader.vertexShader = shader.vertexShader
@@ -253,6 +259,7 @@ uniform float facadeRows;
 uniform float night;
 uniform float litRatio;
 uniform vec4 winRect[${T.FACADES.length}];
+uniform float bayWidth[${T.FACADES.length}];
 varying vec2 vFacadeUv;
 flat varying float vFacade;
 flat varying float vSeed;
@@ -266,11 +273,44 @@ vec2 fCell = vec2(0.0);`)
       .replace('#include <map_fragment>', `
 fCell = floor(vFacadeUv);
 vec2 ff = fract(vFacadeUv);
+// Recessed windows, by parallax: the glass sits a hand's depth behind the
+// wall, so from an angle the frame hides part of it and the reveal — the
+// jamb, the lintel's underside, the sill — shows. No geometry: the view
+// direction, in the wall's frame, shifts where the glass is read from.
+vec4 wr0 = winRect[int(vFacade + 0.5)];
+float fReveal = 0.0;
+float fRevealShade = 1.0;
+vec2 inWin = step(wr0.xy, ff) * step(ff, wr0.xy + wr0.zw);
+float fNear = 1.0 - clamp(length(fwidth(vFacadeUv)) * 4.0 - 0.3, 0.0, 1.0);
+if (inWin.x * inWin.y > 0.5 && fNear > 0.0) {
+  vec3 fV = normalize(vViewPosition);
+  vec3 fN = normalize(vNormal);
+  vec3 fB = normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
+  vec3 fT = normalize(cross(fB, fN));
+  float vn = max(dot(fV, fN), 0.2);
+  float depth = mix(0.24, 0.07, step(9.5, vFacade)) * fNear;
+  vec2 shift = vec2(dot(fV, fT) / bayWidth[int(vFacade + 0.5)], dot(fV, fB) / 3.3) * depth / vn;
+  vec2 g = ff - shift;
+  vec2 lo = wr0.xy, hi = wr0.xy + wr0.zw;
+  if (g.x < lo.x || g.x > hi.x || g.y < lo.y || g.y > hi.y) {
+    fReveal = 1.0;
+    // Lit from above: the lintel's underside darkest, the sill's top lightest.
+    fRevealShade = g.y > hi.y ? 0.35 : g.y < lo.y ? 0.95 : 0.6;
+  }
+  ff = clamp(g, lo + 0.002, hi - 0.002);
+}
 vec2 auv = vec2(ff.x, (facadeRows - vFacade - 1.0 + ff.y) / facadeRows);
 vec2 gx = dFdx(vFacadeUv) * vec2(1.0, 1.0 / facadeRows);
 vec2 gy = dFdy(vFacadeUv) * vec2(1.0, 1.0 / facadeRows);
 vec4 fs = textureGrad(facadeAtlas, auv, gx, gy);
 fGlass = 1.0 - fs.a;
+if (fReveal > 0.5) {
+  // The reveal is the wall's own material, read just beside the window.
+  vec2 wuv0 = vec2(max(wr0.x - 0.04, 0.01), ff.y);
+  fs = textureGrad(facadeAtlas, vec2(wuv0.x, (facadeRows - vFacade - 1.0 + wuv0.y) / facadeRows), gx, gy);
+  fs.rgb *= fRevealShade;
+  fGlass = 0.0;
+}
 vec3 glassTint = mix(vec3(0.05, 0.07, 0.1), vec3(0.1, 0.16, 0.24), step(9.5, vFacade));
 diffuseColor.rgb *= mix(fs.rgb * (0.88 + 0.24 * fHash(vec3(vSeed, 3.0, 1.0))), glassTint, fGlass);`)
       .replace('#include <roughnessmap_fragment>', `

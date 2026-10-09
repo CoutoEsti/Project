@@ -141,6 +141,13 @@ Montréal humide d'un soir d'été, où les enseignes gagnent sur le sodium.
   dessinent les rues la nuit.
 - **Éclairage** : LED blanc froid sur les artères et les autoroutes, sodium
   orange dans les rues résidentielles, lanternes dans le Vieux.
+- **Fenêtres en creux** : la vitre est lue 7 à 24 cm derrière le mur, selon
+  l'angle de vue (parallaxe dans le shader des façades, aucune géométrie) ;
+  de biais, le tableau et le dessous du linteau apparaissent.
+- **Plex** : galeries à chaque étage avec garde-corps ajourés, escalier
+  extérieur quand la cour le permet, corniche avant. Les galeries peuvent
+  surplomber le trottoir, jamais la chaussée ; l'escalier, qui touche le sol,
+  reste hors du trottoir.
 - **Détails** : corniches sur les toits plats, blocs techniques, couronnes
   lumineuses et feux d'avion clignotants sur les tours.
 - **Sol** (textures générées) : asphalte à granulat fin dont la répétition
