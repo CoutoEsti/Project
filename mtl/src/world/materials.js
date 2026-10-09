@@ -144,16 +144,18 @@ export function createMaterials(THREE, opts = {}) {
   });
   pool.name = 'Light_Pool';
   if (canvasOk) pool.map = T.lightPool(THREE);
-  wetStreaks(pool);
+  M.wetUniform = { value: 0 };
+  wetStreaks(pool, M.wetUniform);
   M.Light_Pool = pool;
   // The colour a sign throws on the wet sidewalk and the street.
   const npool = pool.clone();
   npool.name = 'Neon_Pool';
   npool.opacity = 0.55;
-  wetStreaks(npool);
+  wetStreaks(npool, M.wetUniform);
   M.Neon_Pool = npool;
 
   M.setNight = (night) => setNight(M, night);
+  M.setWet = (wet) => setWet(M, wet);
   return M;
 }
 
@@ -182,10 +184,13 @@ function antiTile(m) {
  * the way its reflection streaks down a wet street. Done in the vertex shader
  * per instance (pools are unrotated discs), so it follows the camera for free.
  */
-function wetStreaks(m) {
-  m.customProgramCacheKey = () => 'wet-streaks-v2';
+function wetStreaks(m, wet) {
+  m.customProgramCacheKey = () => 'wet-streaks-v3';
   m.onBeforeCompile = (shader) => {
-    shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+    shader.uniforms.wet = wet;
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform float wet;')
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
 #ifdef USE_INSTANCING
 {
   vec3 c = (modelMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
@@ -195,7 +200,8 @@ function wetStreaks(m) {
   float r = length(instanceMatrix[0].xyz);
   // Longer the lower the eye: a streak is a grazing reflection.
   float graze = clamp(dist / max(cameraPosition.y - c.y, 0.5), 1.0, 12.0);
-  float stretch = 1.0 + min(graze * 0.3, 2.6);
+  // In the rain, twice as long: the street is a mirror.
+  float stretch = 1.0 + min(graze * 0.3, 2.6) * (1.0 + wet);
   vec2 p = transformed.xz;
   float along = dot(p, d);
   vec2 perp = p - along * d;
@@ -338,23 +344,52 @@ totalEmissiveRadiance += lcol * edge * strip * 2.5;`);
   return m;
 }
 
+/**
+ * How much night it is, 0 (day) to 1 (night): the sky passes through every
+ * value at dusk and dawn, so lamps, windows and pools come on gradually.
+ */
 function setNight(M, night) {
+  const k = Math.min(1, Math.max(0, Number(night)));
+  M.night = k;
   const u = M.Facades.userData.uniforms;
-  if (u) u.night.value = night ? 1 : 0;
-  for (const k of ['Lamp_Sodium', 'Lamp_White', 'Lamp_LED', 'Lamp_Tunnel', 'Neon_Red', 'Neon_White', 'Neon', 'Neon_Buzz', 'Neon_Cyan', 'Neon_Magenta', 'Beacon_Red']) {
-    if (!M[k]) continue;
-    M[k].userData.base = M[k].userData.base || M[k].color.clone();
-    M[k].userData.level = night ? 1 : 0.25;
-    M[k].color.copy(M[k].userData.base).multiplyScalar(M[k].userData.level);
+  if (u) u.night.value = k;
+  for (const name of ['Lamp_Sodium', 'Lamp_White', 'Lamp_LED', 'Lamp_Tunnel', 'Neon_Red', 'Neon_White', 'Neon', 'Neon_Buzz', 'Neon_Cyan', 'Neon_Magenta', 'Beacon_Red']) {
+    if (!M[name]) continue;
+    M[name].userData.base = M[name].userData.base || M[name].color.clone();
+    M[name].userData.level = 0.25 + 0.75 * k;
+    M[name].color.copy(M[name].userData.base).multiplyScalar(M[name].userData.level);
   }
-  if (M.Light_Pool) M.Light_Pool.visible = !!night;
-  if (M.Neon_Pool) M.Neon_Pool.visible = !!night;
-  if (M.Beacon) M.Beacon.visible = !!night;
-  // Streets look wet at night — the NFSU look — and dry by day.
-  if (M.Asphalt) M.Asphalt.roughness = night ? 0.42 : 0.82;
-  if (M.Concrete_Dark && M.Concrete_Dark.emissiveMap) M.Concrete_Dark.emissive.set(night ? 0x766e7c : 0x000000);
-  if (M.Tunnel && M.Tunnel.emissiveMap) M.Tunnel.emissive.set(night ? 0x766d5f : 0x000000);
+  if (M.Concrete_Dark && M.Concrete_Dark.emissiveMap) M.Concrete_Dark.emissive.set(0x766e7c).multiplyScalar(k);
+  if (M.Tunnel && M.Tunnel.emissiveMap) M.Tunnel.emissive.set(0x766d5f).multiplyScalar(k);
   // Sparse one-texel lamps: bright, or the mipmaps average them away.
-  if (M.Outskirts) M.Outskirts.emissive.setScalar(night ? 2.6 : 0);
-  if (M.Street_Asphalt) M.Street_Asphalt.roughness = night ? 0.42 : 0.82;
+  if (M.Outskirts) M.Outskirts.emissive.setScalar(2.6 * k);
+  wetGround(M);
+}
+
+/**
+ * How wet the streets are, 0..1 (rain). Night alone already makes them look
+ * damp — the NFSU look; rain makes them a mirror: darker, glossier, and the
+ * lights' reflections stretch twice as far.
+ */
+function setWet(M, wet) {
+  M.wet = Math.min(1, Math.max(0, Number(wet)));
+  wetGround(M);
+}
+
+function wetGround(M) {
+  const night = M.night ?? 1, wet = M.wet ?? 0;
+  if (M.wetUniform) M.wetUniform.value = wet;
+  const pools = { Light_Pool: 0.2, Neon_Pool: 0.55, Beacon: 0.1 };
+  for (const [name, base] of Object.entries(pools)) {
+    if (!M[name]) continue;
+    M[name].visible = night > 0.02;
+    M[name].opacity = base * night * (name === 'Beacon' ? 1 : 1 + 0.7 * wet);
+  }
+  for (const name of ['Asphalt', 'Street_Asphalt']) {
+    const m = M[name];
+    if (!m) continue;
+    m.userData.base = m.userData.base || m.color.clone();
+    m.roughness = 0.82 - 0.4 * night - 0.22 * wet;
+    m.color.copy(m.userData.base).multiplyScalar(1 - 0.3 * wet);
+  }
 }

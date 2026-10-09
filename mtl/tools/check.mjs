@@ -27,6 +27,7 @@ import { Driver } from '../src/game/drive.js';
 import { buildNetwork, span, pointOn, lightAt, insideBox } from '../src/traffic/network.js';
 import { createDensity } from '../src/traffic/density.js';
 import { Traffic, TrafficReplica, TICK, CAR_LENGTH } from '../src/traffic/sim.js';
+import { skyAt, CYCLE_LENGTH } from '../src/world/daycycle.js';
 import { loadSourceNode } from './lib/source-node.mjs';
 import { serve } from './lib/serve.mjs';
 import { loadPlaywright } from './lib/playwright.mjs';
@@ -697,6 +698,27 @@ drive('circuit Gilles-Villeneuve', ['Circuit Gilles-Villeneuve', 2300, -3200, 18
   }
 }
 
+// ------------------------------------------------------------- the sky --
+// The cycle from the shared clock: 15 min of night between the transitions,
+// a short day, and rain on some nights — the same for any two players.
+{
+  const secs = {};
+  for (let t = 0; t < CYCLE_LENGTH; t++) { const p = skyAt(t).phase; secs[p] = (secs[p] || 0) + 1; }
+  let rainy = 0, day = 0;
+  for (let c = 0; c < 500; c++) {
+    let r = false;
+    for (let t = 0; t < CYCLE_LENGTH; t += 5) {
+      const s = skyAt(c * CYCLE_LENGTH + t);
+      if (s.rain > 0) r = true;
+      if (s.rain > 0 && s.phase !== 'nuit') day++;
+    }
+    if (r) rainy++;
+  }
+  const same = skyAt(1.7e9 + 777).rain === skyAt(1.7e9 + 777).rain;
+  check('cycle jour / nuit', secs.nuit === 900 && secs.jour >= 180 && secs.jour <= 240 && rainy > 100 && rainy < 250 && day === 0 && same,
+    `nuit ${secs.nuit / 60} min, jour ${(secs.jour / 60).toFixed(1)} min, crépuscule ${secs['crépuscule']} s, aube ${secs.aube} s ; pluie ${rainy} nuits sur 500`);
+}
+
 // ---------------------------------------------------------------- browser --
 
 if (BROWSER) {
@@ -763,6 +785,17 @@ if (BROWSER) {
     const d = Math.hypot(st.x - tx, st.n - tn);
     check('vol libre (F, Espace, G)', on && h1 > h0 + 20 && back && d < 20,
       `monté de ${(h1 - h0).toFixed(0)} m, voiture posée à ${d.toFixed(1)} m du centre de la vue (${st.where ? st.where.name : '?'})`);
+  }
+  {
+    // N: the sky leaves the clock for night, then day, then follows it again.
+    const modes = [];
+    for (let i = 0; i < 3; i++) {
+      const before = await page.evaluate(() => window.__mtl.sky().mode);
+      await page.keyboard.press('KeyN');
+      await page.waitForFunction((m) => window.__mtl.sky().mode !== m, before, { timeout: 30000 }).catch(() => {});
+      modes.push(await page.evaluate(() => window.__mtl.sky().mode));
+    }
+    check('ciel (N)', modes.join() === 'night,day,cycle', modes.join(' → '));
   }
   check('aucune erreur dans la page', errors.length === 0, errors.slice(0, 5).join(' | ') || '0');
   await browser.close();

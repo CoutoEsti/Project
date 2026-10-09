@@ -3,6 +3,8 @@
 //
 //   node mtl/tools/shots.mjs                    → mtl/.shots/*.png
 //   node mtl/tools/shots.mjs --out DIR --only decarie,plateau --day --zone centre --echelle 85
+//   node mtl/tools/shots.mjs --cycle 1000 --pluie 1   → at dusk, in the rain
+// Night by default (the sky would otherwise follow the clock).
 //
 // Chromium runs headless on SwiftShader when there is no GPU: slow, but the
 // pictures are the real renderer's.
@@ -52,6 +54,9 @@ async function main() {
   const t0 = Date.now();
   const q = new URLSearchParams();
   if (DAY) q.set('day', '1');
+  else if (arg('--cycle', null) != null) q.set('cycle', arg('--cycle', null));
+  else q.set('nuit', '1');
+  if (arg('--pluie', null) != null) q.set('pluie', arg('--pluie', null));
   if (arg('--zone', null)) q.set('zone', arg('--zone', null));
   if (arg('--echelle', null)) q.set('echelle', arg('--echelle', null));
   await page.goto(`${url}/index.html?${q}`);

@@ -67,7 +67,7 @@ sans collision. Les zones `centre` et `anneau` restent des rectangles.
 | clic droit + glisser | orbiter la caméra autour de la voiture (poursuite et lointaine) ; au relâchement, elle revient doucement derrière |
 | V ou 1 / 2 / 3 | changer de voiture (ou les boutons en bas de l’écran) |
 | M | grande carte ; un clic y téléporte |
-| N | nuit / jour |
+| N | ciel : suit l'horloge → nuit → jour |
 | F | vol libre (ou le bouton **Vol libre** en haut) |
 | E | exporter pour Unity (un `.zip` : `.glb` + `map.json`) |
 
@@ -106,12 +106,19 @@ La voiture reste où elle est ; la vitesse suit l'altitude.
 | F | revenir à la voiture |
 
 Autres paramètres d'URL : `?voiture=1|2|3`, `?spawn=decarie|metropolitaine|ville-marie|centre-ville|vieux-port|plateau|camillien-houde|jacques-cartier|stade|circuit`,
-`?day=1`, `?low=1` (réglages téléphone), `?fly=1` ou `#vol` (démarrer en vol
+`?day=1`, `?nuit=1`, `?cycle=<s>`, `?pluie=0..1` (voir « La nuit »), `?low=1` (réglages téléphone), `?fly=1` ou `#vol` (démarrer en vol
 libre), `?cam=x,n,h,tx,tn,th` (vol libre à un point précis).
 
 ## La nuit
 
-Le jeu se passe de nuit (N bascule le jour, pour lire la carte). Low poly,
+Le jeu se passe surtout de nuit. Le ciel suit une horloge commune
+(`world/daycycle.js`) : un cycle de 20 minutes, **15 min de nuit**, 45 s de
+crépuscule, **3 min 30 de jour**, 45 s d'aube. Comme il ne dépend que de
+l'heure de l'ordinateur, tous les joueurs voient le même ciel et la même pluie
+sans rien s'échanger (multijoueur). N fige la nuit, puis le jour, puis revient
+à l'horloge. `?nuit=1` ou `?day=1` figent le ciel, `?cycle=232` le fige à ce
+nombre de secondes dans le cycle (232 : plein crépuscule), `?pluie=0..1` force
+la pluie. Low poly,
 mais détaillé, et une couleur qui donne le ton sans faire futuriste : la
 Montréal humide d'un soir d'été, où les enseignes gagnent sur le sodium.
 
@@ -139,6 +146,19 @@ Montréal humide d'un soir d'été, où les enseignes gagnent sur le sodium.
   dans le vertex shader. Pas de vrais reflets (trop cher sur téléphone). Vues
   d'en haut, les flaques s'élargissent et s'éclairent : ce sont elles qui
   dessinent les rues la nuit.
+- **Crépuscule et aube** : ciel, brume, soleil rasant orangé et
+  environnement mélangés en continu ; lampadaires, fenêtres et flaques de
+  lumière s'allument progressivement. L'environnement réfléchi est recalculé
+  par paliers (toutes les ~2 s pendant la transition, moins sur téléphone).
+- **Pluie** : environ une nuit sur trois, choisie par le numéro du cycle
+  (la même pour tous), quelques minutes après la tombée de la nuit, avec une
+  entrée et une sortie de 40 s. Gouttes en traits autour de la caméra (un
+  seul appel de rendu, 6 000 traits, 2 500 sur téléphone), brume plus dense
+  et plus grise, chaussée plus sombre et plus lisse, reflets des lumières
+  deux fois plus longs.
+- **Flou de vitesse** : au-delà de 110 km/h, les bords de l'image filent
+  vers l'extérieur (plein effet à 260 km/h) ; le centre reste net. Une passe
+  plein écran de huit lectures, coupée sur téléphone et en vol libre.
 - **Éclairage** : LED blanc froid sur les artères et les autoroutes, sodium
   orange dans les rues résidentielles, lanternes dans le Vieux.
 - **Détails** : corniches sur les toits plats, blocs techniques, couronnes
