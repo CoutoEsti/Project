@@ -49,7 +49,7 @@ export function buildStructures(layout) {
 
   for (const r of roads) annotate(r, ground);
   for (const r of roads) roadStructures(r, index, ground, layout, out);
-  covers(roads, out, index);
+  covers(roads, out, index, layout);
   quays(layout, index, out);
   out.index = index;
   out.ground = ground;
@@ -80,7 +80,10 @@ function twinOf(r, p, side, index) {
   for (const d of [-r.half * 0.5, PROBE, 3, 6, MEDIAN_GAP]) {
     const qx = p.x + side * p.lx * (r.half + d), qn = p.n + side * p.ln * (r.half + d);
     for (const o of index.surfacesAt(qx, qn, 0)) {
-      if (o.road === r || o.covered || !o.road.oneway || Math.abs(o.y - p.y) > 0.45) continue;
+      if (o.road === r || o.covered || Math.abs(o.y - p.y) > 0.45) continue;
+      // A two-way road in between (Pierre-Dupuy between the Concorde's
+      // approaches): these are not one road's carriageways.
+      if (!o.road.oneway) return null;
       const q = o.road.samples[o.i], q1 = o.road.samples[Math.min(o.road.samples.length - 1, o.i + 1)];
       if (q.tx * p.tx + q.tn * p.tn > -0.85) return null;
       const cx = q.x + (q1.x - q.x) * o.t, cn = q.n + (q1.n - q.n) * o.t;
@@ -91,7 +94,7 @@ function twinOf(r, p, side, index) {
   return null;
 }
 
-function classify(r, p, side, index, ground) {
+function classify(r, p, side, index, ground, layout) {
   // Twin carriageways touching: one median barrier between them. Further
   // apart: each keeps its barrier on the inside and a slab closes the gap,
   // or the car would find a slot to fall through.
@@ -113,6 +116,14 @@ function classify(r, p, side, index, ground) {
     else if (!higher || o.y < higher.y) higher = o;
   }
   if (merge) return { kind: 'merge' };
+  // So with a street just beyond the edge, near the road's level: the road
+  // lands on it (a bridge's end, a ramp's foot). A skirt or a barrier there
+  // stands in the street's lanes.
+  if (!p.covered && layout) {
+    for (const st of layout.streetsAt(qx, qn, -0.5, stTmp)) {
+      if (st.cls !== 'plaza' && Math.abs(layout.terrain.height(qx, qn) - p.y) < MERGE) return { kind: 'merge' };
+    }
+  }
   // Two bores diverging under the ground: the lower one's wall would stand
   // in the upper one's lanes.
   if (p.covered && aboveInTunnel) return { kind: 'under' };
@@ -159,7 +170,7 @@ function roadStructures(r, index, ground, layout, out) {
   const barrierKind = r.cls === 'bridge' ? 'parapet' : 'jersey';
 
   for (const side of [1, -1]) {
-    const kinds = S.map((p) => classify(r, p, side, index, ground));
+    const kinds = S.map((p) => classify(r, p, side, index, ground, layout));
     // Smooth out flickers of one or two samples so walls do not stutter —
     // also a lone wall-less sample between two different walls, a 2 m slot.
     for (let i = 1; i + 1 < kinds.length; i++) {
@@ -199,7 +210,13 @@ function roadStructures(r, index, ground, layout, out) {
         // Built once per pair, by the carriageway with the smaller id.
         const mine = r.id < ks[0].road.id;
         if (kind === 'twin') {
-          if (mine) out.barriers.push({ kind: 'median', road: r.id, pts: seg.map((p, j) => [...at(p, ks[j].D / 2), p.y]) });
+          // Broken where a street or a third road crosses the pair on the level.
+          if (mine) {
+            const pts = seg.map((p, j) => [...at(p, ks[j].D / 2), p.y]);
+            for (const run of clearRuns(pts, (q) => standsOnLanes(layout, index, q, [r, ks[0].road]))) {
+              out.barriers.push({ kind: 'median', road: r.id, pts: run });
+            }
+          }
         } else {
           out.barriers.push({ kind: 'jersey', road: r.id, pts: seg.map((p) => [...at(p, p.h - 0.35), p.y]) });
           if (mine) {
@@ -225,13 +242,15 @@ function roadStructures(r, index, ground, layout, out) {
         // Split where a road passes over.
         let run = [], deep = false;
         const flush = () => {
-          if (run.length >= 2 && deep) out.fences.push({ height: 1.6, pts: run });
+          if (run.length >= 2 && deep) out.fences.push({ height: 1.6, pts: run, road: r.id });
           run = []; deep = false;
         };
         seg.forEach((p, j) => {
           const f = at(p, p.h + WALL_OFFSET + 0.45);
           const over = index.surfacesAt(f[0], f[1], 1.5).some((o) => o.road !== r && o.y > ks[j].g - 1.5);
-          if (ks[j].under || ks[j].kind === 'covered' || over) { flush(); return; }
+          // Nor across a street that crosses the trench on the level: the
+          // street's own lanes, where the fence would stand across them.
+          if (ks[j].under || ks[j].kind === 'covered' || over || crossingStreet(layout, f[0], f[1], p.tx, p.tn)) { flush(); return; }
           run.push([...f, ks[j].g + 0.05]);
           if (ks[j].g - p.y > 1.2) deep = true;
         });
@@ -296,12 +315,64 @@ function roadStructures(r, index, ground, layout, out) {
   // Where the zone cuts a road, a barrier says so.
   if (r.closedEnd) {
     const p = S[Math.max(0, S.length - 5)];
-    out.closures.push({ x: p.x, n: p.n, y: p.y, tx: p.tx, tn: p.tn, lx: p.lx, ln: p.ln, width: r.width, text: r.closure || 'Fin de la zone' });
+    out.closures.push({ x: p.x, n: p.n, y: p.y, tx: p.tx, tn: p.tn, lx: p.lx, ln: p.ln, width: r.width, text: r.closure || 'Fin de la zone', road: r.id });
   }
   if (r.closedStart) {
     const p = S[Math.min(S.length - 1, 4)];
-    out.closures.push({ x: p.x, n: p.n, y: p.y, tx: -p.tx, tn: -p.tn, lx: -p.lx, ln: -p.ln, width: r.width, text: r.closure || 'Fin de la zone' });
+    out.closures.push({ x: p.x, n: p.n, y: p.y, tx: -p.tx, tn: -p.tn, lx: -p.lx, ln: -p.ln, width: r.width, text: r.closure || 'Fin de la zone', road: r.id });
   }
+}
+
+/**
+ * A street at (x, n) the fence would stand on: one running across the
+ * direction (tx, tn) a metre around, or any whose carriageway it is inside
+ * (a ramp in its trench under the street, its fence along the lanes).
+ */
+function crossingStreet(layout, x, n, tx, tn) {
+  for (const st of layout.streetsAt(x, n, 1, crossTmp)) {
+    if (st.cls === 'plaza') continue;
+    if (layout.streetsAt(x, n, -0.5, crossTmp2).includes(st)) return true;
+    const P = st.path;
+    let best = Infinity, dir = null;
+    for (let i = 0; i + 1 < P.length; i++) {
+      const { d2 } = G.segDist2(x, n, P[i][0], P[i][1], P[i + 1][0], P[i + 1][1]);
+      if (d2 < best) { best = d2; dir = [P[i + 1][0] - P[i][0], P[i + 1][1] - P[i][1]]; }
+    }
+    const l = dir ? Math.hypot(dir[0], dir[1]) : 0;
+    if (l > 1e-6 && Math.abs((dir[0] * tx + dir[1] * tn) / l) < 0.87) return true;
+  }
+  return false;
+}
+const crossTmp = [], crossTmp2 = [], stTmp = [];
+
+/** Runs of consecutive points that are not `blocked`, two points or more. */
+function clearRuns(pts, blocked) {
+  const runs = [];
+  let run = [];
+  for (const q of pts) {
+    if (blocked(q)) { if (run.length >= 2) runs.push(run); run = []; } else run.push(q);
+  }
+  if (run.length >= 2) runs.push(run);
+  return runs;
+}
+
+/** A point [x, n, y] inside the lanes of a street or a road other than `own`, at its level. */
+function standsOnLanes(layout, index, [x, n, y], own) {
+  for (const st of layout.streetsAt(x, n, -0.5, stTmp)) {
+    if (st.cls !== 'plaza' && Math.abs(layout.terrain.height(x, n) - y) < MERGE) return true;
+  }
+  return index.surfacesAt(x, n, -0.5).some((o) => !own.includes(o.road) && !o.covered && Math.abs(o.y - y) < MERGE);
+}
+
+/** Whether the segment a-b runs inside a street's carriageway anywhere. */
+function onStreet(layout, a, b) {
+  const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+  const k = Math.max(1, Math.ceil(L));
+  for (let i = 0; i <= k; i++) {
+    const x = a[0] + ((b[0] - a[0]) * i) / k, n = a[1] + ((b[1] - a[1]) * i) / k;
+    if (layout.streetsAt(x, n, -0.5, crossTmp).some((st) => st.cls !== 'plaza')) return true;
+  }
+  return false;
 }
 
 /** Halfway between two consecutive samples: where two walls meet. */
@@ -359,7 +430,7 @@ function lampsFor(r, out) {
  * Covers: ceilings over tunnels and under streets, the face of each cover
  * where the trench opens again, and the railing along the street's edge.
  */
-function covers(roads, out, index) {
+function covers(roads, out, index, layout) {
   for (const r of roads) {
     const S = r.samples;
     runsOf(S, (p) => (p.covered ? 'c' : 'o'), (k, i0, i1) => {
@@ -371,11 +442,14 @@ function covers(roads, out, index) {
         if (o.y - o.gs > -0.3) continue;       // the road came up to street level
         const w = p.h + WALL_OFFSET + 0.6;
         const a = [p.x + p.lx * w, p.n + p.ln * w], b = [p.x - p.lx * w, p.n - p.ln * w];
-        out.fascias.push({ a, b, y0: ceilingY(p), y1: p.gs + 0.05, face: io > ic ? 1 : -1, tx: p.tx, tn: p.tn });
+        out.fascias.push({ a, b, y0: ceilingY(p), y1: p.gs + 0.05, face: io > ic ? 1 : -1, tx: p.tx, tn: p.tn, road: r.id });
         // No railing where another road runs across the cover at street level.
         const m = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
-        const crossed = [a, m, b].some(([x, n]) => index.surfacesAt(x, n, 1.5).some((q) => q.road !== r && Math.abs(q.y - p.gs) < 2.5));
-        if (!crossed) out.fences.push({ height: 1.3, pts: [[a[0], a[1], p.gs + 0.05], [b[0], b[1], p.gs + 0.05]] });
+        // Nor inside a street's lanes: a street crossing the trench askew, or
+        // only partly over this cover, would have the railing across it.
+        const crossed = [a, m, b].some(([x, n]) => index.surfacesAt(x, n, 1.5).some((q) => q.road !== r && Math.abs(q.y - p.gs) < 2.5))
+          || onStreet(layout, a, b);
+        if (!crossed) out.fences.push({ height: 1.3, pts: [[a[0], a[1], p.gs + 0.05], [b[0], b[1], p.gs + 0.05]], road: r.id });
       }
     });
   }

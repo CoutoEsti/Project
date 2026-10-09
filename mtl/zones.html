@@ -61,6 +61,7 @@
       <button data-tool="free" title="Main levée : glisser (D)">Main levée</button>
       <button data-tool="rect" title="Rectangle : glisser (R)">Rectangle</button>
       <button data-tool="ellipse" title="Ellipse : glisser (O)">Ellipse</button>
+      <button data-tool="route" title="Route : clic sur une rue où elle commence, clic où elle finit ; la zone garde cette route seulement. Échap pour arrêter (T)">Route</button>
       <button id="finish" hidden>Terminer</button>
       <button id="del" title="Supprimer la forme choisie (Suppr)" disabled>Supprimer</button>
       <button id="topoly" title="Rend les sommets d’un rectangle ou d’une ellipse déplaçables" disabled>En polygone</button>
@@ -86,11 +87,14 @@
       <button id="link">Copier le lien</button>
     </div>
     <div class="row">
+      <button data-preset="coeur">Cœur</button>
       <button data-preset="centre">Centre</button>
       <button data-preset="anneau">Anneau</button>
       <button id="clear">Tout effacer</button>
     </div>
-    <p class="hint long">Plusieurs formes = leur union. Molette ou pincement pour zoomer, glisser le fond pour se déplacer.
+    <p class="hint long">Plusieurs formes = leur union. L’outil Route garde une route précise et rien autour :
+      un clic sur la rue où elle commence, puis un clic à chaque endroit où elle passe ; le tracé suit les rues,
+      les sens uniques et, sur une autoroute, prend aussi l’autre sens. Échap termine. Molette ou pincement pour zoomer, glisser le fond pour se déplacer.
       Les nombres de bâtiments et de rues sont des estimations sur les données du jeu.
       « Exporter » télécharge un JSON à coller dans <code>carte.json</code>. Le lien de la page contient la zone.</p>
     <p class="hint"><a href="index.html" style="color:var(--dim)">← Retour au jeu</a></p>

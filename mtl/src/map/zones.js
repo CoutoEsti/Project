@@ -7,10 +7,39 @@
 // map is then cut with the cheap rectangle code); a drawn zone — see
 // mtl/zones.html — is a list of polygons, `poly: [ring, …]`, rings being
 // [[x, n], …] rounded to the metre. Several polygons are their union.
+// A drawn zone can also keep single roads: `routes: [{ h, pts }, …]`, a
+// centre line along real streets and a half width (map/routes.js); the zone is
+// then the polygons plus a corridor around each route.
 
 import * as G from './geom.js';
+import { routeCorridor } from './routes.js';
 
 export const ZONES = {
+  // The playable map: a closed shape you can read at a glance, like an
+  // open-world game's. The river on the south, the mountain on the north,
+  // Turcot on the west; the Lachine canal under Saint-Henri, the islands and
+  // the foot of the Jacques-Cartier bridge in Longueuil, so no bridge stops
+  // in mid-river. About 30 km², a quarter of `anneau`.
+  coeur: {
+    nom: 'Cœur',
+    description: 'Centre-ville, Vieux-Montréal, Vieux-Port, mont Royal, Saint-Henri, Turcot, les îles et la tête du pont à Longueuil',
+    poly: [[
+      // West: Turcot, from the foot of the Décarie trench to the canal.
+      [-4700, 700], [-4700, -560],
+      // South-west: the south bank of the Lachine canal.
+      [-4000, -850], [-3000, -1120], [-2500, -1230], [-1500, -1400], [-700, -1750], [-350, -1800],
+      // Bonaventure down to the Cité du Havre, then the river (the Victoria
+      // bridge stays outside: it leads nowhere in this zone).
+      [-400, -2000], [-350, -2600], [-250, -3000], [150, -2950], [1100, -3250], [1650, -3800], [3000, -3800],
+      // Longueuil, at the foot of the bridge.
+      [3200, -3250], [3700, -3150], [4300, -3150], [4700, -2700], [4700, -2100], [4100, -1600],
+      // Back across the river, then up De Lorimier.
+      [3800, -900], [3550, -450], [3550, 1050],
+      // North: Sherbrooke, the Avenue du Parc, around the mountain.
+      [1150, 650], [1000, 1300], [950, 2300], [300, 2950], [-1000, 3150], [-2000, 3100],
+      [-2900, 2700], [-3100, 1800], [-3000, 750],
+    ]],
+  },
   centre: {
     nom: 'Centre',
     description: 'Centre-ville, Vieux-Montréal, Vieux-Port, Plateau, mont Royal, la Ville-Marie et les îles',
@@ -25,7 +54,7 @@ export const ZONES = {
 
 export const ECHELLES = [100, 85, 70];
 
-export const DEFAUTS = { zone: 'anneau', echelle: 100 };
+export const DEFAUTS = { zone: 'coeur', echelle: 100 };
 
 /** The id a drawn zone goes by in `settings.zone`. */
 export const PERSO = 'perso';
@@ -79,17 +108,17 @@ export function zoneDef(settings) {
 // ------------------------------------------------------------------ shapes --
 
 /**
- * A drawn zone as it is stored: { nom, poly: [ring, …] } with integer metres,
- * rings open. Accepts a polygon list in either flavour (rings, or
- * polygon-clipping polygons) and { box } too. Null when there is nothing.
+ * A drawn zone as it is stored: { nom, poly: [ring, …], routes?: [{ h, pts }] }
+ * with integer metres, rings open. Accepts a polygon list in either flavour
+ * (rings, or polygon-clipping polygons) and { box } too. Null when there is
+ * nothing.
  */
 export function normalizeShape(o) {
   if (!o || typeof o !== 'object') return null;
   const nom = typeof o.nom === 'string' ? o.nom.slice(0, 60) : '';
   if (Array.isArray(o.box) && o.box.length === 4 && o.box.every(Number.isFinite)) return { nom, box: o.box.map(Math.round) };
-  if (!Array.isArray(o.poly)) return null;
-  const rings = [];
-  for (const item of o.poly) {
+  const rings = [], routes = [];
+  for (const item of Array.isArray(o.poly) ? o.poly : []) {
     if (!Array.isArray(item) || !item.length) continue;
     const ring = Array.isArray(item[0][0]) ? item[0] : item;       // a polygon: its outer ring
     const r = ring.filter((p) => Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1]))
@@ -97,11 +126,21 @@ export function normalizeShape(o) {
     const open = G.openRing(r);
     if (open.length >= 3) rings.push(open);
   }
-  return rings.length ? { nom, poly: rings } : null;
+  for (const r of Array.isArray(o.routes) ? o.routes : []) {
+    if (!r || !Array.isArray(r.pts) || !(r.h >= 1)) continue;
+    const pts = r.pts.filter((p) => Array.isArray(p) && Number.isFinite(p[0]) && Number.isFinite(p[1]))
+      .map((p) => [Math.round(p[0]), Math.round(p[1])])
+      .filter((p, i, a) => !i || p[0] !== a[i - 1][0] || p[1] !== a[i - 1][1]);
+    if (pts.length >= 2) routes.push({ h: Math.min(60, Math.round(r.h)), pts });
+  }
+  if (!rings.length && !routes.length) return null;
+  return routes.length ? { nom, poly: rings, routes } : { nom, poly: rings };
 }
 
 // Binary layout, then base64url: version, name (length + UTF-8), ring count,
 // and per ring its length then zigzag varints of x, n, and each step after.
+// Version 2 adds, after the rings, a route count and per route its half width,
+// its length and its points the same way.
 function pushVar(out, v) {
   let u = v >= 0 ? v * 2 : -v * 2 - 1;
   while (u >= 128) { out.push((u % 128) | 128); u = Math.floor(u / 128); }
@@ -117,7 +156,7 @@ export function encodeShape(shape) {
   const f = normalizeShape(shape);
   if (!f) return '';
   const rings = f.poly || [[[f.box[0], f.box[1]], [f.box[2], f.box[1]], [f.box[2], f.box[3]], [f.box[0], f.box[3]]]];
-  const bytes = [1];
+  const bytes = [f.routes ? 2 : 1];
   const name = new TextEncoder().encode(f.nom || '');
   pushUnsigned(bytes, name.length);
   for (const b of name) bytes.push(b);
@@ -126,6 +165,15 @@ export function encodeShape(shape) {
     pushUnsigned(bytes, ring.length);
     let px = 0, pn = 0;
     for (const [x, n] of ring) { pushVar(bytes, x - px); pushVar(bytes, n - pn); px = x; pn = n; }
+  }
+  if (f.routes) {
+    pushUnsigned(bytes, f.routes.length);
+    for (const r of f.routes) {
+      pushUnsigned(bytes, r.h);
+      pushUnsigned(bytes, r.pts.length);
+      let px = 0, pn = 0;
+      for (const [x, n] of r.pts) { pushVar(bytes, x - px); pushVar(bytes, n - pn); px = x; pn = n; }
+    }
   }
   let bin = '';
   for (const b of bytes) bin += String.fromCharCode(b);
@@ -149,22 +197,30 @@ export function decodeShape(text) {
       }
     };
     const zz = () => { const u = un(); return u % 2 ? -(u + 1) / 2 : u / 2; };
-    if (bytes[o++] !== 1) return null;
+    const version = bytes[o++];
+    if (version !== 1 && version !== 2) return null;
     const len = un();
     const nom = new TextDecoder().decode(bytes.slice(o, o + len));
     o += len;
     const count = un();
-    if (count < 1 || count > 200) return null;
-    const poly = [];
-    for (let r = 0; r < count; r++) {
+    if (count > 200 || (count < 1 && version === 1)) return null;
+    const line = (min) => {
       const m = un();
-      if (m < 3 || m > 20000) return null;
+      if (m < min || m > 20000) throw new Error('forme');
       let x = 0, n = 0;
-      const ring = [];
-      for (let i = 0; i < m; i++) { x += zz(); n += zz(); ring.push([x, n]); }
-      poly.push(ring);
+      const pts = [];
+      for (let i = 0; i < m; i++) { x += zz(); n += zz(); pts.push([x, n]); }
+      return pts;
+    };
+    const poly = [];
+    for (let r = 0; r < count; r++) poly.push(line(3));
+    const routes = [];
+    if (version === 2) {
+      const k = un();
+      if (k > 500) return null;
+      for (let r = 0; r < k; r++) { const h = un(); routes.push({ h, pts: line(2) }); }
     }
-    return normalizeShape({ nom, poly });
+    return normalizeShape({ nom, poly, routes });
   } catch (e) {
     return null;
   }
@@ -192,7 +248,7 @@ export function makeZone(def) {
   } else {
     const shape = normalizeShape(def);
     if (!shape) return null;
-    if (shape.box) { box = shape.box; multi = [[rectRing(box)]]; } else multi = union(shape.poly);
+    if (shape.box) { box = shape.box; multi = [[rectRing(box)]]; } else multi = union(shape.poly, shape.routes);
   }
   if (!multi.length) return null;
   const edges = [];
@@ -264,12 +320,16 @@ export function scaleZone(zone, s) {
   return makeZone({ nom: zone.nom, multi });
 }
 
-function union(rings) {
-  const polys = rings.map((r) => [G.closeRing(r)]);
+function union(rings, routes = []) {
+  const polys = rings.map((r) => [[G.closeRing(r)]]);
+  for (const r of routes) {
+    try { polys.push(routeCorridor(r)); } catch (e) { /* a route that cannot be widened keeps nothing */ }
+  }
   try {
-    return polys.length === 1 ? G.pc.union(polys[0]) : G.pc.union(...polys);
+    // Even one polygon goes through the union: it undoes a stroke that crosses itself.
+    return polys.length === 1 ? G.pc.union(polys[0]) : G.unionAll(polys);
   } catch (e) {
-    return polys;
+    return polys.flat();
   }
 }
 

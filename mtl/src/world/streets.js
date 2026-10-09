@@ -25,7 +25,7 @@ const TOL = 0.03;          // metres a ribbon may stray from the ground
 /**
  * @returns { meshes, stats }
  */
-export function buildStreets(THREE, layout, M, tiles) {
+export function buildStreets(THREE, layout, M, tiles, opts = {}) {
   const T = layout.terrain;
   const s = layout.map.scale;
   const holeGrid = polyIndex(layout.holes);
@@ -59,10 +59,12 @@ export function buildStreets(THREE, layout, M, tiles) {
     for (const o of layout.streetsAt(x, n, pad, stmp)) if (o !== st) return true;
     return false;
   };
+  // Merged by tile for the page; one object per street for the export
+  // (opts.split), to pick and edit in an engine.
   const per = new Map();
-  const tile = (key) => {
+  const tile = (key, st) => {
     let t = per.get(key);
-    if (!t) { t = { asphalt: new GeoBuilder(), sidewalk: new GeoBuilder({ color: 3 }) }; per.set(key, t); }
+    if (!t) { t = { asphalt: new GeoBuilder(), sidewalk: new GeoBuilder({ color: 3 }), st }; per.set(key, t); }
     return t;
   };
   let stations = 0;
@@ -73,7 +75,7 @@ export function buildStreets(THREE, layout, M, tiles) {
     const line = densifyNear(stationsOf(st.path, T, half + walk), (x, n) => nearRoad(x, n, half + walk + 3), T);
     stations += line.length;
     const mid = st.path[Math.floor(st.path.length / 2)];
-    const t = tile(tiles.key(mid[0], mid[1]));
+    const t = opts.split ? tile(`st${st.index}`, st) : tile(tiles.key(mid[0], mid[1]));
     // Which quads may need cutting, decided once for the four strips of
     // sidewalk and kerb: a road at street level near, or another street's
     // carriageway reaching the sidewalks.
@@ -98,16 +100,23 @@ export function buildStreets(THREE, layout, M, tiles) {
   const meshes = [];
   for (const [key, t] of per) {
     for (const [layer, b, mat] of [['rues', t.asphalt, M.Street_Asphalt], ['trottoirs', t.sidewalk, M.Street_Sidewalk]]) {
-      const m = meshOf(THREE, b, mat, `${layer === 'rues' ? 'Rues' : 'Trottoirs'}_${key}`);
+      const label = t.st ? `Rue ${t.st.index} ${t.st.name || 'sans nom'}` : key;
+      const m = meshOf(THREE, b, mat, `${layer === 'rues' ? 'Rues' : 'Trottoirs'}_${label}`);
       if (!m) continue;
+      if (t.st) {
+        m.name = layer === 'rues' ? label : `Trottoirs ${label}`;
+        m.userData.piece = { kind: layer === 'rues' ? 'rue' : 'trottoirs', index: t.st.index, osm: t.st.osm ?? null, name: t.st.name || null, cls: t.st.cls, width: t.st.width };
+      }
       m.receiveShadow = true;
-      m.userData.tile = key;
+      m.userData.tile = t.st ? tiles.key(mid0(t.st)[0], mid0(t.st)[1]) : key;
       m.userData.layer = layer;
       meshes.push(m);
     }
   }
   return { meshes, stats: { stations } };
 }
+
+function mid0(st) { return st.path[Math.floor(st.path.length / 2)]; }
 
 /**
  * Stations along a street: position, left normal, and the ground height at

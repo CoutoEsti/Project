@@ -12,9 +12,16 @@
 import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 import { simplifyN } from '../map/geom.js';
 import { resolveSpawn } from '../game/spawn.js';
+import { buildRoads, buildStructureMeshes } from '../world/roads.js';
+import { buildStreets } from '../world/streets.js';
+
+// Drawn merged in the page; exported one object per road, street, junction
+// and road's structures (opts.split), named as in map.json.
+const SPLIT = new Set(['routes', 'ouvrages', 'rues', 'trottoirs']);
 
 /**
  * @param opts { tiles: bool } every layer by tile, not just the buildings
+ *             { split: bool } one object per road, street and structure (default)
  * @returns [{ name, data: ArrayBuffer | string }]
  */
 export async function exportZones(THREE, world, opts = {}) {
@@ -37,7 +44,10 @@ export async function exportZones(THREE, world, opts = {}) {
     }
     return swaps.get(m);
   };
-  world.root.traverse((o) => {
+  const split = opts.split !== false;
+  const roots = [world.root];
+  if (split) roots.push(splitRoot(THREE, world));
+  for (const root of roots) root.traverse((o) => {
     if (!o.isMesh) return;
     let layer = null, tile = null;
     for (let p = o; p; p = p.parent) {
@@ -45,11 +55,12 @@ export async function exportZones(THREE, world, opts = {}) {
       if (!layer && p.userData.layer) layer = p.userData.layer;
       if (!tile && p.userData.tile) tile = p.userData.tile;
     }
+    if (split && root === world.root && SPLIT.has(layer)) return;
     // Buildings always go by tile (a whole zone of them is hundreds of
     // megabytes); the rest by layer, or by tile too when asked. Far tiles
     // hide their small things in the page: exported anyway.
-    const split = tile && (opts.tiles || layer === 'batiments');
-    const zone = (layer || 'divers') + (split ? `_${tile}` : '');
+    const byTile = tile && (opts.tiles || layer === 'batiments');
+    const zone = (layer || 'divers') + (byTile ? `_${tile}` : '');
     if (!zones.has(zone)) {
       const g = new THREE.Group();
       g.name = zone;
@@ -63,7 +74,15 @@ export async function exportZones(THREE, world, opts = {}) {
     if (o.isInstancedMesh) copy.instanceMatrix = o.instanceMatrix;
     copy.name = o.name || o.material.name || 'maillage';
     o.matrixWorld.decompose(copy.position, copy.quaternion, copy.scale);
-    zones.get(zone).add(copy);
+    // What it is, for a script on the engine's side (glTF extras).
+    if (o.userData.piece) copy.userData = { ...o.userData.piece };
+    // An object of several materials: its meshes under one node.
+    const owner = o.parent && o.parent.userData.piece ? o.parent : null;
+    let into = zones.get(zone);
+    if (owner) {
+      into = into.getObjectByName(owner.name) || into.add(Object.assign(new THREE.Group(), { name: owner.name, userData: { ...owner.userData.piece } })).getObjectByName(owner.name);
+    }
+    into.add(copy);
   });
   const exporter = new GLTFExporter();
   const files = [];
@@ -73,6 +92,22 @@ export async function exportZones(THREE, world, opts = {}) {
   }
   files.push({ name: 'map.json', data: JSON.stringify(mapJson(world), null, 1) });
   return files;
+}
+
+/** Roads, structures and streets meshed again, one object each. */
+function splitRoot(THREE, world) {
+  const L = world.layout, M = world.materials;
+  const cover = L.roadCover;
+  const root = new THREE.Group();
+  const add = (list, layer) => {
+    for (const o of list) { if (!o) continue; o.userData.layer = o.userData.layer || layer; root.add(o); }
+  };
+  add(buildRoads(THREE, L, world.structures, M, { split: true }), 'routes');
+  add(buildStructureMeshes(THREE, L, world.structures, M, { split: true }), 'ouvrages');
+  add(buildStreets(THREE, L, M, world.tiles, { split: true }).meshes, 'rues');
+  L.roadCover = cover;
+  root.updateMatrixWorld(true);
+  return root;
 }
 
 /** The level data, in Unity's frame (documented in the file itself). */
@@ -96,16 +131,17 @@ export function mapJson(world) {
       ...M.meta,
       unity: 'Unity X = x (est), Unity Z = n (nord), Unity Y = y (haut) ; 1 unité = 1 m ; caps en degrés, sens horaire depuis le nord de Montréal',
     },
-    settings: { zone: M.settings.zone, echelle: M.settings.echelle, scale: M.scale },
+    // The drawn selection (zones.html): polygons and kept routes, as in carte.json.
+    settings: { zone: M.settings.zone, echelle: M.settings.echelle, scale: M.scale, forme: M.settings.forme || null },
     world: M.world,
     roads: L.roads.map((r) => ({
-      id: r.id, name: r.name, ref: r.ref || null, cls: r.cls, width: r1(r.width), lanes: r.lanes, oneway: !!r.oneway,
+      id: r.id, name: r.name, ref: r.ref || null, cls: r.cls, street: !!r.street, width: r1(r.width), lanes: r.lanes, oneway: !!r.oneway,
       loop: r.loop, closedStart: r.closedStart, closedEnd: r.closedEnd,
       points: simplifyN(r.samples.map((p) => [p.x, p.n, p.y]), 0.05).map(([x, n, y]) => [r1(x), r1(y), r1(n)]),
       tunnels: tunnels(r),
     })),
     streets: L.streets.map((s) => ({
-      name: s.name, cls: s.cls, width: r1(s.width), oneway: !!s.oneway,
+      index: s.index, osm: s.osm ?? null, name: s.name, cls: s.cls, width: r1(s.width), oneway: !!s.oneway,
       points: s.path.map(([x, n]) => [r1(x), r1(T.height(x, n)), r1(n)]),
     })),
     districts: (L.quartiers || []).map((q) => ({ name: q.nom, type: q.type || null, style: q.style || null, x: r1(q.x), z: r1(q.n) })),

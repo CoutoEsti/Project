@@ -8,7 +8,7 @@ import { compile, findJoints } from '../map/layout.js';
 import { junctionPatches, streetLandings } from '../map/junctions.js';
 import { buildStructures } from '../map/structures.js';
 import { tiling, byTile } from '../map/tiles.js';
-import { prepareBuildings } from '../map/buildings.js';
+import { prepareBuildings, clearRoads } from '../map/buildings.js';
 import { placeStreetLamps, placeTrees } from '../map/props.js';
 import { streetMarkings, roadMarkings } from '../map/markings.js';
 import { pointInRing, ringBBox } from '../map/geom.js';
@@ -54,7 +54,7 @@ export async function buildWorld(THREE, source, opts = {}) {
   map.signs = (map.signs || []).concat(exitSigns(layout));
   const tiles = tiling(map);
   const styleAt = (x, n) => map.styleNear(x, n);
-  let buildings = await step('bâtiments', () => prepareBuildings(map, layout, tiles, styleAt));
+  let buildings = await step('bâtiments', () => clearRoads(prepareBuildings(map, layout, tiles, styleAt), structures.index, layout.streetsAt, layout.terrain, map.scale).buildings);
   const M = await step('matériaux', () => createMaterials(THREE, opts));
 
   const root = new THREE.Group();

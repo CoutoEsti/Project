@@ -23,15 +23,25 @@ Deux réglages, dans le bouton **Carte…** en haut (la page se reconstruit) :
 
 | Zone | Contenu |
 |---|---|
+| `coeur` (par défaut) | la carte de jeu : centre-ville, Vieux-Montréal, Vieux-Port, mont Royal, Saint-Henri, Turcot, les îles, la tête du pont Jacques-Cartier à Longueuil (36 km²) |
 | `centre` | centre-ville, Vieux-Montréal, Vieux-Port, Plateau, mont Royal, Ville-Marie, les îles (~7 × 7 km) |
 | `anneau` | le centre, plus Décarie, la Métropolitaine (A-40), Turcot, le Stade (~12 × 11 km) |
+
+`coeur` est un polygone, pas un rectangle : une forme qu'on lit d'un coup
+d'œil, comme la carte d'un monde ouvert. Le fleuve au sud et à l'est, le mont
+Royal au nord, Turcot à l'ouest, le canal de Lachine sous Saint-Henri. Les
+ponts qui mènent aux îles et à la rive sud restent entiers ; ceux qui sortent
+de la carte (Victoria, Champlain par Bonaventure) s'arrêtent sur une barrière.
+Décarie, la 40 et le Stade n'y sont pas : ils restent dans `anneau`.
 
 **Échelle** : 100 % (la vraie ville), 85 % ou 70 %. En dessous de 100 %,
 tout rapetisse d'autant — rues, bâtiments, relief — sauf la voiture et les
 dégagements sous les ponts et dans les tunnels, qui restent en vrais mètres.
 
-La valeur de départ est dans `carte.json` ; l'adresse la remplace :
-`?zone=centre&echelle=85` (ou `#centre-85`).
+La valeur de départ est dans `carte.json`. Le jeu se souvient ensuite de la
+dernière carte jouée sur ce navigateur (zone nommée ou dessinée, et échelle)
+et la recharge tant qu'on n'en choisit pas une autre. L'adresse l'emporte sur
+les deux : `?zone=centre&echelle=85` (ou `#centre-85`).
 
 ### Dessiner sa propre zone
 
@@ -43,9 +53,21 @@ pour un polygone, se déforme sommet par sommet (« En polygone » pour un
 rectangle ou une ellipse). Plusieurs formes = leur union. La page donne la
 surface en km² et une **estimation** des bâtiments et des rues gardés.
 
+**Outil Route** (touche T) : pour garder une route précise et rien autour —
+l'autoroute entre deux quartiers, un pont, une rue de liaison. Un clic sur la
+rue où elle commence, puis un clic à chaque endroit où elle passe : le tracé
+suit les rues réelles (graphe des rues, sens uniques respectés, il reste sur la
+même route quand il peut) et, sur une route à chaussées séparées, prend aussi
+l'autre sens. Échap termine. Le nom de la rue sous le curseur s'affiche avant
+le clic ; zoomer pour viser juste dans les échangeurs. Chaque tronçon devient un
+couloir : la chaussée plus 9 m de chaque côté (`map/routes.js`). Les rues qui le
+croisent sont coupées à son bord comme à n'importe quel contour. En ville, hors
+des formes, on ne voit que le décor en blocs.
+
 - **Jouer cette zone** ouvre `index.html?forme=…` ; le code est un polygone
-  arrondi au mètre, en base64url, donc le lien de la page se partage tel quel.
-- **Exporter** télécharge `{ "zone": { "nom", "poly" }, "echelle": 100 }` : à
+  arrondi au mètre (et les routes : ligne centrale et demi-largeur), en
+  base64url, donc le lien de la page se partage tel quel.
+- **Exporter** télécharge `{ "zone": { "nom", "poly", "routes" }, "echelle": 100 }` : à
   coller dans `carte.json` pour en faire la zone de départ.
 - La zone est aussi gardée dans `localStorage`.
 
@@ -238,6 +260,7 @@ node mtl/tools/shots.mjs --day                   # captures → mtl/.shots/
 node mtl/tools/plan.mjs --png                    # régénère docs/plan.png
 node mtl/tools/export.mjs                        # export Unity → mtl/export/
 node mtl/tools/voitures.mjs                      # pointes des trois voitures (±5 %) et changement en roulant
+node mtl/tools/artefacts.mjs --zone coeur        # murs, glissières, bâtiments plantés sur la chaussée, et trous
 ```
 
 `check.mjs` fait rouler un pilote automatique, voie de droite, sur Décarie
@@ -374,9 +397,6 @@ Voir [`unity/README.md`](unity/README.md).
   rue qui passe sous un tablier sans vrai tunnel, souvent à 5-6 m au lieu de
   6,2. Ça ne bloque pas la voiture ; les pires (routes en escalier, rues qui
   plongeaient dans la tranchée) sont corrigés.
-- Les bretelles de l'île Sainte-Hélène qui montent au pont Jacques-Cartier
-  sont trop courtes dans les données pour atteindre le tablier : elles
-  finissent sur une barrière « Fermé ».
 - À 70 %, les voies sont étroites (la voiture ne rapetisse pas).
 - Premier chargement lourd : ~25 s pour `anneau` sur un bon ordinateur. Au
   volant, 400 à 750 appels de rendu et 3 à 5 M triangles au centre-ville ;

@@ -2,15 +2,40 @@
 
 1. Installer **glTFast** (`com.unity.cloud.gltfast`) depuis le Package Manager.
 2. Générer l'export : `node mtl/tools/export.mjs` (options `--zone`,
-   `--echelle`, `--tuiles`), ou la touche **E** dans le navigateur, qui
-   télécharge un `.zip` et garde les textures générées. La zone et l'échelle
-   exportées sont celles de la carte construite.
+   `--echelle`, `--tuiles`, `--carte f.json`, `--forme <code>`), ou la touche
+   **E** dans le navigateur, qui télécharge un `.zip` et garde les textures
+   générées. La zone et l'échelle exportées sont celles de la carte construite.
+   Une zone dessinée dans `zones.html` (polygones et routes gardées) se
+   sauvegarde en `carte.json`, que l'export lit ; elle est recopiée dans
+   `map.json` sous `settings.forme`, en mètres dans le repère du jeu.
 3. Glisser les `.glb` de `mtl/export/` dans `Assets/`. Un fichier par couche :
    `sol`, `eau`, `rues`, `trottoirs`, `routes`, `ouvrages` (murs, glissières,
    piliers, tunnels), `marquage`, `reperes`, `arbres`, `mobilier`,
    `neons` (enseignes, auvents), `alentours` ; et les bâtiments par tuile de 1 km (`batiments_<i>_<j>`),
    pour pouvoir les charger ou les décharger par morceaux. `--tuiles` découpe
    aussi toutes les autres couches.
+
+### Un objet par route, pour éditer
+
+Dans `routes`, `ouvrages`, `rues` et `trottoirs`, chaque élément est un objet
+à part, nommé comme dans `map.json` : on le sélectionne, on le déplace ou on
+le supprime dans la scène sans toucher au reste.
+
+| Couche | Objets | Nom |
+|---|---|---|
+| `routes` | une chaussée par route ou pont de rue (dessous du tablier compris), une par jonction de bretelle, un par raccord | `r81 Autoroute Décarie`, `Jonction r504 > r495`, `Raccord 12` |
+| `ouvrages` | murs, glissières, piliers, plafonds, clôtures et fermetures d'**une** route | `Ouvrages r81 Autoroute Décarie` |
+| `rues` | une chaussée par rue | `Rue 3 Boulevard Décarie` |
+| `trottoirs` | trottoirs et bordures d'une rue | `Trottoirs Rue 3 Boulevard Décarie` |
+
+Un objet de plusieurs matériaux est un nœud avec un maillage par matériau
+dessous (`… · Concrete`, `… · Metal`). Chaque nœud porte aussi ses données
+dans les `extras` glTF (`kind`, `id`, `name`, `cls`, `width`, `index` d'une
+rue) : glTFast ne les lit pas par défaut, mais Unreal et Blender les gardent.
+L'`id` d'une route et l'`index` d'une rue renvoient à `map.json`.
+
+Le poids est le même qu'en bloc (~150 Mo pour le coeur). `--fusionne` sort
+l'ancien découpage, une seule pièce par couche, comme la page la dessine.
 
 Les `.glb` passent le validateur officiel de Khronos (`gltf-validator`) sans
 erreur ni avertissement. Extensions utilisées, toutes lues par glTFast :

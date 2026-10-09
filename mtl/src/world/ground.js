@@ -247,26 +247,50 @@ export function buildOutside(THREE, layout, M) {
   const idx = new Map();
   const c0 = lin(0.35), c1 = lin(0.36), c2 = lin(0.33);
   const K = keptCells(layout);
-  const allKept = (i, j) => {
-    for (let q = 0; q < step; q++) for (let r = 0; r < step; r++) if (!K.keep(i + r, j + q)) return false;
-    return true;
+  // A block of step × step cells: drawn coarse when no kept cell is in it.
+  // One the zone only crosses (a kept road's narrow corridor) is drawn cell
+  // by cell around the kept ones: a coarse quad there lay over the kept
+  // ground, trenches and all.
+  const keptIn = (i, j) => {
+    let k = 0;
+    for (let q = 0; q < step; q++) for (let r = 0; r < step; r++) if (K.keep(i + r, j + q)) k++;
+    return k;
+  };
+  const h = (i, j) => g.h[j * g.cols + i];
+  // On a block's border a fine vertex takes the coarse edge's height, so the
+  // two meshes share their edges without a crack.
+  const heightAt = (i, j) => {
+    const ri = i % step, rj = j % step;
+    if (ri && !rj) { const i0 = i - ri; return h(i0, j) + (h(i0 + step, j) - h(i0, j)) * (ri / step); }
+    if (rj && !ri) { const j0 = j - rj; return h(i, j0) + (h(i, j0 + step) - h(i, j0)) * (rj / step); }
+    return h(i, j);
   };
   const vert = (i, j) => {
     const k = j * g.cols + i;
     let v = idx.get(k);
     if (v !== undefined) return v;
     const x = g.x0 + i * g.cell, n = g.n0 + j * g.cell;
-    v = b.v(x, n, g.h[k] - 0.3, 0, 0, 1, x, n, c0, c1, c2);
+    v = b.v(x, n, heightAt(i, j) - 0.3, 0, 0, 1, x, n, c0, c1, c2);
     idx.set(k, v);
     return v;
+  };
+  const quad = (i, j, e) => {
+    const a = vert(i, j), c = vert(i + e, j), d = vert(i + e, j + e), f = vert(i, j + e);
+    b.tri(a, c, d);
+    b.tri(a, d, f);
   };
   for (let j = 0; j + step < g.rows; j += step) {
     for (let i = 0; i + step < g.cols; i += step) {
       const x = g.x0 + i * g.cell, n = g.n0 + j * g.cell, e = step * g.cell;
-      if (K ? allKept(i, j) : x >= W.x0 && x + e <= W.x1 && n >= W.n0 && n + e <= W.n1) continue;
-      const a = vert(i, j), c = vert(i + step, j), d = vert(i + step, j + step), f = vert(i, j + step);
-      b.tri(a, c, d);
-      b.tri(a, d, f);
+      if (!K) {
+        if (x >= W.x0 && x + e <= W.x1 && n >= W.n0 && n + e <= W.n1) continue;
+        quad(i, j, step);
+        continue;
+      }
+      const k = keptIn(i, j);
+      if (k === step * step) continue;
+      if (!k) { quad(i, j, step); continue; }
+      for (let q = 0; q < step; q++) for (let r = 0; r < step; r++) if (!K.keep(i + r, j + q)) quad(i + r, j + q, 1);
     }
   }
   const out = [];
