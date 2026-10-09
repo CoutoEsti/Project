@@ -11,6 +11,8 @@
 //   ?voiture=1|2|3       the car: 180, 250 or 350 km/h (V or 1 2 3 in the game)
 //   ?day=1                start by day
 //   ?low=1                phone settings: no bloom, lower resolution
+//   ?trafic=0             empty streets (?trafic=40: 40 cars at full density)
+//   ?heure=17:30          time of day for the traffic (trafic.json says "reelle": the clock)
 
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
@@ -33,6 +35,10 @@ import { createCar } from './game/car.js';
 import { loadCarModel } from './game/gltf-car.js';
 import { CARS } from './game/vehicle.js';
 import { EngineAudio } from './game/audio.js';
+import { buildNetwork } from './traffic/network.js';
+import { Traffic, TICK } from './traffic/sim.js';
+import { createTrafficView } from './traffic/render.js';
+import { createDensity, startHour } from './traffic/density.js';
 
 const params = new URLSearchParams(location.search);
 // The preview only passes a bare #anchor: tokens like #centre-85-vol.
@@ -89,6 +95,33 @@ const solids = buildSolids(layout, structures, world.buildings, {
   lamps: world.lamps, trees: world.trees, footprints: world.footprints,
 });
 const game = { layout, structures, surface, solids };
+
+// --- traffic -------------------------------------------------------------------
+// The host's simulation (here, the only player). Other players would get a
+// TrafficReplica fed by traffic.encode() instead — see traffic/sim.js.
+// How much traffic where and when: trafic.json (README, « La circulation »).
+let trafficFile = {};
+try {
+  const r = await fetch('trafic.json');
+  if (r.ok) trafficFile = await r.json();
+} catch (e) { /* no file: the defaults */ }
+if (params.has('trafic')) trafficFile = { ...trafficFile, autos_max: Number(params.get('trafic')) || 0 };
+if (LOW && !params.has('trafic')) trafficFile = { ...trafficFile, autos_max: Math.round((trafficFile.autos_max ?? 90) / 2) };
+const TRAFFIC_CAP = LOW ? 70 : 150;    // what the device can draw, whatever the file asks
+let traffic = null, trafficView = null;
+if (trafficFile.autos_max !== 0) {
+  stepLabel.textContent = 'circulation';
+  await nextFrame();
+  const net = buildNetwork(layout);
+  const density = createDensity(trafficFile, layout, net);
+  for (const w of density.warnings) console.warn(`trafic.json : ${w}`);
+  traffic = new Traffic(net, { seed: 1, max: TRAFFIC_CAP, density, hour: startHour(trafficFile, params.get('heure')) });
+  trafficView = createTrafficView(THREE, net, { max: TRAFFIC_CAP });
+  scene.add(trafficView.root);
+}
+let trafficAcc = 0;
+// The player's car bumps into the traffic, blended to the physics step.
+if (traffic) solids.dynamic = { near: (x, n, r, out) => traffic.near(x, n, r, out, trafficAcc / TICK) };
 
 // --- the car -----------------------------------------------------------------
 const driver = new Driver(game);
@@ -166,6 +199,7 @@ function setNight(v) {
   sky.set(night ? 'night' : 'day');
   world.materials.setNight(night);
   bloom.enabled = night && !LOW;
+  if (trafficView) trafficView.setNight(night);
   renderer.toneMappingExposure = night ? 1.15 : 1.0;
   fogBase = scene.fog.density;
 }
@@ -379,6 +413,20 @@ function updateDetails(dt) {
 }
 
 // --- the loop --------------------------------------------------------------------
+// Who the traffic lives around: the car, or the ground under the free camera.
+const me = { x: 0, n: 0, y: 0, heading: 0, speed: 0 };
+const playerList = [me];
+function players() {
+  if (flying) {
+    const p = flyFocus();
+    me.x = p.x; me.n = p.n; me.y = layout.terrain.height(p.x, p.n); me.heading = 0; me.speed = 0;
+  } else {
+    me.x = driver.x; me.n = driver.n; me.y = driver.y; me.heading = driver.heading; me.speed = driver.speed;
+  }
+  return playerList;
+}
+const trafficPoses = [];
+let hornTimer = 0;
 let frames = 0, acc = 0, last = performance.now();
 const clock = new THREE.Clock();
 function frame(now) {
@@ -398,6 +446,13 @@ function frame(now) {
     input.step(STEP);
     driver.step(STEP, input);
     capture(cur);
+    if (traffic) {
+      trafficAcc += STEP;
+      if (trafficAcc >= TICK - 1e-9) {
+        trafficAcc -= TICK;
+        traffic.step(TICK, players());
+      }
+    }
     acc -= STEP;
     steps++;
   }
@@ -448,6 +503,16 @@ function frame(now) {
     redline: v.spec.redline, cylinders: v.spec.cylinders, exhaust: v.spec.exhaust, induction: v.spec.induction,
   }, dt);
   if (driver.impact > 1.5) audio.impact(driver.impact);
+  if (traffic) {
+    if (driver.impact > 1.5) traffic.knock(driver.x, driver.n);
+    // A horn from a car close enough to hear, not a chorus.
+    hornTimer -= dt;
+    for (const ev of traffic.events) {
+      if (ev.type === 'horn' && hornTimer <= 0 && Math.hypot(ev.x - pose.x, ev.n - pose.n) < 45) { audio.horn(); hornTimer = 1.5; }
+    }
+    traffic.events.length = 0;
+    trafficView.update(traffic.poses(trafficAcc / TICK, trafficPoses), traffic);
+  }
   if (driver.landing > 3) audio.impact(driver.landing * 0.7);
   driver.impact = 0;
   driver.landing = 0;
@@ -491,6 +556,7 @@ window.__mtl = {
   world,
   game,
   driver,
+  traffic,
   renderer,
   camera,
   scene,

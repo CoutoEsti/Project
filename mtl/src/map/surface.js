@@ -7,7 +7,7 @@
 // relief is what a car on a street stands on.
 
 import { Grid } from './geom.js';
-import { jointHeight } from './layout.js';
+import { jointHeight, KERB_H } from './layout.js';
 
 export function createSurface(layout, structures) {
   const { index, ground } = structures;
@@ -48,7 +48,8 @@ export function createSurface(layout, structures) {
     }
     const k = ground.kindAt(x, n);
     if (k === 'terrain') {
-      const gy = T.height(x, n);
+      // A sidewalk stands a kerb above the street: the step a car climbs.
+      const gy = T.height(x, n) + (layout.sidewalkAt && layout.sidewalkAt(x, n) ? KERB_H : 0);
       // Inside a road's footprint the relief is under the asphalt: a slope
       // across the road pokes through by a few decimetres, and a car would
       // climb it and jump off.
