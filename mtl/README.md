@@ -275,6 +275,93 @@ recentré, posé au sol, et ses roues sont retrouvées par leur nom
 `rear`/`arrière`) pour le braquage et la rotation. Sans nœud reconnu comme
 roue, le modèle reste statique plutôt que de planter.
 
+## La circulation
+
+Des voitures dans une bulle de ~260 m autour du joueur, autant que l'heure
+et le quartier le demandent (`trafic.json`, plus bas ; 150 au plus, 70 sur
+téléphone). `?trafic=0` pour des rues vides, `?trafic=40` pour changer le
+nombre de base, `?heure=17:30` pour l'heure. Code dans `src/traffic/`, sans IA au sens « modèle de langage » :
+des règles de jeu classiques, quelques microsecondes par voiture.
+
+- **Le réseau** (`network.js`) vient des rues et des routes de la carte :
+  un nœud là où OpenStreetMap partage un point entre deux voies, un tronçon
+  entre deux nœuds, des voies latérales selon la classe et la largeur (les
+  mêmes que le marquage). Ruelles et places piétonnes exclues.
+- **Les carrefours** : un feu là où les données ont un feu à moins de 20 m
+  (~2 000 carrefours), sinon un arrêt — sur la petite rue seulement si une
+  rue plus importante la croise, à toutes les approches sinon (l'arrêt
+  toutes directions montréalais). Rien là où une bretelle rejoint
+  l'autoroute. Les feux proches (les deux chaussées d'un boulevard) forment
+  un seul carrefour : ses approches sont rangées par axe (deux à un
+  croisement simple, trois ou quatre quand une rue arrive en biais) et
+  chaque axe a son vert à tour de rôle, donc deux voies qui se croisent ne
+  sont jamais vertes ensemble. Pas de virage à droite au feu rouge, comme
+  sur l'île. La lampe ne se voit que de face.
+- **La conduite** (`sim.js`) : chaque voiture suit sa voie, choisit sa
+  sortie au carrefour suivant, change de voie avant de tourner, ralentit
+  dans les virages, garde ses distances (modèle IDM), s'arrête au rouge et
+  marque l'arrêt. Elle freine pour le joueur, en regardant où il sera dans
+  une seconde et demie (une queue de poisson se voit venir), klaxonne s'il
+  la bloque, la coupe ou la percute, et elle est solide (`map/collide.js`, `solids.dynamic`).
+- **Multijoueur, prévu dès le départ** : une seule simulation, chez
+  l'hôte, pour la bulle de chaque joueur ; à 20 Hz, fixe, découplée de la
+  physique. Les feux sont une fonction de l'horloge commune : rien à
+  envoyer. `encode()` donne toutes les voitures en ~4 Ko (120 voitures,
+  ~75 Ko/s à 20 Hz) et `TrafficReplica` les redessine chez les autres
+  joueurs, sans rien simuler. Même graine et mêmes joueurs, même trafic au
+  pas près (vérifié). Ce qu'il manque pour jouer à plusieurs, c'est le
+  transport entre joueurs : un site statique ne suffit pas, il faut au moins
+  un petit serveur de mise en relation (WebRTC) ou de relais.
+- **Rendu** (`render.js`) : 5 appels de rendu en tout (voitures, phares,
+  poteaux, boîtiers, lampes des feux).
+
+### Combien de trafic : `trafic.json`
+
+À côté de `carte.json`. Les facteurs se multiplient : Décarie à l'heure de
+pointe dans un quartier chargé prend les trois.
+
+```json
+{
+  "heure": "reelle",
+  "vitesse_horloge": 1,
+  "autos_max": 90,
+  "horaire": { "00:00": 0.3, "07:00": 1.4, "09:30": 1.0, "15:30": 1.4, "18:30": 1.0 },
+  "zones": [
+    { "quartier": "Centre-ville", "densite": 1.3 },
+    { "x": 0, "n": 0, "rayon": 500, "densite": 2 },
+    { "quartier": "Vieux-Montréal", "horaire": { "00:00": 1, "18:00": 1.4, "23:30": 1 } }
+  ],
+  "routes": [
+    { "nom": "Autoroute Décarie", "horaire": { "00:00": 1, "07:00": 1.8, "09:30": 1 } },
+    { "ref": "A20", "densite": 0.5 },
+    { "nom": "Rue Sainte-Catherine", "densite": 0 }
+  ]
+}
+```
+
+- `heure` : `"reelle"` (l'horloge de l'ordinateur) ou `"08:00"`.
+  `vitesse_horloge` : 60 fait passer une heure de jeu par minute.
+- `autos_max` : le nombre de voitures à densité 1. Le téléphone en prend la
+  moitié.
+- `horaire` : une valeur tient de son heure jusqu'à la suivante ; la
+  dernière continue après minuit.
+- `zones` : un quartier par son nom (celui qu'affiche le jeu) ou un cercle
+  en mètres réels (`x`, `n`, `rayon`, repère de `map/zones.js`), avec une
+  `densite`, un `horaire`, ou les deux. Le quartier où se trouve le joueur
+  change le nombre de voitures autour de lui.
+- `routes` : une rue ou une autoroute par son nom (ou le début du nom), ou
+  son numéro (`ref`). Une route plus dense reçoit plus des voitures qui
+  apparaissent ; à 0, aucune n'y apparaît (elles peuvent encore y tourner).
+- Un nom inconnu est signalé dans la console du navigateur (`trafic.json :
+  quartier inconnu`). Sans fichier, les valeurs ci-dessus s'appliquent.
+
+`check.mjs` le vérifie : 5 minutes de trafic avec deux joueurs (aucun feu
+rouge brûlé, aucune voiture coincée), aucun carrefour où deux voies qui se
+croisent sont vertes ensemble, déterminisme, aller-retour hôte → joueur,
+une voiture qui s'arrête devant le joueur, une queue de poisson sur Décarie
+à 65 km/h (sans l'anticipation, la voiture percute), `trafic.json` (moins
+d'autos la nuit, aucune sur une route à 0), et le choc contre elle.
+
 ## Unity
 
 Voir [`unity/README.md`](unity/README.md).
@@ -295,5 +382,7 @@ Voir [`unity/README.md`](unity/README.md).
   volant, 400 à 750 appels de rendu et 3 à 5 M triangles au centre-ville ;
   la vue d'ensemble de l'anneau, ~1 400 appels et 6,7 M. Sur téléphone,
   utiliser la zone `centre` (non mesuré sur un vrai téléphone).
-- Les voitures, piétons et le trafic manquent : les rues sont vides.
-- Pas encore de trafic, de piétons, ni de course jouable.
+- La circulation est une première version (voir « La circulation ») : pas
+  de dépassement, les virages à gauche ne cèdent pas aux voitures d'en
+  face, et les bretelles s'insèrent sans regarder à côté.
+- Pas encore de piétons, ni de course jouable.
