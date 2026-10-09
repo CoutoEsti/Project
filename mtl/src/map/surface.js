@@ -21,6 +21,19 @@ export function createSurface(layout, structures) {
     joints.insert({ j, x0, n0, x1, n1 }, x0, n0, x1, n1);
   }
   const jtmp = [];
+  // The decks between two carriageways alongside (map/structures.js medians):
+  // quads from one edge to the other, at the higher carriageway's level.
+  const slabs = new Grid(32);
+  for (const md of structures.medians || []) {
+    for (let k = 0; k + 1 < md.pts.length; k++) {
+      const p = md.pts[k], q = md.pts[k + 1];
+      const ring = [[p[0], p[1]], [p[2], p[3]], [q[2], q[3]], [q[0], q[1]]];
+      const xs = ring.map((v) => v[0]), ns = ring.map((v) => v[1]);
+      const c = { ring, y: (p[4] + q[4]) / 2, x0: Math.min(...xs), n0: Math.min(...ns), x1: Math.max(...xs), n1: Math.max(...ns) };
+      slabs.insert(c, c.x0, c.n0, c.x1, c.n1);
+    }
+  }
+  const stmp = [];
 
   /**
    * @param yRef   the car's current height
@@ -46,6 +59,11 @@ export function createSurface(layout, structures) {
       asphalt = Math.max(asphalt, y);
       if (y > best) { best = y; kind = 'joint'; road = null; }
     }
+    for (const c of slabs.query(x, n, 0, stmp)) {
+      if (x < c.x0 || x > c.x1 || n < c.n0 || n > c.n1 || c.y > lim || !inRing(c.ring, x, n)) continue;
+      asphalt = Math.max(asphalt, c.y);
+      if (c.y > best) { best = c.y; kind = 'joint'; road = null; }
+    }
     const k = ground.kindAt(x, n);
     if (k === 'terrain') {
       const gy = T.height(x, n);
@@ -64,4 +82,13 @@ export function createSurface(layout, structures) {
   }
 
   return { at };
+}
+
+function inRing(R, x, n) {
+  let inside = false;
+  for (let i = 0, j = R.length - 1; i < R.length; j = i++) {
+    const [xi, ni] = R[i], [xj, nj] = R[j];
+    if ((ni > n) !== (nj > n) && x < ((xj - xi) * (n - ni)) / (nj - ni) + xi) inside = !inside;
+  }
+  return inside;
 }

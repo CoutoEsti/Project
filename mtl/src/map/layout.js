@@ -14,6 +14,7 @@
 
 import * as G from './geom.js';
 import { createRoadIndex } from './query.js';
+import { trenchMate, pavesGap } from './structures.js';
 
 export const SPACING = 2;         // metres between road samples
 
@@ -176,6 +177,28 @@ export function compile(map) {
   for (const r of roads) {
     sunken.push(...runs(r, (p) => p.y - p.gs < SUNKEN && !p.tunnel, (p) => margin(r, p)));
     tunnels.push(...runs(r, (p) => p.tunnel, () => 0.5));
+  }
+  // Two roads sunk side by side (Décarie's carriageways, a ramp climbing out
+  // beside them) share one trench: the strip of ground left between their
+  // holes stood a trench deep, its top a grey face over the median barriers.
+  // map/structures.js paves the gap and walls any step.
+  const rIndex = createRoadIndex(roads);
+  for (const r of roads) {
+    if (!r.oneway) continue;
+    for (const side of [1, -1]) {
+      let a = [], b = [];
+      const flushStrip = () => { if (a.length >= 2) sunken.push([[...a, ...b.reverse(), a[0]]]); a = []; b = []; };
+      for (const p of r.samples) {
+        const t = p.tunnel ? null : trenchMate(r, p, side, rIndex);
+        if (!t || !pavesGap(r, t)) { flushStrip(); continue; }
+        const at = (off) => [p.x + side * p.lx * off, p.n + side * p.ln * off];
+        a.push(at(p.h - 0.3));
+        b.push(at(p.h + t.gap + 0.3));
+        // Short pieces, overlapping by a sample: a long ring can cross itself.
+        if (a.length >= 16) { const la = a[a.length - 1], lb = b[b.length - 1]; flushStrip(); a.push(la); b.push(lb); }
+      }
+      flushStrip();
+    }
   }
   let holes = G.unionAll(sunken);
   if (landings.length && holes.length) holes = G.pc.difference(holes, ...landings);
