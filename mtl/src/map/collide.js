@@ -18,6 +18,7 @@ export class Solids {
   constructor() {
     this.grid = new Grid(CELL);
     this.count = 0;
+    this.dynamic = null;      // moving things (traffic): { near(x, n, r, out) } appending to out
   }
 
   /** Add a segment (a point when a == b) with a height range and a radius. */
@@ -35,7 +36,11 @@ export class Solids {
     }
   }
 
-  near(x, n, r, out) { return this.grid.query(x, n, r, out); }
+  near(x, n, r, out) {
+    this.grid.query(x, n, r, out);
+    if (this.dynamic) this.dynamic.near(x, n, r, out);
+    return out;
+  }
 }
 
 /** Build the solid world from the structures, the buildings and the props. */
