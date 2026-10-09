@@ -24,8 +24,9 @@ import { projectOnRoad, SPACING } from '../src/map/layout.js';
 import { resolveSpawn } from '../src/game/spawn.js';
 import { pointInRing, ringBBox, hash01, segDist2 } from '../src/map/geom.js';
 import { Driver } from '../src/game/drive.js';
-import { buildNetwork, span, pointOn } from '../src/traffic/network.js';
-import { Traffic, TrafficReplica, TICK } from '../src/traffic/sim.js';
+import { buildNetwork, span, pointOn, lightAt, insideBox } from '../src/traffic/network.js';
+import { createDensity } from '../src/traffic/density.js';
+import { Traffic, TrafficReplica, TICK, CAR_LENGTH } from '../src/traffic/sim.js';
 import { loadSourceNode } from './lib/source-node.mjs';
 import { serve } from './lib/serve.mjs';
 import { loadPlaywright } from './lib/playwright.mjs';
@@ -538,23 +539,51 @@ drive('circuit Gilles-Villeneuve', ['Circuit Gilles-Villeneuve', 2300, -3200, 18
   check('réseau de circulation', net.edges.length > 1000 && (by.signal || 0) > 50 && (by.stop || 0) > 50,
     `${net.edges.length} tronçons, ${by.signal || 0} carrefours à feux, ${by.stop || 0} arrêts, ${by.merge || 0} bretelles, en ${ms.toFixed(0)} ms`);
 
+  // Lights: two ways that cross are never green together, at any junction
+  // of a cluster (a boulevard's two carriageways are one junction).
+  {
+    const dirOf = (ed) => {
+      const e = net.edges[ed >> 1], P = ed & 1 ? e.pts.slice().reverse() : e.pts;
+      let i = P.length - 1, d = 0;
+      while (i > 0 && d < 15) { d += Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]); i--; }
+      return Math.atan2(P[P.length - 1][0] - P[i][0], P[P.length - 1][1] - P[i][1]);
+    };
+    const fold = (a) => { const d = Math.abs(a) % Math.PI; return d > Math.PI / 2 ? Math.PI - d : d; };
+    const lit = net.nodes.filter((o) => o.control === 'signal');
+    const bad = new Set();
+    for (const o of lit) {
+      const aps = [];
+      for (const p of lit) {
+        if (p.offset !== o.offset || Math.hypot(p.x - o.x, p.n - o.n) > 120 * s) continue;
+        for (const ed of p.in) if (!insideBox(net, ed)) aps.push([p, ed, dirOf(ed)]);
+      }
+      for (let t = 0; t < 160 && !bad.has(o.id); t += 1) {
+        const g = aps.filter(([p, ed]) => lightAt(p, ed, t) === 'g');
+        for (let i = 0; i < g.length; i++) for (let j = i + 1; j < g.length; j++) if (fold(g[i][2] - g[j][2]) > Math.PI / 3) bad.add(o.id);
+      }
+    }
+    const ex = [...bad].slice(0, 3).map((id) => `(${Math.round(net.nodes[id].x)}, ${Math.round(net.nodes[id].n)})`).join(' ');
+    check('feux : jamais deux verts qui se croisent', bad.size === 0, `${bad.size}/${lit.length} carrefours en conflit ${ex}`);
+  }
+
   // Two players far apart: the host keeps one bubble around each.
   const at = (id) => { const p = resolveSpawn(layout, layout.map.spawns.find((q) => q.id === id)); return { x: p.x, n: p.n, y: p.y, heading: p.heading, speed: 0 }; };
   const players = ['centre-ville', 'plateau'].map(at);
+  // For the flow itself, two bubbles whose players hover above the street:
+  // a player standing in a lane holds up a queue, and that is tested apart.
+  const hover = players.map((p) => ({ ...p, y: p.y + 50 }));
   const run = (seconds, seed = 1) => {
     const tr = new Traffic(net, { seed, max: 120 });
     const still = new Map();
     let worst = 0, nan = 0, steps = 0, spent = 0, speed = 0, samples = 0;
     for (let i = 0; i < seconds / TICK; i++) {
       const a = performance.now();
-      tr.step(TICK, players);
+      tr.step(TICK, hover);
       spent += performance.now() - a;
       steps++;
       for (const c of tr.cars) {
         if (!Number.isFinite(c.x + c.n + c.y)) nan++;
-        // A player standing on the road holds up a queue: that is the point.
-        const near = players.some((p) => Math.hypot(p.x - c.x, p.n - c.n) < 100);
-        const t = c.v < 0.3 && !near ? (still.get(c.id) || 0) + TICK : 0;
+        const t = c.v < 0.3 ? (still.get(c.id) || 0) + TICK : 0;
         still.set(c.id, t);
         if (t > worst) worst = t;
         speed += c.v; samples++;
@@ -600,6 +629,57 @@ drive('circuit Gilles-Villeneuve', ['Circuit Gilles-Villeneuve', 2300, -3200, 18
     detail = `arrêtée à ${d.toFixed(1)} m (centre à centre) à ${c.v.toFixed(1)} m/s`;
   }
   check('les autos s’arrêtent devant le joueur', ok, detail);
+
+  // Cut off: on Décarie, a player swerves from the next lane into the path
+  // of a car at ~65 km/h, 16 m ahead of it. Seeing only where the player is,
+  // the car would brake too late and hit (~2.5 m centre to centre).
+  {
+    const DP = [at('decarie')];
+    const tr2 = new Traffic(net, { seed: 5, max: 60 });
+    const sp2 = {};
+    let v = null;
+    for (let i = 0; i < 1200 && !v; i++) {
+      tr2.step(TICK, DP);
+      v = tr2.cars.find((o) => !o.conn && o.v > 18 && (span(net, o.ed, sp2), sp2.s1 - o.s > 150));
+    }
+    let ok2 = false, d2 = 'aucune auto lancée sur l’autoroute';
+    if (v) {
+      const side = 4, cross = 6;
+      const q = pointOn(net, v.ed, v.s + 16 + (v.v * side) / cross, v.lat, {});
+      const right = q.h + Math.PI / 2;
+      const me = { x: q.x + Math.sin(right) * side, n: q.n + Math.cos(right) * side, y: q.y, heading: q.h - Math.PI / 2, speed: cross };
+      const v0 = v.v;
+      let min = Infinity, horn = false;
+      for (let i = 0; i < 6 / TICK; i++) {
+        if (Math.hypot(me.x - q.x, me.n - q.n) > 0.3) { me.x -= Math.sin(right) * cross * TICK; me.n -= Math.cos(right) * cross * TICK; } else me.speed = 0;
+        tr2.step(TICK, [me]);
+        min = Math.min(min, Math.hypot(v.x - me.x, v.n - me.n));
+        if (tr2.events.some((e) => e.id === v.id)) horn = true;
+        tr2.events.length = 0;
+      }
+      ok2 = min > CAR_LENGTH + 0.5 && v.v < 1;
+      d2 = `${(v0 * 3.6).toFixed(0)} km/h → arrêtée, au plus près ${min.toFixed(1)} m (centre à centre)${horn ? ', klaxon' : ''}`;
+    }
+    check('les autos freinent quand on leur coupe le chemin', ok2, d2);
+  }
+
+  // trafic.json: the hour, the districts and the roads set how many cars.
+  {
+    const cfg = { autos_max: 90, horaire: { '00:00': 0.3, '07:00': 1.5, '09:30': 1 },
+      zones: [{ quartier: 'Centre-ville', densite: 1.2 }], routes: [{ nom: 'Rue Sainte-Catherine', densite: 0 }] };
+    const D = createDensity(cfg, layout, net);
+    const count = (hour) => {
+      const t = new Traffic(net, { seed: 2, max: 150, density: D, hour });
+      for (let i = 0; i < 20 * 20; i++) t.step(TICK, P0);
+      return t;
+    };
+    const night = count(3 * 3600), rush = count(8 * 3600);
+    const sc = new Traffic(net, { seed: 2, max: 150, density: D, hour: 8 * 3600 });
+    sc.step(TICK, P0);
+    const onIt = sc.cars.filter((c) => /^rue sainte-catherine/i.test((net.edges[c.ed >> 1].street || {}).name || '')).length;
+    check('trafic.json : heures, quartiers, routes', D.warnings.length === 0 && night.cars.length < rush.cars.length / 3 && onIt === 0,
+      `3 h : ${night.cars.length} autos, 8 h : ${rush.cars.length}, Sainte-Catherine à 0 : ${onIt} auto au départ${D.warnings.length ? ` — ${D.warnings.join(' ; ')}` : ''}`);
+  }
 
   // And the player's car hits them: they are solid.
   if (c) {

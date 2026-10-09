@@ -22,9 +22,11 @@ const RANK = { highway: 10, bridge: 6, ramp: 0 };
 const SIGNAL_REACH = 20;    // a signal head this close to a junction runs it (real metres)
 const STOP_SETBACK = 3.5;   // stop line ahead of the crossing street's edge, as the paint (map/markings.js)
 
-// Light cycle, seconds: two groups of approaches (one axis, then the other).
-export const CYCLE = 52;
-const GREEN = 22, YELLOW = 3;      // then a second of all red
+// Light cycle, seconds: each axis of a junction in turn (two at a plain
+// crossing), green, yellow, then a second of all red.
+const PHASE = 26;
+const GREEN = 22, YELLOW = 3;
+const AXIS_SPREAD = Math.PI / 6;   // approaches within 30° (either way) share an axis
 
 export function buildNetwork(layout) {
   const s = layout.map.scale;
@@ -149,23 +151,33 @@ export function buildNetwork(layout) {
       if (a !== b) root.set(Math.max(a, b), Math.min(a, b));
     }
   }
-  // Light groups: the approaches along the main way's axis (the cluster's
-  // first junction decides it), then the others.
-  const axisOf = new Map();
+  // Light phases: the cluster's approaches sorted into axes (two at a plain
+  // crossing, three where a diagonal street comes in), each axis green in
+  // turn. Every approach of the cluster shares them, so two ways that cross
+  // are never green together, whichever of its junctions they enter by.
+  const members = new Map();
   for (const o of lit) {
     const r = find(o.id);
-    o.offset = hash01(r, 7) * CYCLE;
-    if (!axisOf.has(r)) {
-      const top = nodes[r];
-      const main = top.in.slice().sort((p, q) => edges[q >> 1].rank - edges[p >> 1].rank || p - q)[0];
-      axisOf.set(r, main === undefined ? 0 : arrival(edges[main >> 1], main & 1));
+    if (!members.has(r)) members.set(r, []);
+    members.get(r).push(o);
+  }
+  for (const [r, group] of members) {
+    const aps = [];
+    for (const o of group) for (const ed of o.in) aps.push({ o, ed, h: approach(edges[ed >> 1], ed & 1), rank: edges[ed >> 1].rank });
+    aps.sort((p, q) => q.rank - p.rank || p.ed - q.ed);
+    const axes = [];
+    for (const ap of aps) {
+      let k = axes.findIndex((h) => fold(ap.h - h) < AXIS_SPREAD);
+      if (k < 0) { k = axes.length; axes.push(ap.h); }
+      ap.phase = k;
     }
-    const axis = axisOf.get(r);
-    o.group = new Map();
-    for (const ed of o.in) {
-      const h = arrival(edges[ed >> 1], ed & 1);
-      o.group.set(ed, Math.abs(Math.cos(h - axis)) >= 0.5 ? 0 : 1);
+    const phases = Math.max(2, axes.length);
+    for (const o of group) {
+      o.phases = phases;
+      o.offset = hash01(r, 7) * PHASE * phases;
+      o.group = new Map();
     }
+    for (const ap of aps) ap.o.group.set(ap.ed, ap.phase);
   }
 
   // Where each edge's drivable run starts and ends: short of the junction box.
@@ -208,7 +220,7 @@ function makeEdge(id, L, a, b, pts, len, s) {
     offsets = [side, side];
   }
   return {
-    id, a: a.id, b: b.id, pts, len, cls: L.cls, rank: L.rank, width: w,
+    id, a: a.id, b: b.id, pts, len, plen: len, cls: L.cls, rank: L.rank, width: w,
     street: L.street || null, road: L.road || null,
     lanes, offsets, speed: SPEED[L.cls] || SPEED.street, geo: null, t0: 0, t1: 0,
   };
@@ -283,13 +295,31 @@ function densify(pts, step) {
  */
 export function lightAt(node, ed, t) {
   const g = node.group ? node.group.get(ed) || 0 : 0;
-  let u = (t + node.offset) % CYCLE;
-  if (u < 0) u += CYCLE;
-  const half = CYCLE / 2;
-  if (g === 1) u = (u + half) % CYCLE;
+  const cycle = PHASE * (node.phases || 2);
+  let u = (t + node.offset - g * PHASE) % cycle;
+  if (u < 0) u += cycle;
+  if (u >= PHASE) return 'r';
   if (u < GREEN) return 'g';
   if (u < GREEN + YELLOW) return 'y';
   return 'r';
+}
+
+/**
+ * The direction an approach comes from, over its last ~15 m: the very last
+ * segment of a way is often a short kink that says nothing of the street.
+ */
+function approach(e, dir) {
+  const P = dir ? e.pts.slice().reverse() : e.pts;
+  const b = P[P.length - 1];
+  let i = P.length - 1, d = 0;
+  while (i > 0 && d < 15) { d += Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]); i--; }
+  return Math.atan2(b[0] - P[i][0], b[1] - P[i][1]);
+}
+
+/** Angle between two directions as lines (0 to π/2): opposite ways are one axis. */
+function fold(a) {
+  const d = Math.abs(a) % Math.PI;
+  return d > Math.PI / 2 ? Math.PI - d : d;
 }
 
 /** Heading (compass radians) of a car leaving the near end of ed. */
@@ -345,4 +375,10 @@ export function pointOn(net, ed, s, lat, out) {
   out.h = Math.atan2(tx, tn);
   out.p = d > 1e-9 ? Math.atan2((ys[hi] - ys[lo]) * sg, d) : 0;
   return out;
+}
+
+/** A short link between two lit junctions (a boulevard's median): one box with the first. */
+export function insideBox(net, ed) {
+  const e = net.edges[ed >> 1];
+  return e.plen < 30 * net.scale && net.nodes[ed & 1 ? e.b : e.a].control === 'signal';
 }

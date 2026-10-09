@@ -14,7 +14,7 @@
 //   - same seed, same players → same traffic, step for step (checked).
 
 import { rng } from '../map/geom.js';
-import { lightAt, span, pointOn, arrival, departure } from './network.js';
+import { lightAt, span, pointOn, arrival, departure, insideBox } from './network.js';
 
 export const TICK = 1 / 20;        // traffic steps a second (the car's physics runs at 120)
 export const CAR_LENGTH = 4.6;
@@ -26,6 +26,8 @@ const HEADWAY = 1.3;               // seconds
 const LAT_RATE = 1.3;              // lane change, m/s sideways
 const A_LAT = 2.6;                 // cornering, m/s²
 const LOOK = 70;                   // how far past the end of its edge a car looks
+const LOOK_AHEAD = [0, 0.5, 1, 1.5];   // seconds: where a player will be, to see a cut-in coming
+const CORRIDOR = 2.4;              // a player this close to the car's line is in its lane
 const STOP_HOLD = 0.9;             // seconds stopped at a stop sign
 const RADIUS = 260;                // the bubble around each player
 const MARGIN = 90;                 // a car leaves this far beyond it
@@ -35,12 +37,17 @@ const FIELDS = 8;                  // floats per car on the wire
 export class Traffic {
   /**
    * @param net   buildNetwork(layout)
-   * @param opts  seed, max (cars), radius (m)
+   * @param opts  seed, max (cars: the most the device can draw), radius (m),
+   *              density (traffic/density.js: how many cars where and when),
+   *              hour (time of day at the start, seconds since midnight)
    */
-  constructor(net, { seed = 1, max = 80, radius = RADIUS } = {}) {
+  constructor(net, { seed = 1, max = 80, radius = RADIUS, density = null, hour = 12 * 3600 } = {}) {
     this.net = net;
     this.rand = rng(seed);
     this.max = max;
+    this.target = max;             // how many the time and the place call for, at most max
+    this.density = density;
+    this.hour = hour;
     this.radius = radius * net.scale;
     this.cars = [];
     this.byEd = new Map();
@@ -65,6 +72,8 @@ export class Traffic {
   step(dt, players) {
     this.time += dt;
     this.tick++;
+    this.hour = (this.hour + dt * (this.density ? this.density.clockRate : 1)) % 86400;
+    if (this.tick % 20 === 1) this._aim(players);
     for (const c of this.cars) this._drive(c, dt, players);
     for (const c of this.cars) this._move(c, dt);
     this._cull(players);
@@ -109,17 +118,29 @@ export class Traffic {
     };
     const lead = this._leader(c, sp);
     if (lead) take(lead.gap, c.v - lead.v);
-    // The players: a car ahead in the lane, whatever it is doing there.
-    let blocked = false;
+    // The players: a car ahead in the lane, or about to be — one cutting in
+    // is seen where it will be in a second, not where it is now.
+    let blocked = false, cut = false;
     const fx = Math.sin(c.h), fn = Math.cos(c.h);
     for (const p of players) {
+      if (Math.abs((p.y ?? c.y) - c.y) > 3) continue;
       const dx = p.x - c.x, dn = p.n - c.n;
       const along = dx * fx + dn * fn;
-      if (along <= 0 || along > 45) continue;
-      if (Math.abs(dx * fn - dn * fx) > 2.3 || Math.abs((p.y ?? c.y) - c.y) > 3) continue;
-      const pv = Math.max(0, (p.speed || 0) * Math.cos((p.heading || 0) - c.h));
-      take(along - CAR_LENGTH, c.v - pv);
+      if (along <= 0 || along > 50) continue;
+      const ps = p.speed || 0, ph = p.heading || 0;
+      const vx = Math.sin(ph) * ps, vn = Math.cos(ph) * ps;
+      let inLane = false;
+      for (const t of LOOK_AHEAD) {
+        const lx = dx + vx * t, ln = dn + vn * t;
+        if (Math.abs(lx * fn - ln * fx) < CORRIDOR && lx * fx + ln * fn > 0) { inLane = true; break; }
+      }
+      if (!inLane) continue;
+      const pv = Math.max(0, vx * fx + vn * fn);
+      const gap = along - CAR_LENGTH;
+      take(gap, c.v - pv);
       if (along < 14 && pv < 1) blocked = true;
+      // Cut off: not enough room to stop comfortably.
+      if (c.v > 4 && c.v - pv > 2 && gap < ((c.v - pv) ** 2) / (2 * B_COMF)) cut = true;
     }
     // The stop line.
     if (!c.committed && c.next >= 0) {
@@ -135,7 +156,7 @@ export class Traffic {
     // Reactions to the player: a horn when blocked, more so after a knock.
     c.honk -= dt;
     c.blocked = blocked && c.v < 0.5 ? c.blocked + dt : 0;
-    if ((c.blocked > 3 || c.hit > 0) && c.honk <= 0) {
+    if ((c.blocked > 3 || c.hit > 0 || cut) && c.honk <= 0) {
       c.honk = 4 + this.rand() * 3;
       this.events.push({ type: 'horn', x: c.x, n: c.n, id: c.id });
     }
@@ -192,7 +213,7 @@ export class Traffic {
 
   /** A short link between two lit junctions (a boulevard's median): one box. */
   _inside(sp) {
-    return sp.e.len < 30 * this.net.scale && this.net.nodes[sp.from].control === 'signal';
+    return insideBox(this.net, sp.e.id * 2 + sp.dir);
   }
 
   /** Is the start of the next edge full (a car standing just past the box)? */
@@ -377,23 +398,36 @@ export class Traffic {
     }
   }
 
+  /** How many cars now: the base count × the hour × the players' districts. */
+  _aim(players) {
+    const D = this.density;
+    if (!D || !players.length) { this.target = this.max; return; }
+    let local = 0;
+    for (const p of players) local += D.local(p.x, p.n, this.hour);
+    const want = D.max * D.global(this.hour) * (local / players.length);
+    this.target = Math.max(0, Math.min(this.max, Math.round(want)));
+  }
+
   _spawn(players) {
-    if (!players.length || this.cars.length >= this.max) return;
+    if (!players.length || this.cars.length >= this.target) return;
     const net = this.net, R = this.radius;
     // The first fill puts cars everywhere; after that they come in from the
     // edge of the bubble, out of sight more often than not.
     // A player who jumps (teleport, free flight) gets a full bubble at once.
-    const burst = !this.filled || this.cars.length < this.max / 2;
+    const burst = !this.filled || this.cars.length < this.target / 2;
     const inner = burst ? 12 : R * 0.55;
-    let tries = burst ? 400 : 4;
+    let tries = burst ? 600 : 8;
     const sp = this._sp, tmp = this._found || (this._found = []);
-    while (tries-- > 0 && this.cars.length < this.max) {
+    const D = this.density, peak = D ? D.peak(this.hour) : 1;
+    while (tries-- > 0 && this.cars.length < this.target) {
       const p = players[Math.floor(this.rand() * players.length)];
       const ang = this.rand() * Math.PI * 2, r = inner + this.rand() * (R - inner);
       const x = p.x + Math.sin(ang) * r, n = p.n + Math.cos(ang) * r;
       const found = net.grid.query(x, n, 30, tmp);
       if (!found.length) continue;
       const e = found[Math.floor(this.rand() * found.length)];
+      // Busier streets take more of the cars: a draw against their factor.
+      if (D && this.rand() * peak >= D.at(e, this.hour)) continue;
       const dirs = [0, 1].filter((d) => e.lanes[d] > 0);
       const ed = e.id * 2 + dirs[Math.floor(this.rand() * dirs.length)];
       span(net, ed, sp);

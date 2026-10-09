@@ -11,7 +11,8 @@
 //   ?voiture=1|2|3       the car: 180, 250 or 350 km/h (V or 1 2 3 in the game)
 //   ?day=1                start by day
 //   ?low=1                phone settings: no bloom, lower resolution
-//   ?trafic=0             empty streets (?trafic=40: at most 40 cars)
+//   ?trafic=0             empty streets (?trafic=40: 40 cars at full density)
+//   ?heure=17:30          time of day for the traffic (trafic.json says "reelle": the clock)
 
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
@@ -37,6 +38,7 @@ import { EngineAudio } from './game/audio.js';
 import { buildNetwork } from './traffic/network.js';
 import { Traffic, TICK } from './traffic/sim.js';
 import { createTrafficView } from './traffic/render.js';
+import { createDensity, startHour } from './traffic/density.js';
 
 const params = new URLSearchParams(location.search);
 // The preview only passes a bare #anchor: tokens like #centre-85-vol.
@@ -97,14 +99,24 @@ const game = { layout, structures, surface, solids };
 // --- traffic -------------------------------------------------------------------
 // The host's simulation (here, the only player). Other players would get a
 // TrafficReplica fed by traffic.encode() instead — see traffic/sim.js.
-const TRAFFIC_MAX = params.get('trafic') === '0' ? 0 : Number(params.get('trafic')) || (LOW ? 45 : 90);
+// How much traffic where and when: trafic.json (README, « La circulation »).
+let trafficFile = {};
+try {
+  const r = await fetch('trafic.json');
+  if (r.ok) trafficFile = await r.json();
+} catch (e) { /* no file: the defaults */ }
+if (params.has('trafic')) trafficFile = { ...trafficFile, autos_max: Number(params.get('trafic')) || 0 };
+if (LOW && !params.has('trafic')) trafficFile = { ...trafficFile, autos_max: Math.round((trafficFile.autos_max ?? 90) / 2) };
+const TRAFFIC_CAP = LOW ? 70 : 150;    // what the device can draw, whatever the file asks
 let traffic = null, trafficView = null;
-if (TRAFFIC_MAX > 0) {
+if (trafficFile.autos_max !== 0) {
   stepLabel.textContent = 'circulation';
   await nextFrame();
   const net = buildNetwork(layout);
-  traffic = new Traffic(net, { seed: 1, max: TRAFFIC_MAX });
-  trafficView = createTrafficView(THREE, net, { max: TRAFFIC_MAX });
+  const density = createDensity(trafficFile, layout, net);
+  for (const w of density.warnings) console.warn(`trafic.json : ${w}`);
+  traffic = new Traffic(net, { seed: 1, max: TRAFFIC_CAP, density, hour: startHour(trafficFile, params.get('heure')) });
+  trafficView = createTrafficView(THREE, net, { max: TRAFFIC_CAP });
   scene.add(trafficView.root);
 }
 let trafficAcc = 0;

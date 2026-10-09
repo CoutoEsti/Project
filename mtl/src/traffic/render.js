@@ -3,7 +3,7 @@
 // traffic lights in three more — five draw calls for the whole city. Receives
 // THREE, like the world modules.
 
-import { span, pointOn, lightAt } from './network.js';
+import { span, pointOn, lightAt, insideBox } from './network.js';
 
 const PAINT = [0xd9dde2, 0x1d1f24, 0x8a9099, 0xa3202a, 0x1f4f9c, 0xe8e4d6, 0x2e5e3e, 0x5a4a3a];
 const LAMP = { r: [1, 0.08, 0.04], y: [1, 0.62, 0], g: [0.1, 1, 0.5] };
@@ -53,7 +53,7 @@ export function createTrafficView(THREE, net, { max = 120 } = {}) {
     if (node.control !== 'signal') continue;
     for (const ed of node.in) {
       span(net, ed, sp);
-      if (sp.s1 - sp.s0 < 6) continue;
+      if (sp.s1 - sp.s0 < 6 || insideBox(net, ed)) continue;   // a median link: the first light rules it
       pointOn(net, ed, sp.s1, -(sp.e.width / 2 + 0.9), q);
       heads.push({ node, ed, x: q.x, n: q.n, y: q.y, h: q.h, state: null });
     }
@@ -61,7 +61,9 @@ export function createTrafficView(THREE, net, { max = 120 } = {}) {
   const poleGeo = new THREE.CylinderGeometry(0.09, 0.11, 4.6, 6);
   poleGeo.translate(0, 2.3, 0);
   const headGeo = new THREE.BoxGeometry(0.42, 1.15, 0.32);
-  const lampGeo = new THREE.SphereGeometry(0.14, 8, 6);
+  // A flat lens, one-sided: from the cross street a light is dark, as a
+  // real one behind its visor.
+  const lampGeo = new THREE.CircleGeometry(0.15, 12);
   const dark = new THREE.MeshStandardMaterial({ color: 0x24262a, roughness: 0.7, metalness: 0.4 });
   const poles = new THREE.InstancedMesh(poleGeo, dark, Math.max(1, heads.length));
   const boxesMesh = new THREE.InstancedMesh(headGeo, dark, Math.max(1, heads.length));
@@ -74,6 +76,7 @@ export function createTrafficView(THREE, net, { max = 120 } = {}) {
     // The head faces the cars coming: its front (+z) points back down the approach.
     E.set(0, -hd.h, 0, 'YXZ');
     Q.setFromEuler(E);
+    hd.q = Q.clone();
     poles.setMatrixAt(i, M.compose(P.set(hd.x, hd.y, -hd.n), Q, S));
     boxesMesh.setMatrixAt(i, M.compose(P.set(hd.x, hd.y + 4.0, -hd.n), Q, S));
   });
@@ -113,7 +116,7 @@ export function createTrafficView(THREE, net, { max = 120 } = {}) {
       changed = true;
       const dy = st === 'r' ? 0.36 : st === 'y' ? 0 : -0.36;
       const fx = -Math.sin(hd.h) * 0.17, fn = -Math.cos(hd.h) * 0.17;
-      M.makeTranslation(hd.x + fx, hd.y + 4.0 + dy, -(hd.n + fn));
+      M.compose(P.set(hd.x + fx, hd.y + 4.0 + dy, -(hd.n + fn)), hd.q, S);
       lit.setMatrixAt(i, M);
       const c = LAMP[st];
       lit.setColorAt(i, col.setRGB(c[0], c[1], c[2]));
