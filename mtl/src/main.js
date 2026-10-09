@@ -67,6 +67,13 @@ composer.addPass(bloom);
 composer.addPass(new OutputPass());
 
 // --- the world ---------------------------------------------------------------
+/** The parked cars' model: the generated Civic, painted per instance, lights off. */
+function parkedCar(THREE) {
+  const c = createCar(THREE, { color: 0xffffff });
+  c.setLights(false, false);
+  c.group.userData.headMat.color.setHex(0x2a2a2a);
+  return { object: c.group, paint: c.group.children[0].material };
+}
 const stepLabel = $('loading-step');
 const nextFrame = () => new Promise((r) => requestAnimationFrame(() => r()));
 let fileSettings = {};
@@ -79,6 +86,7 @@ stepLabel.textContent = 'données';
 const source = await loadSource(fetchReader('data/'));
 const world = await buildWorld(THREE, source, {
   settings, onStep: (s) => { stepLabel.textContent = s; }, pause: nextFrame,
+  parkedModel: parkedCar,
 });
 scene.add(world.root);
 stepLabel.textContent = 'collisions';
@@ -86,7 +94,7 @@ await nextFrame();
 const { layout, structures } = world;
 const surface = createSurface(layout, structures);
 const solids = buildSolids(layout, structures, world.buildings, {
-  lamps: world.lamps, trees: world.trees, footprints: world.footprints,
+  lamps: world.lamps, trees: world.trees, parked: world.parked, footprints: world.footprints,
 });
 const game = { layout, structures, surface, solids };
 
@@ -371,8 +379,14 @@ function updateDetails(dt) {
   for (const [key, list] of world.details) {
     const b = world.tiles.bounds(key);
     const dx = Math.max(b.x0 - cx, 0, cx - b.x1), dn = Math.max(b.n0 - cn, 0, cn - b.n1);
-    const show = Math.hypot(dx, dn) < reach;
-    for (const o of list) o.visible = show;
+    const d = Math.hypot(dx, dn);
+    // Some things carry their own, shorter reach (parked cars: a thousand
+    // triangles each, unreadable past a few hundred metres).
+    for (const o of list) {
+      if (!o.userData.reach) { o.visible = d < reach; continue; }
+      const c = o.boundingSphere.center;
+      o.visible = Math.hypot(c.x - cx, -c.z - cn) - o.boundingSphere.radius < o.userData.reach;
+    }
   }
   const far = flying ? 40000 : 7000;
   if (camera.far !== far) { camera.far = far; camera.updateProjectionMatrix(); }

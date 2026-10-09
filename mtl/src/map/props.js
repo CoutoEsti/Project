@@ -99,3 +99,66 @@ export function placeTrees(layout, structures, map, lamps = []) {
   }
   return { trees, mapped };
 }
+
+const PARK_SLOT = 6.4;          // metres of kerb per parked car
+const PARK_FILL = 0.55;         // share of the slots taken
+const PARK_CLEAR = 10;          // metres kept clear of any other street (corners, crosswalks)
+
+/**
+ * Cars parked along the kerb of ordinary streets: both sides of a two-way
+ * street at least 10.5 m wide, one side of a one-way at least 7.5 m. Never
+ * near a corner, on a bridge or ramp, or over water. Deterministic, so every
+ * player sees the same cars in the same places. The cars are not scaled with
+ * the map: they keep real size, like the player's.
+ * @returns [{ x, n, y, yaw (radians, three.js), pitch, len, hue }]
+ */
+export function placeParkedCars(layout, structures) {
+  const { index, ground } = structures;
+  const T = layout.terrain, s = layout.map.scale;
+  const cars = [];
+  const tmp = [];
+  for (const st of layout.streets) {
+    if (st.cls !== 'street' && st.cls !== 'avenue') continue;
+    // The driven lane must stay clear: the game (spawns, checks) drives the
+    // right-hand lane, a quarter of the width off the axis, on streets 10 m
+    // wide or more, and the axis on narrower ones. A parked car needs its
+    // inner flank 1.3 m past that line, so an ordinary 11 m two-way street
+    // has no room for them; a 13 m one has, on both sides.
+    const w = st.width, lane = w >= 10 ? w / 4 : 0;
+    const off = st.half - 1.0;                  // kerb lane: centre of the car
+    const fits = off - 0.9 >= lane + 1.3;
+    const sides = !fits || w / s < 7.5 ? []
+      : st.oneway ? [w >= 10 ? 1 : (hash01(st.index, 3, 11) < 0.5 ? 1 : -1)]
+        : [1, -1];
+    if (!sides.length) continue;
+    for (let i = 0; i + 1 < st.path.length; i++) {
+      const a = st.path[i], b = st.path[i + 1];
+      const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (len < PARK_SLOT * 2) continue;
+      const tx = (b[0] - a[0]) / len, tn = (b[1] - a[1]) / len;
+      const lx = -tn, ln = tx;
+      for (let d = PARK_SLOT; d + PARK_SLOT * 0.5 < len; d += PARK_SLOT) {
+        for (const side of sides) {
+          const h = hash01(Math.round(a[0] + tx * d), Math.round(a[1] + tn * d), side > 0 ? 21 : 22);
+          if (h > PARK_FILL) continue;
+          const jitter = (hash01(Math.round(a[0] * 3 + d), side, 23) - 0.5) * 0.8;
+          const x = a[0] + tx * (d + jitter) + lx * side * off, n = a[1] + tn * (d + jitter) + ln * side * off;
+          if (layout.streetsAt(x, n, PARK_CLEAR * s, tmp).some((o) => o !== st)) continue;
+          if (index.surfacesAt(x, n, 3).length) continue;
+          if (ground.kindAt(x, n) !== 'terrain') continue;
+          // Facing the traffic of their own side: on the left of a two-way
+          // street, the other way.
+          const fx = st.oneway || side < 0 ? tx : -tx, fn = st.oneway || side < 0 ? tn : -tn;
+          const y0 = T.height(x - fx * 1.3, n - fn * 1.3), y1 = T.height(x + fx * 1.3, n + fn * 1.3);
+          cars.push({
+            x, n, y: (y0 + y1) / 2 + 0.03,
+            // three.js yaw turning the car's +Z (its nose) onto (fx, -fn).
+            yaw: Math.atan2(fx, -fn), pitch: Math.atan2(y1 - y0, 2.6),
+            fx, fn, hue: hash01(Math.round(x * 7), Math.round(n * 7), 24),
+          });
+        }
+      }
+    }
+  }
+  return cars;
+}

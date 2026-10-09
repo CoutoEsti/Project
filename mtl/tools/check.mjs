@@ -51,7 +51,7 @@ const world = await buildWorld(THREE, source, { settings });
 const { layout, structures } = world;
 const s = layout.map.scale;
 const surface = createSurface(layout, structures);
-const solids = buildSolids(layout, structures, world.buildings, { lamps: world.lamps, trees: world.trees, footprints: world.footprints });
+const solids = buildSolids(layout, structures, world.buildings, { lamps: world.lamps, trees: world.trees, parked: world.parked, footprints: world.footprints });
 const game = { layout, structures, surface, solids };
 console.log(`zone ${settings.zone} à ${settings.echelle} % construite en ${((performance.now() - t0) / 1000).toFixed(1)} s — `
   + `${layout.streets.length} rues, ${layout.roads.length} routes, ${world.buildings.length} bâtiments, ${solids.count} obstacles\n`);
