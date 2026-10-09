@@ -22,7 +22,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { buildWorld } from './world/build.js';
 import { createSky } from './world/sky.js';
 import { loadSource, fetchReader } from './map/source.js';
-import { ZONES, ECHELLES, resolveSettings } from './map/zones.js';
+import { ZONES, ECHELLES, resolveSettings, makeZone, zoneDef } from './map/zones.js';
 import { resolveSpawn } from './game/spawn.js';
 import { createSurface } from './map/surface.js';
 import { buildSolids } from './map/collide.js';
@@ -82,7 +82,11 @@ try {
 } catch (e) { /* no file: the defaults */ }
 const settings = resolveSettings(fileSettings, params);
 stepLabel.textContent = 'données';
-const source = await loadSource(fetchReader('data/'));
+const zoneNow = makeZone(zoneDef(settings));
+// The city's 3D buildings weigh a few megabytes per borough: phones keep the
+// extruded footprints unless asked (?lod2=1); ?lod2=0 turns them off anywhere.
+const useLod2 = params.has('lod2') ? params.get('lod2') !== '0' : !LOW;
+const source = await loadSource(fetchReader('data/'), { box: zoneNow && zoneNow.bbox, lod2: useLod2 });
 const world = await buildWorld(THREE, source, {
   settings, onStep: (s) => { stepLabel.textContent = s; }, pause: nextFrame,
 });
@@ -407,6 +411,16 @@ function updateDetails(dt) {
     const dx = Math.max(b.x0 - cx, 0, cx - b.x1), dn = Math.max(b.n0 - cn, 0, cn - b.n1);
     const show = Math.hypot(dx, dn) < reach;
     for (const o of list) o.visible = show;
+  }
+  // City models: a few hundred thousand triangles a tile, so only the tiles
+  // around the camera draw them; the others show their boxes.
+  const nearReach = (flying ? Math.min(1500, 600 + alt) : 700) * Math.max(0.7, s);
+  for (const [key, l] of world.lods) {
+    const b = world.tiles.bounds(key);
+    const dx = Math.max(b.x0 - cx, 0, cx - b.x1), dn = Math.max(b.n0 - cn, 0, cn - b.n1);
+    const near = Math.hypot(dx, dn) < nearReach;
+    for (const o of l.near) o.visible = near;
+    for (const o of l.far) o.visible = !near;
   }
   const far = flying ? 40000 : 7000;
   if (camera.far !== far) { camera.far = far; camera.updateProjectionMatrix(); }

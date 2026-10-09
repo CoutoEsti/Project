@@ -133,9 +133,19 @@ export async function buildWorld(THREE, source, opts = {}) {
     list.push(o);
   });
 
+  // City models: the surveyed mesh up close, a box afar (see main.js).
+  const lods = new Map();
+  root.traverse((o) => {
+    if (!o.userData.lod) return;
+    let l = lods.get(o.userData.tile);
+    if (!l) { l = { near: [], far: [] }; lods.set(o.userData.tile, l); }
+    l[o.userData.lod].push(o);
+    o.visible = o.userData.lod === 'far';
+  });
+
   return {
     root, map, layout, structures, buildings, lamps, trees, landmarks, footprints,
-    materials: M, timings: T, animated, tiles, details, stats, settings,
+    materials: M, timings: T, animated, tiles, details, lods, stats, settings,
   };
 }
 
