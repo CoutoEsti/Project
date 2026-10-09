@@ -215,6 +215,29 @@ export function buildMap(src, settings) {
     if (landmarkPlots.some((p) => Math.hypot(cx - p.x, cn - p.n) < p.r)) continue;
     buildings.push({ ...b, ring, cx, cn, h: S(b.h), minH: S(b.minH) });
   }
+  // The city's own 3D models win over the extruded footprints they cover.
+  const lod2 = cityModels(src.lod2 || [], inZone, s, landmarkPlots);
+  if (lod2.length) {
+    const grid = new G.Grid(64);
+    for (const b of lod2) {
+      const bb = G.ringBBox(b.ring);
+      b.bb = bb;
+      grid.insert(b, bb.x0, bb.n0, bb.x1, bb.n1);
+    }
+    const tmp = [];
+    const covered = (b) => {
+      const bb = G.ringBBox(b.ring);
+      for (const m of grid.query((bb.x0 + bb.x1) / 2, (bb.n0 + bb.n1) / 2, Math.max(bb.x1 - bb.x0, bb.n1 - bb.n0) / 2, tmp)) {
+        if (m.bb.x1 < bb.x0 || m.bb.x0 > bb.x1 || m.bb.n1 < bb.n0 || m.bb.n0 > bb.n1) continue;
+        if (G.pointInRing(b.cx, b.cn, m.ring) || G.pointInRing(m.cx, m.cn, b.ring)) return true;
+      }
+      return false;
+    };
+    const kept = buildings.filter((b) => !covered(b));
+    buildings.length = 0;
+    for (const b of kept) buildings.push(b);
+    for (const b of lod2) { delete b.bb; buildings.push(b); }
+  }
   const tx = [], tn = [];
   for (let k = 0; k < src.trees.count; k++) {
     const x = src.trees.xs[k], n = src.trees.ns[k];
@@ -933,6 +956,47 @@ function area(multi) {
   let a = 0;
   for (const poly of multi) a += Math.abs(G.ringArea(poly[0]));
   return a;
+}
+
+/**
+ * The city's 3D buildings in the zone, at the map's scale, as buildings:
+ * one per footprint, the first carrying the group's mesh, each with the
+ * height of the mesh over it (for collisions and the plex details).
+ */
+function cityModels(groups, inZone, s, plots) {
+  const out = [];
+  for (const g of groups) {
+    const c0 = centroid(g.rings[0]);
+    if (!inZone(c0[0], c0[1])) continue;
+    const cx0 = c0[0] * s, cn0 = c0[1] * s;
+    if (plots.some((p) => Math.hypot(cx0 - p.x, cn0 - p.n) < p.r)) continue;
+    const verts = new Float32Array(g.verts.length);
+    for (let i = 0; i < verts.length; i++) verts[i] = g.verts[i] * s;
+    const mesh = { verts, roof: g.roof, wall: g.wall, rings: g.rings.map((r) => r.map(([x, n]) => [x * s, n * s])) };
+    // Each footprint's height: the highest roof over it.
+    const boxes = mesh.rings.map((r) => G.ringBBox(r));
+    const tops = mesh.rings.map(() => 0);
+    const R = g.roof;
+    for (let t = 0; t < R.length; t += 3) {
+      const a = R[t] * 3, b = R[t + 1] * 3, c = R[t + 2] * 3;
+      const x = (verts[a] + verts[b] + verts[c]) / 3, n = (verts[a + 1] + verts[b + 1] + verts[c + 1]) / 3;
+      const z = Math.max(verts[a + 2], verts[b + 2], verts[c + 2]);
+      for (let k = 0; k < boxes.length; k++) {
+        const bb = boxes[k];
+        if (x < bb.x0 || x > bb.x1 || n < bb.n0 || n > bb.n1 || z <= tops[k]) continue;
+        if (G.pointInRing(x, n, mesh.rings[k])) { tops[k] = z; break; }
+      }
+    }
+    mesh.rings.forEach((ring, k) => {
+      const c = centroid(ring);
+      const top = tops[k];
+      out.push({
+        id: `lod2-${out.length}`, ring, cx: c[0], cn: c[1], h: top > 0 ? top : g.h * s, minH: 0, floors: 0,
+        kind: '', roof: '', part: false, name: '', lod2: k === 0 ? mesh : null, lod2Rings: mesh.rings, lod2At: [cx0, cn0],
+      });
+    });
+  }
+  return out;
 }
 
 function centroid(ring) {

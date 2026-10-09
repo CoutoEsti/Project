@@ -42,7 +42,8 @@ export function prepareBuildings(map, layout, tiles, styleAt) {
   for (const b of map.buildings) {
     const ring = b.ring;
     let base = Infinity;
-    for (const [x, n] of ring) base = Math.min(base, T.height(x, n));
+    // A city model stands as one piece: every footprint of it on the lowest point of all.
+    for (const r of b.lod2Rings || [ring]) for (const [x, n] of r) base = Math.min(base, T.height(x, n));
     base = Math.min(base, T.height(b.cx, b.cn)) - 0.3 * s;
     const area = Math.abs(ringArea(ring)) / (s * s);         // real m²
     const style = STYLES[BY_KIND[b.kind] || styleAt(b.cx, b.cn)] || STYLES.walkups;
@@ -66,13 +67,19 @@ export function prepareBuildings(map, layout, tiles, styleAt) {
     let roof = 'flat';
     if ((b.roof === 'gabled' || b.roof === 'hipped' || b.roof === 'gambrel' || b.roof === 'saltbox') && ring.length === 4) roof = 'gable';
     else if (b.roof === 'mansard' && ring.length === 4) roof = 'mansard';
-    else if (real > 55 && hash01(seed * 1000, 3) < 0.6) roof = 'crown';
+    else if (real > 55 && hash01(seed * 1000, 3) < 0.6 && !b.lod2Rings) roof = 'crown';
     // The outdoor staircase: plexes facing a street.
     let front = null;
     if (style.stairs && real <= 13 && area < 320 && b.kind !== 'outbuilding') front = facing(layout, b, tmp);
     out.push({
       id: b.id, name: b.name, ring, base, h, minH: b.minH || 0, facade, roof, floorH, front, stairs: !!front,
-      tile: tiles.key(b.cx, b.cn), cx: b.cx, cn: b.cn, kind: b.kind, scale: s,
+      // A city model's footprints all go with its mesh, so its box and its
+      // mesh never show at once.
+      tile: b.lod2At ? tiles.key(b.lod2At[0], b.lod2At[1]) : tiles.key(b.cx, b.cn), cx: b.cx, cn: b.cn, kind: b.kind, scale: s,
+      lod2: b.lod2 || null, model: !!b.lod2Rings, lod2Rings: b.lod2Rings || null,
+      // A model's footprint holds a podium and a tower alike: the walls
+      // below this height take the district's ordinary facade.
+      facadeLow: style.facades[Math.floor(seed * style.facades.length)], tallFrom: style.tall ? 45 * s : Infinity,
     });
   }
   return out;

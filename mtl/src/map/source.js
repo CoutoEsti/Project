@@ -13,13 +13,19 @@ const BUILDING_KINDS = ['', 'residential', 'commercial', 'industrial', 'religiou
   'transportation', 'entertainment', 'outbuilding', 'agricultural', 'military', 'service'];
 const ROOFS = ['', 'gabled', 'hipped', 'dome', 'skillion', 'gambrel', 'mansard', 'saltbox', 'pyramidal', 'onion', 'round'];
 
-export async function loadSource(read) {
+/**
+ * @param opts.box  [x0, n0, x1, n1] real metres: only the city's 3D tiles
+ *                  touching it are read (all of them without it)
+ * @param opts.lod2 false: none of them
+ */
+export async function loadSource(read, opts = {}) {
   const json = (name) => read(name, 'json');
   const bin = (name) => read(name, 'bin');
   const [meta, rues, surfaces, quartiers, mobilier, noms, bld, arb, rel] = await Promise.all([
     json('meta.json'), json('rues.json'), json('surfaces.json'), json('quartiers.json'), json('mobilier.json'),
     json('batiments-noms.json'), bin('batiments.bin'), bin('arbres.bin'), bin('relief.bin'),
   ]);
+  const lod2 = opts.lod2 === false ? [] : await loadLod2(read, opts.box);
   return {
     meta,
     roads: decodeRoads(rues),
@@ -29,7 +35,67 @@ export async function loadSource(read) {
     buildings: decodeBuildings(bld, noms),
     trees: decodeTrees(arb),
     relief: decodeRelief(rel),
+    lod2,
   };
+}
+
+/**
+ * The city's own 3D buildings (tools/lod2.mjs), where it has them: none when
+ * the files are missing, so the game falls back to extruded footprints.
+ */
+export async function loadLod2(read, box) {
+  let index;
+  try { index = await read('lod2/index.json', 'json'); } catch (e) { return []; }
+  const tiles = (index.tuiles || []).filter((t) => !box
+    || (t.boite[0] <= box[2] && t.boite[2] >= box[0] && t.boite[1] <= box[3] && t.boite[3] >= box[1]));
+  const bufs = await Promise.all(tiles.map((t) => read(`lod2/${t.fichier}`, 'bin').catch(() => null)));
+  const out = [];
+  for (const b of bufs) if (b) for (const g of decodeLod2(b)) out.push(g);
+  return out;
+}
+
+/**
+ * One tile: per building, its footprints on the ground (real metres) and its
+ * roofs and walls as indexed triangles — x, n in the frame, z up from the
+ * lowest point of its footprint (the feet of the walls go a metre lower).
+ */
+export function decodeLod2(buf) {
+  const dv = new DataView(buf);
+  const magic = String.fromCharCode(dv.getUint8(0), dv.getUint8(1), dv.getUint8(2), dv.getUint8(3));
+  if (magic !== 'MTL2') return [];
+  const count = dv.getUint32(8, true);
+  const out = new Array(count);
+  let o = 12;
+  for (let k = 0; k < count; k++) {
+    const big = dv.getUint8(o) & 1;
+    const nr = dv.getUint16(o + 1, true);
+    const ax = dv.getInt32(o + 3, true), an = dv.getInt32(o + 7, true);
+    const h = dv.getUint16(o + 11, true) / 10;
+    o += 13;
+    const rings = [];
+    for (let r = 0; r < nr; r++) {
+      const np = dv.getUint16(o, true);
+      o += 2;
+      const ring = new Array(np);
+      for (let i = 0; i < np; i++, o += 4) ring[i] = [(ax + dv.getInt16(o, true)) / 10, (an + dv.getInt16(o + 2, true)) / 10];
+      rings.push(ring);
+    }
+    const nv = dv.getUint32(o, true);
+    o += 4;
+    const verts = new Float32Array(nv * 3);
+    for (let i = 0; i < nv; i++, o += 6) {
+      verts[i * 3] = (ax + dv.getInt16(o, true)) / 10;
+      verts[i * 3 + 1] = (an + dv.getInt16(o + 2, true)) / 10;
+      verts[i * 3 + 2] = dv.getInt16(o + 4, true) / 10;
+    }
+    const nRoof = dv.getUint32(o, true), nWall = dv.getUint32(o + 4, true);
+    o += 8;
+    const Index = big ? Uint32Array : Uint16Array;
+    const idx = new Index(nRoof + nWall);
+    for (let i = 0; i < idx.length; i++, o += big ? 4 : 2) idx[i] = big ? dv.getUint32(o, true) : dv.getUint16(o, true);
+    out[k] = { rings, h, verts, roof: idx.subarray(0, nRoof), wall: idx.subarray(nRoof) };
+  }
+  return out;
 }
 
 /** Browser: files next to the page. */

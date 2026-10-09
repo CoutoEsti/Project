@@ -3,8 +3,11 @@
 Carte de monde ouvert pour un jeu de course de rue façon *Need for Speed
 Underground*, construite sur les **vraies données** de Montréal :
 OpenStreetMap (via Overture Maps) pour les rues, autoroutes, bâtiments, eau,
-parcs et arbres, et le relief réel (tuiles Terrarium). Rien n'est tracé à la
-main sauf quelques repères, les points de départ et les styles de quartier.
+parcs et arbres, et le relief réel (tuiles Terrarium). Là où la Ville a
+modélisé ses bâtiments en 3D (maquettes LOD2 : Ville-Marie, Plateau,
+Sud-Ouest, Verdun, Outremont, Côte-des-Neiges–NDG), ce sont ses vrais toits et
+ses vrais murs qui remplacent les boîtes. Rien n'est tracé à la main sauf
+quelques repères, les points de départ et les styles de quartier.
 
 ![Plan](docs/plan.png)
 
@@ -227,6 +230,33 @@ tools/extract.py  →  data/*  →  map/source.js  →  map/real.js  →  map/la
 
 Rafraîchir les données (réseau requis, ~5 min) :
 `python3 -m pip install pyarrow shapely numpy scipy pillow && python3 mtl/tools/extract.py`.
+
+### Bâtiments 3D de la Ville (LOD2)
+
+`node mtl/tools/lod2.mjs` lit les maquettes CityGML du portail
+[donnees.montreal.ca](https://donnees.montreal.ca) (2020 pour Ville-Marie,
+Outremont et Côte-des-Neiges–NDG ; 2016 pour le Plateau, le Sud-Ouest et
+Verdun ; licence CC BY 4.0) et écrit `data/lod2/`, un fichier par tuile, plus
+`index.json` (boîte de chaque tuile). Les archives pèsent plusieurs Go : le
+script lit par plages HTTP, ne garde que le GML (les textures ne sont pas
+conservées) et passe les tuiles déjà faites (`--force` pour les refaire,
+`--arr VM,PMR` pour certains arrondissements). Derrière un proxy, lancer avec
+`NODE_USE_ENV_PROXY=1`.
+
+Dans le jeu (`map/source.js` → `map/real.js`) :
+
+- chaque bâtiment de la maquette devient une ou plusieurs empreintes (une par
+  surface au sol), avec la hauteur du toit au-dessus d'elle ; collisions,
+  enseignes et escaliers des plex les utilisent comme les autres ;
+- un bâtiment Overture recouvert par une maquette est retiré ; ailleurs, et
+  partout hors des arrondissements modélisés, on garde les boîtes extrudées ;
+- murs et toits sont ceux de la maquette. Les murs prennent l'atlas de
+  façades (travées le long du mur, étages depuis la base) ; dans un même îlot,
+  chaque bâtiment garde sa façade, et un mur plus bas que 45 m prend la
+  façade ordinaire du quartier même au pied d'une tour ;
+- seules les tuiles qui touchent la zone sont lues. Sur téléphone, elles ne
+  le sont pas par défaut (`?lod2=1` pour les forcer, `?lod2=0` pour les
+  couper partout).
 
 ## Contrôles avant de commiter
 

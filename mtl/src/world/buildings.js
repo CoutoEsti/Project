@@ -25,10 +25,28 @@ export function buildBuildings(THREE, buildings, M) {
         glow: new GeoBuilder(),
         glow2: new GeoBuilder(),
         beacon: new GeoBuilder(),
+        // City models, twice: as surveyed for up close, as boxes for afar.
+        near: { facade: new GeoBuilder({ facade: 1, seed: 1 }), roof: new GeoBuilder() },
+        far: { facade: new GeoBuilder({ facade: 1, seed: 1 }), roof: new GeoBuilder() },
       });
     }
     return zones.get(id);
   };
+
+  // A city model's footprints, each with its own facade: a block's walls
+  // change material from one building to the next, as on the street.
+  const parts = new Map();
+  buildings.forEach((bld, k) => {
+    if (!bld.model) return;
+    const key = bld.lod2Rings || bld.ring;
+    if (!parts.has(key)) parts.set(key, []);
+    parts.get(key).push({
+      ring: bld.ring, bb: bbox(bld.ring), facade: Math.max(0, FACADES.indexOf(bld.facade)),
+      low: Math.max(0, FACADES.indexOf(bld.facadeLow || bld.facade)), tallFrom: bld.tallFrom ?? Infinity,
+      lowBay: (BAY[bld.facadeLow || bld.facade] || 3) * (bld.scale || 1),
+      bay: (BAY[bld.facade] || 3) * (bld.scale || 1), floorH: bld.floorH || 3.3, seed: hash01(k, 71, 3) * 100,
+    });
+  });
 
   buildings.forEach((bld, k) => {
     const Z = zone(bld.tile || bld.district || 'autres');
@@ -41,6 +59,20 @@ export function buildBuildings(THREE, buildings, M) {
     const fIndex = Math.max(0, FACADES.indexOf(bld.facade));
     const bay = (BAY[bld.facade] || 3) * (bld.scale || 1);
     const seed = hash01(k, 71, 3) * 100;
+
+    // The city's own model: its walls and roofs as they are.
+    if (bld.model) {
+      if (bld.lod2) cityModel(Z.near, bld.lod2, bld.base || 0, parts.get(bld.lod2Rings) || []);
+      for (let i = 0; i < ring.length; i++) {
+        const a = ring[i], b = ring[(i + 1) % ring.length];
+        const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+        if (len >= 0.05) wallQuad(Z.far.facade, a, b, base, top, Math.max(1, Math.round(len / bay)), (top - base) / floorH, fIndex, seed);
+      }
+      const { pts, tris } = triangulate(THREE, [ring]);
+      Z.far.roof.flat(pts, tris, top);
+      if (bld.stairs && bld.front) stairs(Z.stairs, ring, bld, k);
+      return;
+    }
 
     // Walls.
     for (let i = 0; i < ring.length; i++) {
@@ -91,8 +123,80 @@ export function buildBuildings(THREE, buildings, M) {
     add(Z.glow, M.Neon_Cyan, 'Couronnes_cyan');
     add(Z.glow2, M.Neon_Magenta, 'Couronnes_magenta');
     add(Z.beacon, M.Beacon_Red, 'Feux_aviation');
+    add(Z.near.facade, M.Facades, 'Maquettes', { facadeAtlas: true, lod: 'near' });
+    add(Z.near.roof, M.Roof, 'Maquettes_toits', { lod: 'near' });
+    add(Z.far.facade, M.Facades, 'Maquettes_loin', { facadeAtlas: true, lod: 'far' });
+    add(Z.far.roof, M.Roof, 'Maquettes_loin_toits', { lod: 'far' });
   }
   return out;
+}
+
+/**
+ * A LOD2 model: walls take the facade atlas (bays counted along the wall,
+ * floors up from the base), roofs the roof material. Flat-shaded; corners
+ * shared only between triangles of one plane.
+ */
+function cityModel(Z, m, base, parts) {
+  const V = m.verts;
+  // The footprint a wall belongs to: the one just inside it.
+  const partOf = (x, n) => {
+    for (const p of parts) {
+      if (x < p.bb.x0 || x > p.bb.x1 || n < p.bb.n0 || n > p.bb.n1) continue;
+      if (inside(x, n, p.ring)) return p;
+    }
+    return parts[0];
+  };
+  const faceOf = (idx, t) => {
+    const a = idx[t] * 3, c = idx[t + 1] * 3, d = idx[t + 2] * 3;
+    const ux = V[c] - V[a], un = V[c + 1] - V[a + 1], uz = V[c + 2] - V[a + 2];
+    const vx = V[d] - V[a], vn = V[d + 1] - V[a + 1], vz = V[d + 2] - V[a + 2];
+    let nx = un * vz - uz * vn, nn = uz * vx - ux * vz, nz = ux * vn - un * vx;
+    const len = Math.hypot(nx, nn, nz);
+    if (len < 1e-9) return null;
+    nx /= len; nn /= len; nz /= len;
+    const off = Math.round((nx * V[a] + nn * V[a + 1] + nz * V[a + 2]) * 4);
+    return { a, c, d, nx, nn, nz, plane: `${Math.round(nx * 50)},${Math.round(nn * 50)},${Math.round(nz * 50)}`, off };
+  };
+  // How tall each wall plane stands: a tower's face is glass to the ground.
+  const planeTop = new Map();
+  for (let t = 0; t < m.wall.length; t += 3) {
+    const f = faceOf(m.wall, t);
+    if (!f) continue;
+    const k = `${f.plane}|${f.off}`;
+    planeTop.set(k, Math.max(planeTop.get(k) || 0, V[f.a + 2], V[f.c + 2], V[f.d + 2]));
+  }
+  const emit = (idx, b, wall) => {
+    const shared = new Map();
+    for (let t = 0; t < idx.length; t += 3) {
+      const f = faceOf(idx, t);
+      if (!f) continue;
+      const { a, c, d, nx, nn, nz, plane } = f;
+      const hl = Math.hypot(nx, nn) || 1;
+      const dx = -nn / hl, dn = nx / hl;
+      let P = parts[0];
+      if (wall && parts.length > 1) {
+        P = partOf((V[a] + V[c] + V[d]) / 3 - nx / hl * 0.6, (V[a + 1] + V[c + 1] + V[d + 1]) / 3 - nn / hl * 0.6);
+      }
+      const tall = !wall || planeTop.get(`${plane}|${f.off}`) >= P.tallFrom;
+      const facade = tall ? P.facade : P.low, bay = tall ? P.bay : P.lowBay;
+      const { floorH, seed } = P;
+      const ids = [idx[t], idx[t + 1], idx[t + 2]].map((i) => {
+        const key = `${i}|${plane}|${facade}`;
+        let j = shared.get(key);
+        if (j === undefined) {
+          const x = V[i * 3], n = V[i * 3 + 1], z = V[i * 3 + 2];
+          j = wall
+            ? b.v(x, n, base + z, nx, nn, nz, (x * dx + n * dn) / bay, z / floorH, facade, seed)
+            : b.v(x, n, base + z, nx, nn, nz, x, n);
+          shared.set(key, j);
+        }
+        return j;
+      });
+      b.tri(ids[0], ids[1], ids[2]);
+    }
+  };
+  emit(m.wall, Z.facade, true);
+  emit(m.roof, Z.roof, false);
 }
 
 function area(ring) {
