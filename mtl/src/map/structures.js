@@ -45,9 +45,13 @@ export function buildStructures(layout) {
     lamps: [],      // { x, n, y, kind, tx, tn, side }
     decks: [],      // { poly: ring, y, depth } — street bridges over the canal
     medians: [],    // { pts: [[xa, na, xb, nb, y]], depth, lifted } — deck between twin carriageways
-    fills: [],      // { pts: [[xa, na, ya, xb, nb, yb]], road, other } — asphalt between twins that touch
+    fills: [],      // { pts: [[xa, na, ya, xb, nb, yb]], road, other } — asphalt between twins that touch,
+                    // and the floor of a strip opened between two carriageways
   };
 
+  // The floor of the strip opened between two carriageways (layout.js
+  // twinStrips) is laid like the asphalt between twins that touch.
+  for (const f of layout.stripFloors || []) out.fills.push(f);
   for (const r of roads) annotate(r, ground);
   for (const r of roads) roadStructures(r, index, ground, layout, out);
   covers(roads, out, index, layout);
