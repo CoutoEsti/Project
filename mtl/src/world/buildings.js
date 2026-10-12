@@ -3,14 +3,10 @@
 // shader lines windows up with corners and floor lines on every wall.
 
 import { GeoBuilder, triangulate, meshOf } from './builder.js';
-import { FACADES } from './textures.js';
+import { FACADES, FACADE_BAY } from './textures.js';
 import { hash01 } from '../map/geom.js';
 
-const BAY = {
-  brick_red: 2.7, brick_brown: 2.7, brick_buff: 2.9, brick_dark: 2.7, brick_old: 3.6, stone: 3.2,
-  stone_dark: 3.2, concrete: 3.4, panel: 6.5, panel_dark: 6.5, glass_blue: 3.0, glass_dark: 3.0,
-  glass_green: 3.0, glass_silver: 3.0,
-};
+const BAY = FACADE_BAY;
 
 export function buildBuildings(THREE, buildings, M) {
   const zones = new Map();
@@ -21,6 +17,7 @@ export function buildBuildings(THREE, buildings, M) {
         roof: new GeoBuilder(),
         copper: new GeoBuilder(),
         stairs: new GeoBuilder(),
+        rail: new GeoBuilder(),
         trim: new GeoBuilder(),
         glow: new GeoBuilder(),
         glow2: new GeoBuilder(),
@@ -67,7 +64,10 @@ export function buildBuildings(THREE, buildings, M) {
       if (real >= 80) beacons(Z.beacon, ring, top + (bld.roof === 'crown' ? 7 : 0.7 * s), s);
     }
 
-    if (bld.stairs && bld.front) stairs(Z.stairs, ring, bld, k);
+    if (bld.stairs && bld.front) {
+      stairs(Z.stairs, Z.rail, ring, bld, k, top);
+      plexCornice(Z.trim, ring, bld, top);
+    }
   });
 
   const out = [];
@@ -87,6 +87,7 @@ export function buildBuildings(THREE, buildings, M) {
     add(Z.roof, M.Roof, 'Toits');
     add(Z.copper, M.Copper, 'Toits_cuivre');
     add(Z.stairs, M.Metal_Black, 'Escaliers');
+    add(Z.rail, M.Railing, 'Garde_corps');
     add(Z.trim, M.Concrete_Dark, 'Corniches');
     add(Z.glow, M.Neon_Cyan, 'Couronnes_cyan');
     add(Z.glow2, M.Neon_Magenta, 'Couronnes_magenta');
@@ -284,10 +285,60 @@ function slantedSlab(b, cx, cn, ux, un, run, halfW, y0, y1) {
  * Montréal's outdoor staircase: a balcony at the second floor and a straight
  * flight down to the sidewalk, parallel to the facade.
  */
-function stairs(b, ring, bld, k) {
+function stairs(b, rail, ring, bld, k, top) {
   if (hash01(k, 13) < 0.35) return;
+  const edge = frontEdge(ring, bld.front);
+  if (!edge) return;
   const [fx, fn] = bld.front;
-  // The facade edge: the ring edge whose outward normal matches `front`.
+  const { a, c, len } = edge;
+  if (len < 5) return;
+  const dx = c[0] - a[0], dn = c[1] - a[1];
+  const ux = dx / len, un = dn / len;
+  const floorH = bld.floorH || 3.3;
+  const deck = (bld.base || 0) + floorH + 0.2;
+  // The galleries are a floor up, out of a car's way: they may overhang the
+  // sidewalk, never the asphalt. The flight down reaches the ground, so it
+  // needs a yard clear of the sidewalk (2.6 m on a street).
+  const walk = 2.8 * (bld.scale || 1);
+  const yard = bld.yard ?? 0;
+  const depth = Math.min(1.3, yard - 0.4);
+  if (depth < 0.8) return;
+  // Balcony across most of the facade.
+  const bx = (a[0] + c[0]) / 2 + fx * depth / 2, bn = (a[1] + c[1]) / 2 + fn * depth / 2;
+  b.box(bx, bn, deck - 0.15, deck, ux, un, len / 2 - 0.3, depth / 2);
+  railing(rail, bx + fx * depth / 2, bn + fn * depth / 2, ux, un, len / 2 - 0.3, deck, 1.0);
+  // The floors above get their own balcony, shallower, one floor apart: the
+  // stacked galleries of a triplex.
+  for (let y = deck + floorH; y < top - 1.8; y += floorH) {
+    const d2 = Math.min(1.0, depth);
+    const cx2 = (a[0] + c[0]) / 2 + fx * d2 / 2, cn2 = (a[1] + c[1]) / 2 + fn * d2 / 2;
+    b.box(cx2, cn2, y - 0.12, y, ux, un, len / 2 - 0.5, d2 / 2);
+    railing(rail, cx2 + fx * d2 / 2, cn2 + fn * d2 / 2, ux, un, len / 2 - 0.5, y, 0.95);
+  }
+  // The flight: one slanted slab from the balcony's end down to the
+  // sidewalk, along the facade. Seen from a car, that is the staircase.
+  const dir = hash01(k, 29) < 0.5 ? 1 : -1;
+  const run = Math.min(len * 0.55, 4.2);
+  if (yard - walk < 1.2) return;
+  // Beside the gallery when the yard allows it, else tucked under it.
+  const out = yard - walk >= depth + 1.1 ? depth + 0.55 : Math.min(depth, yard - walk) / 2;
+  const sx = (a[0] + c[0]) / 2 + ux * dir * (len / 2 - 0.9 - run / 2) + fx * out;
+  const sn = (a[1] + c[1]) / 2 + un * dir * (len / 2 - 0.9 - run / 2) + fn * out;
+  slantedSlab(b, sx, sn, ux * dir, un * dir, run, Math.min(0.55, (yard - walk) / 2), bld.base || 0, deck);
+}
+
+/** A see-through railing: one double-sided panel, balusters in its alpha map. */
+function railing(b, cx, cn, ux, un, half, y, h) {
+  const ax = cx - ux * half, an = cn - un * half, bx = cx + ux * half, bn = cn + un * half;
+  const nx = un, nn = -ux;
+  const i0 = b.v(ax, an, y, nx, nn, 0, 0, 0), i1 = b.v(bx, bn, y, nx, nn, 0, half * 2, 0);
+  const i2 = b.v(bx, bn, y + h, nx, nn, 0, half * 2, 1), i3 = b.v(ax, an, y + h, nx, nn, 0, 0, 1);
+  b.quad(i0, i1, i2, i3);
+}
+
+/** The ring edge whose outward normal matches `front`, or null. */
+function frontEdge(ring, front) {
+  const [fx, fn] = front;
   let best = -1, bestDot = 0.7;
   for (let i = 0; i < ring.length; i++) {
     const a = ring[i], c = ring[(i + 1) % ring.length];
@@ -295,24 +346,23 @@ function stairs(b, ring, bld, k) {
     const d = (dn / l) * fx + (-dx / l) * fn;
     if (d > bestDot) { bestDot = d; best = i; }
   }
-  if (best < 0) return;
+  if (best < 0) return null;
   const a = ring[best], c = ring[(best + 1) % ring.length];
-  const dx = c[0] - a[0], dn = c[1] - a[1], len = Math.hypot(dx, dn);
-  if (len < 5) return;
-  const ux = dx / len, un = dn / len;
-  const floorH = bld.floorH || 3.3;
-  const deck = floorH + 0.2;
-  const depth = 1.3;
-  // Balcony across most of the facade.
-  const bx = (a[0] + c[0]) / 2 + fx * depth / 2, bn = (a[1] + c[1]) / 2 + fn * depth / 2;
-  b.box(bx, bn, deck - 0.15, deck, ux, un, len / 2 - 0.3, depth / 2);
-  // Railing.
-  b.box(bx + fx * depth / 2, bn + fn * depth / 2, deck, deck + 1.0, ux, un, len / 2 - 0.3, 0.03);
-  // The flight: one slanted slab from the balcony's end down to the
-  // sidewalk, along the facade. Seen from a car, that is the staircase.
-  const dir = hash01(k, 29) < 0.5 ? 1 : -1;
-  const run = Math.min(len * 0.55, 4.2);
-  const sx = (a[0] + c[0]) / 2 + ux * dir * (len / 2 - 0.9 - run / 2) + fx * (depth + 0.55);
-  const sn = (a[1] + c[1]) / 2 + un * dir * (len / 2 - 0.9 - run / 2) + fn * (depth + 0.55);
-  slantedSlab(b, sx, sn, ux * dir, un * dir, run, 0.55, 0, deck);
+  return { a, c, len: Math.hypot(c[0] - a[0], c[1] - a[1]) };
+}
+
+/**
+ * The plex's crown: a deep cornice along the street front only, standing
+ * proud of the wall and a little above the roof line — the profile every
+ * Plateau street has against the sky.
+ */
+function plexCornice(b, ring, bld, top) {
+  const edge = frontEdge(ring, bld.front);
+  if (!edge || edge.len < 4) return;
+  const { a, c, len } = edge;
+  const [fx, fn] = bld.front;
+  const ux = (c[0] - a[0]) / len, un = (c[1] - a[1]) / len;
+  const out = 0.55;
+  const mx = (a[0] + c[0]) / 2 + fx * out / 2, mn = (a[1] + c[1]) / 2 + fn * out / 2;
+  b.box(mx, mn, top - 0.75, top + 0.3, ux, un, len / 2 + 0.15, out / 2);
 }
