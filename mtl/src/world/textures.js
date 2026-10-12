@@ -432,6 +432,9 @@ export function facadeAtlas(THREE) {
   t.magFilter = THREE.LinearFilter;
   t.minFilter = THREE.LinearMipmapLinearFilter;
   t.generateMipmaps = true;
+  // Facades are mostly seen edge-on from the street: without anisotropic
+  // filtering the windows smear into vertical streaks.
+  t.anisotropy = 8;
   t.premultiplyAlpha = false;
   return t;
 }

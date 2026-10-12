@@ -67,6 +67,7 @@ export function createSky(THREE, scene, renderer) {
 
   const pmrem = renderer ? new THREE.PMREMGenerator(renderer) : null;
   let envRT = null;
+  let carRT = null;
 
   function set(mode) {
     const night = mode !== 'day';
@@ -114,16 +115,73 @@ export function createSky(THREE, scene, renderer) {
       env.add(clone);
       if (envRT) envRT.dispose();
       envRT = pmrem.fromScene(env, 0, 1, 20000);
-      uniforms.stars.value = stars;
       scene.environment = envRT.texture;
       scene.environmentIntensity = night ? 0.45 : 1.0;
+      if (carRT) carRT.dispose();
+      const cs = carScene(night);
+      carRT = pmrem.fromScene(cs, 0, 0.1, 20000);
+      cs.traverse((o) => { if (o.geometry && o.material !== dome.material) { o.geometry.dispose(); o.material.dispose(); } });
+      uniforms.stars.value = stars;
     }
     return night;
+  }
+
+  // The car's own reflections. Under the city's environment alone the body is
+  // a near-black blob at night: the dome is dark and nothing else lights it.
+  // This one is the same dome over dark asphalt, ringed with what a car on a
+  // Montréal street at night actually mirrors — lamp heads, shop fronts,
+  // neon — so the paint keeps its colour and the highlights slide along it.
+  // Baked once per mode; it costs nothing per frame and lights nothing else.
+  function carScene(night) {
+    const env = new THREE.Scene();
+    const clone = dome.clone();
+    clone.material = dome.material;
+    env.add(clone);
+    const basic = (hex, k) => new THREE.MeshBasicMaterial({ color: new THREE.Color(hex).multiplyScalar(k), fog: false });
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), basic(night ? 0x08080c : 0x3c3d40, 1));
+    ground.rotation.x = -Math.PI / 2;
+    ground.position.y = -1;
+    env.add(ground);
+    const box = new THREE.BoxGeometry(1, 1, 1);
+    const put = (mat, a, r, y, w, h) => {
+      const m = new THREE.Mesh(box, mat);
+      m.position.set(Math.cos(a) * r, y, Math.sin(a) * r);
+      m.scale.set(w, h, w);
+      m.lookAt(0, y, 0);
+      env.add(m);
+    };
+    if (night) {
+      const lamp = basic(0xffd59a, 14), led = basic(0xe8f0ff, 12);
+      const neons = [basic(0x2fe6ff, 6), basic(0xff3fb4, 6), basic(0xffb347, 5)];
+      const shop = basic(0xffe2b8, 0.35);
+      for (let i = 0; i < 12; i++) {
+        const a = (i / 12) * Math.PI * 2 + 0.2;
+        put(i % 3 ? lamp : led, a, 18 + (i % 4) * 7, 7.5, 1.6, 0.5);
+        put(shop, a + 0.26, 16, 2.2, 5, 2);
+        put(neons[i % 3], a + 0.13, 15, 4, 0.5, 2.6);
+      }
+      // A faint overhead softbox: the glow of the sky above the street.
+      const sky = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), basic(0x2a2440, 1.2));
+      sky.rotation.x = Math.PI / 2;
+      sky.position.y = 30;
+      env.add(sky);
+    } else {
+      // By day the dome already does the work; a few building faces break
+      // the horizon so the body doesn't read as chrome.
+      const wall = basic(0x8a8580, 1), wall2 = basic(0xb9b2a6, 1);
+      for (let i = 0; i < 10; i++) put(i % 2 ? wall : wall2, (i / 10) * Math.PI * 2, 30, 6, 14, 14 + (i % 3) * 8);
+    }
+    return env;
+  }
+
+  /** The car's environment map, for the current mode. */
+  function carEnvironment() {
+    return carRT ? carRT.texture : null;
   }
 
   function follow(camera) {
     dome.position.copy(camera.position);
   }
 
-  return { set, follow, sun, hemi, dome };
+  return { set, follow, carEnvironment, sun, hemi, dome };
 }
