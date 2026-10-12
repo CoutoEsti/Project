@@ -511,4 +511,8 @@ Voir [`unity/README.md`](unity/README.md).
 - La circulation est une première version (voir « La circulation ») : pas
   de dépassement, les virages à gauche ne cèdent pas aux voitures d'en
   face, et les bretelles s'insèrent sans regarder à côté.
+- Des voitures stationnées bordent les rues assez larges (`placeParkedCars`
+  dans `map/props.js`) : 13 m et plus pour une rue à double sens, sinon la
+  voie de droite ne serait plus libre. Les rues de 11 m du Plateau n'en ont
+  donc pas encore.
 - Pas encore de piétons, ni de course jouable.
