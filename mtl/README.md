@@ -253,7 +253,8 @@ Rafraîchir les données (réseau requis, ~5 min) :
 ## Contrôles avant de commiter
 
 ```bash
-node mtl/tools/check.mjs                         # ~40 s : profils, repères, conduite
+node mtl/tools/check.mjs                         # ~2 min : profils, repères, conduite, filet
+node mtl/tools/check.mjs --vise decarie          # la modif vise Décarie : la carte peut changer là, nulle part ailleurs
 node mtl/tools/check.mjs --zone centre --echelle 85
 node mtl/tools/check.mjs --browser               # + la vraie page dans Chromium headless
 node mtl/tools/shots.mjs --day                   # captures → mtl/.shots/
@@ -261,7 +262,50 @@ node mtl/tools/plan.mjs --png                    # régénère docs/plan.png
 node mtl/tools/export.mjs                        # export Unity → mtl/export/
 node mtl/tools/voitures.mjs                      # pointes des trois voitures (±5 %) et changement en roulant
 node mtl/tools/artefacts.mjs --zone coeur        # murs, glissières, bâtiments plantés sur la chaussée, et trous
+node mtl/tools/filet.mjs --vise decarie          # le filet seul, sur anneau et coeur
+node mtl/tools/filet.mjs --accepter              # les chiffres actuels deviennent la référence
+node mtl/tools/avant-apres.mjs                   # captures des jonctions, HEAD contre la copie de travail
 ```
+
+### Le filet de sécurité (`tools/filet.mjs`)
+
+Les jonctions se réparaient au cas par cas, et chaque rustine en cassait une
+autre ailleurs, sans qu'aucun contrôle ne le voie : deux corrections de
+Décarie passaient `check.mjs` (18/18) en retirant 4,5 km de bordures de
+viaduc à l'autre bout de la carte. Le filet mesure toute la carte et la
+compare à une référence commitée (`tools/filet/anneau.json`,
+`tools/filet/coeur.json`), cellule de 40 m par cellule de 40 m :
+
+| mesure | ce que c'est |
+|---|---|
+| `trou` | sous les roues, rien ou une surface 0,6 m plus bas (m²) |
+| `fente` | une bande vide entre deux chaussées côte à côte au même niveau (m) |
+| `obstacle` | mur, glissière, pilier, bâtiment sur la chaussée, à hauteur de voiture (m) |
+| `bout` | bout de route qui donne sur le vide (nombre) |
+| `sol` | relief dessiné au-dessus d'une route ouverte (m) |
+| `niveau` | point de route où la voiture ne tient pas à la hauteur de la route |
+| `mur …`, `glissière …`, `dalle`, `pilier` | longueur de chaque genre de structure (m) |
+
+Il échoue si une cellule change **hors** des zones nommées par `--vise` (dans
+un sens comme dans l'autre : des murs qui disparaissent loin de la modif,
+c'est une règle trop large), si un défaut **augmente**, même dans la zone
+visée, ou si les murs bougent un peu partout (plus de 25 m au total hors
+zone). Dans la zone visée, les murs peuvent changer et les défauts baisser :
+c'est la correction. Lieux connus de `--vise` : `decarie`, `turcot`,
+`savane`, `ville-marie`, `jacques-cartier`, `concorde` ; ou une boîte
+`x0,n0,x1,n1` en mètres. Après avoir regardé ce qui change (le rapport liste
+les endroits, et `avant-apres.mjs` les montre), `--accepter` écrit la
+nouvelle référence, à commiter avec la modif.
+
+Vérifié sur les deux corrections annulées le 9 octobre : le filet les refuse
+(667 cellules changent hors de Décarie sur `anneau`, +1,8 km d'obstacles sur
+la chaussée), là où `check.mjs` les laissait passer.
+
+`avant-apres.mjs` photographie huit jonctions fixes (Décarie centre, nord et
+Savane, Turcot, Ville-Marie à Turcot, Bonaventure, la Concorde, l'île
+Sainte-Hélène) sur une révision commitée (un `git worktree`) et sur la copie
+de travail, de jour et sans les panneaux, et met côte à côte avant, après et
+les pixels qui changent en rouge (`mtl/.shots/avant-apres/`).
 
 `check.mjs` fait rouler un pilote automatique, voie de droite, sur Décarie
 dans les deux sens, la Métropolitaine dans les deux sens, le tunnel
