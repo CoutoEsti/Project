@@ -21,6 +21,19 @@ export function createSurface(layout, structures) {
     joints.insert({ j, x0, n0, x1, n1 }, x0, n0, x1, n1);
   }
   const jtmp = [];
+  // The asphalt between twin carriageways (structures.fills), as triangles.
+  const fills = new Grid(16);
+  for (const f of structures.fills || []) {
+    for (let i = 0; i + 1 < f.pts.length; i++) {
+      const p = f.pts[i], q = f.pts[i + 1];
+      const A = [p[0], p[1], p[2]], B = [p[3], p[4], p[5]], C = [q[3], q[4], q[5]], D = [q[0], q[1], q[2]];
+      for (const t of [[A, B, C], [A, C, D]]) {
+        const xs = t.map((v) => v[0]), ns = t.map((v) => v[1]);
+        fills.insert(t, Math.min(...xs), Math.min(...ns), Math.max(...xs), Math.max(...ns));
+      }
+    }
+  }
+  const ftmp = [];
 
   /**
    * @param yRef   the car's current height
@@ -46,6 +59,12 @@ export function createSurface(layout, structures) {
       asphalt = Math.max(asphalt, y);
       if (y > best) { best = y; kind = 'joint'; road = null; }
     }
+    for (const t of fills.query(x, n, 0, ftmp)) {
+      const y = triHeight(t, x, n);
+      if (y === null || y > lim) continue;
+      asphalt = Math.max(asphalt, y);
+      if (y > best) { best = y; kind = 'joint'; road = null; }
+    }
     const k = ground.kindAt(x, n);
     if (k === 'terrain') {
       const gy = T.height(x, n);
@@ -64,4 +83,15 @@ export function createSurface(layout, structures) {
   }
 
   return { at };
+}
+
+/** Height of the triangle [[x, n, y] × 3] at (x, n), or null outside it. */
+function triHeight([a, b, c], x, n) {
+  const d = (b[1] - c[1]) * (a[0] - c[0]) + (c[0] - b[0]) * (a[1] - c[1]);
+  if (Math.abs(d) < 1e-9) return null;
+  const w0 = ((b[1] - c[1]) * (x - c[0]) + (c[0] - b[0]) * (n - c[1])) / d;
+  const w1 = ((c[1] - a[1]) * (x - c[0]) + (a[0] - c[0]) * (n - c[1])) / d;
+  const w2 = 1 - w0 - w1;
+  if (w0 < -1e-6 || w1 < -1e-6 || w2 < -1e-6) return null;
+  return w0 * a[2] + w1 * b[2] + w2 * c[2];
 }

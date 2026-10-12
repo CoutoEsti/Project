@@ -301,7 +301,7 @@ Vérifié sur les deux corrections annulées le 9 octobre : le filet les refuse
 (667 cellules changent hors de Décarie sur `anneau`, +1,8 km d'obstacles sur
 la chaussée), là où `check.mjs` les laissait passer.
 
-`avant-apres.mjs` photographie huit jonctions fixes (Décarie centre, nord et
+`avant-apres.mjs` photographie neuf jonctions fixes (Décarie centre, terre-plein, nord et
 Savane, Turcot, Ville-Marie à Turcot, Bonaventure, la Concorde, l'île
 Sainte-Hélène) sur une révision commitée (un `git worktree`) et sur la copie
 de travail, de jour et sans les panneaux, et met côte à côte avant, après et

@@ -177,6 +177,8 @@ export function compile(map) {
     sunken.push(...runs(r, (p) => p.y - p.gs < SUNKEN && !p.tunnel, (p) => margin(r, p)));
     tunnels.push(...runs(r, (p) => p.tunnel, () => 0.5));
   }
+  const strips = twinStrips(roads, (p) => p.y - p.gs < SUNKEN && !p.tunnel && !p.covered, streetsAt);
+  sunken.push(...strips.holes);
   let holes = G.unionAll(sunken);
   if (landings.length && holes.length) holes = G.pc.difference(holes, ...landings);
   if (coverers.size && holes.length) {
@@ -194,6 +196,7 @@ export function compile(map) {
     timings: T,
   };
   layout.roadById = Object.fromEntries(roads.map((r) => [r.id, r]));
+  layout.stripFloors = strips.floors;
   return layout;
 }
 
@@ -900,6 +903,85 @@ function nearRuns(path, x0, n0, x1, n1) {
  * margin(sample) beyond the road's half width. Where the margin changes, the
  * two pieces share a sample so they meet.
  */
+/**
+ * The strip of ground between the two carriageways of a divided road, both
+ * down in a trench: Décarie is one trench with a median, not two trenches
+ * with a ridge of relief left standing between them (a grey face above the
+ * median, up to the rim). Only for what map/structures.js twinOf takes for
+ * twins — the other carriageway, the other way, within 0.45 m of height and
+ * MEDIAN_GAP of the edge — so that the median it builds there stands in the
+ * trench this opens; up to STRIP_DY apart in height, a skirt. A ramp
+ * alongside, the same way, keeps its own trench.
+ */
+const STRIP_GAP = 9;              // structures.js MEDIAN_GAP
+// Up to this apart in height too: the lanes the other way a metre or two
+// lower get a skirt and a barrier on the step (structures.js 'over'), not a
+// ridge of ground up to the rim.
+const STRIP_DY = 2.0;
+const RAMP_GAP = 4, RAMP_DY = 8;
+const tmpSt = [];
+
+function twinStrips(roads, sunk, streetsAt) {
+  const index = createRoadIndex(roads);
+  const out = [], floors = [];
+  for (const r of roads) {
+    // A street's own lowered piece (`street`) keeps the rules of its street.
+    if (!r.oneway || r.street) continue;
+    const S = r.samples;
+    for (const side of [1, -1]) {
+      let run = [];
+      // One quad per pair of samples: a single ring along a bend whose gap
+      // varies can cross itself, and the clipper then leaves a hole in it.
+      // The strip's floor, at the lower of the two levels: from the higher
+      // edge a skirt goes down to it (structures.js), the wall that rises
+      // as a ramp climbs away; at one level, a paved gore.
+      const flush = () => {
+        for (let i = 0; i + 1 < run.length; i++) {
+          const [a, b] = run[i], [c, d] = run[i + 1];
+          out.push([[[a, b, d, c, a]]]);
+        }
+        if (run.length >= 2) floors.push({ road: r.id, other: run[0][3], pts: run.map(([a, b, y]) => [a[0], a[1], y, b[0], b[1], y]) });
+        run = [];
+      };
+      for (const p of S) {
+        const t = sunk(p) && twinAt(r, p, side, index, sunk);
+        const at = (off) => [p.x + side * p.lx * off, p.n + side * p.ln * off];
+        // Not under or beside a street: its own rules decide the trench there.
+        const [mx, mn] = t ? at(r.half + t.gap / 2) : [0, 0];
+        if (!t || streetsAt(mx, mn, 2 + t.gap / 2, tmpSt).length) { flush(); continue; }
+        if (run.length && run[0][3] !== t.road.id) flush();
+        run.push([at(p.h - 0.2), at(r.half + t.gap + 0.2), Math.min(p.y, t.y) - 0.05, t.road.id]);
+      }
+      flush();
+    }
+  }
+  return { holes: out, floors };
+}
+
+function twinAt(r, p, side, index, sunk) {
+  for (const d of [-r.half * 0.5, 0.8, 3, 6, STRIP_GAP]) {
+    const qx = p.x + side * p.lx * (r.half + d), qn = p.n + side * p.ln * (r.half + d);
+    for (const o of index.surfacesAt(qx, qn, 0)) {
+      if (o.road === r || o.covered) continue;
+      const q = o.road.samples[o.i], q1 = o.road.samples[Math.min(o.road.samples.length - 1, o.i + 1)];
+      const dot = q.tx * p.tx + q.tn * p.tn, dy = Math.abs(o.y - p.y);
+      // A ramp leaving the same way: its wall rises out of the trench floor
+      // as the ramp climbs away, instead of standing full height from the
+      // nose. Narrow strips only, the width of a dividing wall.
+      const ramp = dot > 0.85 && (r.kind === 'link' || o.road.kind === 'link' || r.cls === 'ramp' || o.road.cls === 'ramp');
+      if (!ramp && dy > STRIP_DY) continue;
+      if (ramp && dy > RAMP_DY) continue;
+      if (!o.road.oneway || o.road.street || !sunk(q)) return null;
+      if (!ramp && dot > -0.85) return null;
+      const cx = q.x + (q1.x - q.x) * o.t, cn = q.n + (q1.n - q.n) * o.t;
+      const D = Math.abs((cx - p.x) * p.lx + (cn - p.n) * p.ln);
+      const gap = D - r.half - o.road.half;
+      return gap > 0 && gap < (ramp ? RAMP_GAP : STRIP_GAP) ? { gap, y: o.y, road: o.road } : null;
+    }
+  }
+  return null;
+}
+
 function runs(road, test, margin) {
   const out = [];
   let cur = [], m = 0, joinStart = false;

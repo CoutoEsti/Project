@@ -45,8 +45,13 @@ export function buildStructures(layout) {
     lamps: [],      // { x, n, y, kind, tx, tn, side }
     decks: [],      // { poly: ring, y, depth } — street bridges over the canal
     medians: [],    // { pts: [[xa, na, xb, nb, y]], depth, lifted } — deck between twin carriageways
+    fills: [],      // { pts: [[xa, na, ya, xb, nb, yb]], road, other } — asphalt between twins that touch,
+                    // and the floor of a strip opened between two carriageways
   };
 
+  // The floor of the strip opened between two carriageways (layout.js
+  // twinStrips) is laid like the asphalt between twins that touch.
+  for (const f of layout.stripFloors || []) out.fills.push(f);
   for (const r of roads) annotate(r, ground);
   for (const r of roads) roadStructures(r, index, ground, layout, out);
   covers(roads, out, index, layout);
@@ -88,7 +93,7 @@ function twinOf(r, p, side, index) {
       if (q.tx * p.tx + q.tn * p.tn > -0.85) return null;
       const cx = q.x + (q1.x - q.x) * o.t, cn = q.n + (q1.n - q.n) * o.t;
       const D = Math.abs((cx - p.x) * p.lx + (cn - p.n) * p.ln);
-      return { road: o.road, gap: D - r.half - o.road.half, D };
+      return { road: o.road, gap: D - r.half - o.road.half, D, y: o.y };
     }
   }
   return null;
@@ -216,6 +221,21 @@ function roadStructures(r, index, ground, layout, out) {
             for (const run of clearRuns(pts, (q) => standsOnLanes(layout, index, q, [r, ks[0].road]))) {
               out.barriers.push({ kind: 'median', road: r.id, pts: run });
             }
+            // The strip between the two edges, up to 1.2 m: one asphalt from
+            // one carriageway to the other, the median standing on it. Left
+            // open, it was a slot down to the bottom of the trench. Not
+            // where a street crosses near the level: it lies on the relief,
+            // and asphalt a step under it would bury that relief (surface.js).
+            let run = [];
+            const flush = () => { if (run.length >= 2) out.fills.push({ road: r.id, other: ks[0].road.id, pts: run }); run = []; };
+            seg.forEach((p, j) => {
+              const k = ks[j];
+              const [mx, mn] = at(p, (p.h + r.half + k.gap) / 2);
+              const street = layout.streetsAt(mx, mn, 1, stTmp).some((st) => st.cls !== 'plaza' && Math.abs(layout.terrain.height(mx, mn) - p.y) < 3);
+              if (!(k.gap > 0.05) || k.road !== ks[0].road || street) { flush(); return; }
+              run.push([...at(p, p.h - 0.05), p.y, ...at(p, r.half + k.gap + 0.05), k.y ?? p.y]);
+            });
+            flush();
           }
         } else {
           out.barriers.push({ kind: 'jersey', road: r.id, pts: seg.map((p) => [...at(p, p.h - 0.35), p.y]) });

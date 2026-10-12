@@ -13,7 +13,8 @@
 //   groundOver(world)  → [...]   relief drawn above an open road
 //   offLevel(world)    → [...]   a point of a road where the car would not
 //                        stand at the road's own height
-//   walls(world)       → [...]   every wall, barrier and median deck, by kind
+//   walls(world)       → [...]   every wall, barrier, median deck and trench
+//                        edge, by kind
 
 import { pillarColumns } from '../../src/map/structures.js';
 import { createSurface } from '../../src/map/surface.js';
@@ -322,5 +323,8 @@ export function walls(world) {
     pieces('dalle', m.pts.map((q) => [(q[0] + q[2]) / 2, (q[1] + q[3]) / 2]), m.road);
   }
   for (const p of structures.pillars) out.push({ kind: 'pilier', x: p.x, n: p.n, len: 1, road: p.road });
+  // The edge of every opening in the ground (trenches): where the relief is
+  // cut, a face of ground or a wall stands.
+  for (const poly of world.layout.holes || []) for (const ring of poly) pieces('bord de tranchée', ring, null);
   return out;
 }

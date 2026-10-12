@@ -59,6 +59,15 @@ export function buildRoads(THREE, layout, S, M, opts = {}) {
   }
   // Joints: the wedges where two ways meet end to end at an angle.
   (layout.joints || []).forEach((j, k) => joint(pieces.of(`joint:${k}`, () => `Raccord ${k}`, { kind: 'raccord' }, 'Asphalt', top), j));
+  // The strip between twin carriageways that touch (map/structures.js fills).
+  for (const f of S.fills || []) {
+    const b = pieces.of(`fill:${f.road}:${f.other}`, () => `Terre-plein ${f.road} ${f.other}`, { kind: 'raccord' }, 'Asphalt', top);
+    for (let i = 0; i + 1 < f.pts.length; i++) {
+      const p = f.pts[i], q = f.pts[i + 1];
+      const v = (x, n, y) => b.v(x, n, y - JOINT_SINK, 0, 0, 1, x, n);
+      orientedQuad(b, v(p[0], p[1], p[2]), v(p[3], p[4], p[5]), v(q[3], q[4], q[5]), v(q[0], q[1], q[2]));
+    }
+  }
   // What is actually drawn, for the streets to give way to (world/streets.js).
   layout.roadCover = coverIndex([top, circuit, ...pieces.builders('Asphalt')]);
   for (const m of pieces.meshes(THREE, M)) push(out, m, 'routes');
