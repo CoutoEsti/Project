@@ -555,6 +555,38 @@ drive('circuit Gilles-Villeneuve', ['Circuit Gilles-Villeneuve', 2300, -3200, 18
   check('réseau de circulation', net.edges.length > 1000 && (by.signal || 0) > 50 && (by.stop || 0) > 50,
     `${net.edges.length} tronçons, ${by.signal || 0} carrefours à feux, ${by.stop || 0} arrêts, ${by.merge || 0} bretelles, en ${ms.toFixed(0)} ms`);
 
+  // Parked cars (map/props.js) stand clear of every lane the traffic drives,
+  // between its stop lines: a car's half-width each, and a little air.
+  {
+    const cell = 8, grid = new Map(), sp = {}, q = {};
+    for (let ed = 0; ed < net.edges.length * 2; ed++) {
+      span(net, ed, sp);
+      for (const lat of sp.offsets) {
+        for (let d = sp.s0; d <= sp.s1; d += 1.5) {
+          pointOn(net, ed, d, lat, q);
+          const k = `${Math.floor(q.x / cell)},${Math.floor(q.n / cell)}`;
+          let a = grid.get(k);
+          if (!a) grid.set(k, a = []);
+          a.push(q.x, q.n);
+        }
+      }
+    }
+    let bad = 0, worst = Infinity, at = null;
+    for (const p of world.parked || []) {
+      const cx = Math.floor(p.x / cell), cn = Math.floor(p.n / cell);
+      let m = Infinity;
+      for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) {
+        const a = grid.get(`${cx + i},${cn + j}`);
+        if (a) for (let k = 0; k < a.length; k += 2) m = Math.min(m, Math.hypot(a[k] - p.x, a[k + 1] - p.n));
+      }
+      if (m < 2) bad++;
+      if (m < worst) { worst = m; at = p; }
+    }
+    const n = (world.parked || []).length;
+    check('autos stationnées hors des voies du trafic', bad === 0,
+      `${n} autos stationnées, ${bad} sur une voie${at ? `, au plus près ${worst.toFixed(1)} m (${Math.round(at.x)}, ${Math.round(at.n)})` : ''}`);
+  }
+
   // Lights: two ways that cross are never green together, at any junction
   // of a cluster (a boulevard's two carriageways are one junction).
   {
