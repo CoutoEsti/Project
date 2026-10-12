@@ -803,11 +803,11 @@ if (BROWSER) {
   page.on('pageerror', (e) => errors.push(String(e)));
   page.on('console', (m) => {
     if (m.type() !== 'error') return;
-    // The optional civic.glb (mtl/README.md, "La voiture") is absent in this
-    // checkout by design — game/gltf-car.js probes it with a HEAD request and
-    // falls back silently, but Chromium still logs the failed HTTP request
-    // itself to the console; no amount of catching in page JS suppresses
-    // that. Expected, not a bug — only swallow this one exact 404.
+    // models/civic.glb (mtl/README.md, "La voiture") may be absent, in an
+    // older checkout or a trimmed deploy — game/gltf-car.js probes it with a
+    // HEAD request and falls back silently, but Chromium still logs the failed
+    // HTTP request itself to the console; no amount of catching in page JS
+    // suppresses that. Expected, not a bug — only swallow this one exact 404.
     if (/Failed to load resource.*404/.test(m.text()) && /\/models\/civic\.glb$/.test(m.location().url || '')) return;
     errors.push(m.text());
   });

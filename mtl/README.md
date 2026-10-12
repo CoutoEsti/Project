@@ -380,29 +380,38 @@ aux zones `anneau` 100 % et 70 %, et `centre` 100 % et 85 %.
 
 ## La voiture
 
-Une Honda Civic générée (`src/game/car.js`) roule par défaut : un hull
-low-poly texturé par sa seule couleur, avec les proportions d'une 10e/11e
-génération — long capot bas, pavillon fastback, ligne de caractère marquée,
-phares fins, feux arrière en C, calandre noire, jantes à 5 branches.
+La voiture du joueur est la **Honda Civic SiR II EG (1992)** de Ko :
+`mtl/models/civic.glb` (2,9 Mo, ~96 000 triangles, ~57 appels de rendu).
+Elle sert aussi aux autres joueurs : `game/gltf-car.js` télécharge et lit le
+fichier une seule fois, puis donne à chaque voiture sa propre copie (géométrie
+et textures partagées, matériaux à elle, pour qu'elle ait sa couleur).
 
-Pour rouler avec un vrai modèle : déposer un fichier `mtl/models/civic.glb`
-(glTF **binaire**, sans Draco — `mtl/vendor` n'a pas le décodeur, seul
-`hop/vendor` l'a — idéalement sous 5 Mo, par exemple exporté depuis Blender en
-`.glb` sans cocher la compression Draco). Au chargement, `game/gltf-car.js`
-sonde ce chemin ; s'il est absent, la voiture générée reste en place, sans
-message dans la console. `?car=<url>` pointe vers un autre fichier.
+Les pièces de peinture (matériaux nommés `Paint…`) prennent la couleur de la
+voiture choisie au garage ; les roues (`wheel_front_left`…) braquent et
+tournent ; les feux (`headlight…`, `taillight…`) s'allument la nuit et au
+freinage. Le modèle est mis à l'échelle de la physique (4,30 m, empattement
+2,70 m), soit environ 5 % plus grand que la vraie EG (4,07 m) : c'est ce qui
+pose ses roues sur les essieux simulés.
 
-`hop/tools/prepare-model.mjs` (réduction de texture + Draco) n'est **pas**
-directement utilisable ici : il compresse toujours la géométrie en Draco, que
-`mtl/vendor` ne sait pas décoder. Pour un modèle déjà lourd, réduire les
-textures à la main (2048 px ou moins, WebP ou JPEG) et exporter sans Draco est
-la voie la plus sûre tant que `mtl/vendor` n'a pas son propre décodeur.
+Le `.blend` d'origine (Blender 2.79, Cycles) et ses textures ne sont pas dans
+le dépôt. Pour régénérer le `.glb` à partir d'eux :
 
-Le modèle est mis à l'échelle sur la longueur de la voiture générée (4,30 m),
-recentré, posé au sol, et ses roues sont retrouvées par leur nom
-(`wheel`/`tire`/`roue`/`pneu`…, avant/arrière par `front`/`avant` ou
-`rear`/`arrière`) pour le braquage et la rotation. Sans nœud reconnu comme
-roue, le modèle reste statique plutôt que de planter.
+```bash
+pip install bpy        # ou Blender 4.2+ : blender -b -P mtl/tools/civic-glb.py -- <...>
+python3 mtl/tools/civic-glb.py <dossier>/1992_Honda_Civic_SiR_II_EG.blend mtl/models/civic.glb
+```
+
+Le script refait chaque matériau Cycles en Principled BSDF (le seul que
+l'export glTF comprend), sépare les quatre roues, nomme peinture, feux et
+vitres, applique les transformations, fusionne les pièces fixes et exporte
+sans Draco, textures en WebP.
+
+Sans le fichier (ou s'il est illisible), la Civic générée (`src/game/car.js`)
+reprend sa place sans message. `?car=<url>` pointe vers un autre `.glb`
+(binaire, **sans Draco** : `mtl/vendor` n'a pas le décodeur). Les roues y sont
+retrouvées par leur nom (`wheel`/`tire`/`roue`/`pneu`…, avant/arrière par
+`front`/`avant` ou `rear`/`arrière`) ; sans roue reconnue, le modèle reste
+statique plutôt que de planter.
 
 ## La circulation
 
