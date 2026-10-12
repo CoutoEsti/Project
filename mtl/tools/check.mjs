@@ -883,8 +883,10 @@ if (BROWSER) {
       window.__mtl.look(a - 150, b - 150, T.height(a, b) + 120, a, b, T.height(a, b));
       return best;
     });
+    // On SwiftShader, the first frames over downtown compile its materials
+    // and take a while: the landing waits for them.
     await page.keyboard.press('KeyG');
-    const back = await page.waitForFunction(() => !document.body.classList.contains('fly'), null, { timeout: 30000 })
+    const back = await page.waitForFunction(() => !document.body.classList.contains('fly'), null, { timeout: 120000 })
       .then(() => true, () => false);
     const st = await page.evaluate(() => window.__mtl.state());
     const d = Math.hypot(st.x - tx, st.n - tn);
@@ -907,7 +909,7 @@ if (BROWSER) {
     // The objects editor: a .glb made on the spot, placed on the plan, then
     // the game's local preview builds it, levelled and solid.
     errors.length = 0;
-    await page.goto(`${url}/objets.html`);
+    await page.goto(`${url}/objets.html`, { timeout: 180000 });
     await page.waitForFunction(() => window.__objets && window.__objets.ready, null, { timeout: 120000 });
     const placed = await page.evaluate(async () => {
       const THREE = await import('three');

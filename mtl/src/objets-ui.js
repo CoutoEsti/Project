@@ -343,9 +343,22 @@ function drawBase() {
   c.font = '11px system-ui, sans-serif';
   c.lineWidth = 1;
   for (const z of Object.values(ZONES)) {
-    const [a, b, e, f] = z.box;
-    c.strokeRect(sx(a), sy(f), (e - a) * ppm, (f - b) * ppm);
-    c.fillText(z.nom, sx(a) + 4, sy(f) + 13);
+    if (z.box) {
+      const [a, b, e, f] = z.box;
+      c.strokeRect(sx(a), sy(f), (e - a) * ppm, (f - b) * ppm);
+      c.fillText(z.nom, sx(a) + 4, sy(f) + 13);
+      continue;
+    }
+    // A drawn zone (map/zones.js): its rings, named at the northernmost point.
+    let top = null;
+    c.beginPath();
+    for (const ring of z.poly || []) {
+      ring.forEach(([x, n], i) => { if (i) c.lineTo(sx(x), sy(n)); else c.moveTo(sx(x), sy(n)); });
+      c.closePath();
+      for (const p of ring) if (!top || p[1] > top[1]) top = p;
+    }
+    c.stroke();
+    if (top) c.fillText(z.nom, sx(top[0]) + 4, sy(top[1]) + 13);
   }
   c.setLineDash([]);
   if (ppm > 0.045 && ppm < 1.5) {
