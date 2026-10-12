@@ -81,7 +81,7 @@ export function createTrafficView(THREE, net, { max = 120 } = {}) {
     boxesMesh.setMatrixAt(i, M.compose(P.set(hd.x, hd.y + 4.0, -hd.n), Q, S));
   });
 
-  let night = true;
+  let night = 1;   // 0 by day, 1 by night, in between at dusk and dawn
   const carColour = new THREE.Color();
 
   function update(poses, source) {
@@ -98,7 +98,7 @@ export function createTrafficView(THREE, net, { max = 120 } = {}) {
       cars.setColorAt(i, carColour.set(PAINT[p.colour % PAINT.length]));
       // Lamps: the instance colour scales the vertex colours (white front,
       // red back); brakes and night brighten them, bloom does the rest.
-      const k = night ? (p.brake ? 2.6 : 1.4) : (p.brake ? 1.6 : 0.5);
+      const k = p.brake ? 1.6 + night : 0.5 + 0.9 * night;
       lights.setColorAt(i, col.setRGB(k, k, k));
     }
     cars.instanceMatrix.needsUpdate = true;
@@ -131,7 +131,7 @@ export function createTrafficView(THREE, net, { max = 120 } = {}) {
     root,
     heads: heads.length,
     update,
-    setNight(v) { night = v; },
+    setNight(v) { night = Math.min(1, Math.max(0, Number(v))); },
     dispose() {
       for (const m of [cars, lights, poles, boxesMesh, lit]) { m.geometry.dispose(); m.material.dispose(); m.dispose(); }
     },

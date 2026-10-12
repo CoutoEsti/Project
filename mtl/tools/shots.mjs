@@ -5,6 +5,8 @@
 //   node mtl/tools/shots.mjs --out DIR --only decarie,plateau --day --zone centre --echelle 85
 //   node mtl/tools/shots.mjs --views vues.json   (a list of [name, x, n, h, tx, tn, th], as VIEWS)
 //   node mtl/tools/shots.mjs --jonctions         → the junctions of JUNCTIONS instead
+//   node mtl/tools/shots.mjs --cycle 1000 --pluie 1   → at dusk, in the rain
+// Night by default (the sky would otherwise follow the clock).
 //
 // Chromium runs headless on SwiftShader when there is no GPU: slow, but the
 // pictures are the real renderer's.
@@ -75,7 +77,9 @@ export async function shoot({ root, views, out, day = false, query = {}, w = 128
   try {
     const t0 = Date.now();
     const q = new URLSearchParams();
+    // Night unless told otherwise: the sky would follow the clock.
     if (day) q.set('day', '1');
+    else if (query.cycle == null) q.set('nuit', '1');
     for (const [k, v] of Object.entries(query)) if (v != null) q.set(k, v);
     await page.goto(`${url}/index.html?${q}`);
     await page.waitForFunction(() => window.__mtl && window.__mtl.ready, null, { timeout: 300000 });
@@ -118,7 +122,8 @@ async function main() {
     : args.includes('--jonctions') ? JUNCTIONS : VIEWS;
   await shoot({
     root: ROOT, views, out: OUT, day: DAY, w: W, h: H, only: ONLY ? ONLY.split(',') : null,
-    query: { zone: arg('--zone', null), forme: arg('--forme', null), echelle: arg('--echelle', null) },
+    query: { zone: arg('--zone', null), forme: arg('--forme', null), echelle: arg('--echelle', null),
+      cycle: DAY ? null : arg('--cycle', null), pluie: arg('--pluie', null) },
   });
 }
 
