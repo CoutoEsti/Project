@@ -3,6 +3,7 @@
 //
 //   node mtl/tools/shots.mjs                    → mtl/.shots/*.png
 //   node mtl/tools/shots.mjs --out DIR --only decarie,plateau --day --zone centre --echelle 85
+//   node mtl/tools/shots.mjs --views vues.json   (a list of [name, x, n, h, tx, tn, th], as VIEWS)
 //
 // Chromium runs headless on SwiftShader when there is no GPU: slow, but the
 // pictures are the real renderer's.
@@ -53,11 +54,13 @@ async function main() {
   const q = new URLSearchParams();
   if (DAY) q.set('day', '1');
   if (arg('--zone', null)) q.set('zone', arg('--zone', null));
+  if (arg('--forme', null)) q.set('forme', arg('--forme', null));
   if (arg('--echelle', null)) q.set('echelle', arg('--echelle', null));
   await page.goto(`${url}/index.html?${q}`);
   await page.waitForFunction(() => window.__mtl && window.__mtl.ready, null, { timeout: 300000 });
   console.log(`chargé en ${((Date.now() - t0) / 1000).toFixed(1)} s`, JSON.stringify(await page.evaluate(() => window.__mtl.world.timings)));
-  for (const [name, ...v] of VIEWS) {
+  const views = arg('--views', null) ? JSON.parse(await fs.readFile(arg('--views', null), 'utf8')) : VIEWS;
+  for (const [name, ...v] of views) {
     if (ONLY && !ONLY.split(',').includes(name)) continue;
     await page.evaluate((v) => {
       const m = window.__mtl;

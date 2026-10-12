@@ -192,3 +192,135 @@ bouts ; `check.mjs` 18/18, à revoir 11 grade, 41 clearance, 11 overlap,
 `main` (commit de fusion, pas de force-push). Partir de `main`. **Faire
 `git fetch` avant de commencer** : c'est faute de l'avoir fait que la session
 du 28 a refait du travail existant.
+
+## Zone Cœur et tête du pont Jacques-Cartier (8 octobre)
+
+Ko trouvait la carte bien trop grande. La zone de départ est maintenant
+`coeur` (`map/zones.js`), un polygone de 36 km² au lieu des 127 de `anneau` :
+le fleuve, le mont Royal, Turcot, le canal de Lachine, les îles et la tête du
+pont à Longueuil. `anneau` et `centre` restent dans le menu ; `check.mjs`
+tourne toujours sur `anneau` par défaut (`--zone coeur` pour l'autre).
+
+Pont Jacques-Cartier sur l'île Sainte-Hélène : une parabole par chenal
+(`map/real.js`, champ `island` de `BRIDGES`), le tablier à 8 m au-dessus de
+l'île entre les deux, le treillis seulement au-dessus de l'eau
+(`world/landmarks.js`). OSM ne donne que la couche 1, aucune hauteur : 8 m,
+c'est ce qui laisse les bretelles, telles que dessinées, atteindre le tablier
+sans dépasser leur pente (à 10 m, s6044 monte à 25 %), avec 10 à 12 m au-dessus
+de la boucle et du chemin qui passent dessous. Les morceaux de rue se posent
+sur une route quand OSM les y raccorde (nœud partagé, `sharesNode`).
+
+Un bâtiment de l'île (« Pavillon ») traversait le nouveau tablier.
+`clearRoads` (`map/buildings.js`) coupe un bâtiment 1,5 m sous un tablier qui
+le survole et retire du plan au sol le ruban d'une route qui passe au niveau de
+son rez-de-chaussée. Zone `coeur` : 2 coupés, 3 entaillés.
+
+Bouts ouverts (`bouts.mjs`) : anneau 87 → 81, coeur 76 → 70. `check.mjs`
+anneau : 11 → 7 chevauchements, 11 → 10 pentes, 41 → 38 dégagements.
+
+## Artefacts sur la chaussée (8 octobre)
+
+`tools/artefacts.mjs` compte ce qui est solide *sur* une chaussée (à plus
+d'un mètre du bord, à hauteur de voiture : mur, glissière, clôture, pilier,
+bâtiment) et les trous (sondes en travers des routes et des rues, la surface
+de `map/surface.js` vide ou 0,6 m plus bas). Places regroupées à 15 m près.
+
+| | main, coeur | après, coeur | main, anneau | après, anneau |
+|---|---|---|---|---|
+| obstacles | 549 (5 556 m) | 78 (364 m) | 1 988 (19 878 m) | 171 (853 m) |
+| dont bâtiments | 408 | 22 | 1 615 | 33 |
+| dont clôtures | 59 | 0 | 144 | 0 |
+| trous | 62 (570 m²) | 62 | 200 (1 683 m²) | 200 |
+
+Corrigé : bâtiments entaillés par les rues et routes qui traversent leur
+rez-de-chaussée (`clearRoads`, ~640 bâtiments, 0,2 % de la surface bâtie) ;
+clôtures de tranchée et garde-corps de couverture plus jamais dans les voies
+d'une rue ; pas de mur ni de glissière au bord d'une route là où une rue est
+juste à côté, à son niveau (elle s'y pose) ; muret central de deux chaussées
+coupé là où une rue ou une troisième route les traverse au même niveau.
+
+Restent surtout des profils à revoir (pas des murs mal placés) : Turcot
+(Upper Lachine s526/s527, bretelles r504/r895/r505 sur Tanneries), les deux
+tabliers de la Concorde au-dessus de l'avenue Pierre-Dupuy (s5411 et s5417,
+rubans qui se chevauchent à 3 m d'écart), les bretelles de l'île sous le bord
+du pont Jacques-Cartier. Les plazas (rues piétonnes, largeur par défaut de
+8 m) ne comptent pas.
+
+## Routes gardées une par une (8 octobre)
+
+Ko veut le centre-ville en grande partie, d'autres petites zones, et à
+certains endroits seulement certaines routes. `zones.html` a maintenant un
+outil **Route** : deux clics sur le plan, le chemin par les rues entre les deux
+(Dijkstra sur le graphe des rues, `map/routes.js`), plus l'autre chaussée
+d'une route divisée. Une zone dessinée devient `{ nom, poly, routes: [{ h, pts }] }` ;
+`routes` = ligne centrale arrondie au mètre et demi-largeur du couloir (chaussée
++ 9 m). `makeZone` fait l'union des polygones et des couloirs ; tout le reste
+(coupe des rues, murs invisibles, décor) ne voit qu'un multipolygone. Le code
+`?forme=` passe en version 2 seulement s'il y a des routes ; la version 1 se lit
+toujours. `WIDTH` a déménagé de `map/real.js` à `map/routes.js` (une seule
+table des largeurs).
+
+Vérifié : une zone de test (un carré au centre-ville + la Ville-Marie jusqu'à
+Turcot, les deux sens) passe `check.mjs --forme … --browser` (22/22). Les outils
+`check`, `artefacts`, `plan` et `shots` prennent `--forme <code>`.
+
+Limites : le graphe est celui des données (`rues.json`) — une bretelle mal
+reliée dans OSM ne se suit pas ; hors des formes, la route traverse le décor en
+blocs, pas de vrais bâtiments.
+
+## Trous sous les rues (8 octobre)
+
+Les « vides » d'`artefacts.mjs` venaient tous de la même chose : une tranchée
+s'ouvre 0,5 m plus large que sa route (le sol s'arrête avant les murs), et
+cette bande passait sous les rues qui croisent ou longent la route. Sous une
+rue, la marge tombe à 0 (`layout.js`, `runs` avec une marge par échantillon).
+Cœur : 62 trous (570 m²) → 42 (318 m²), plus aucun « vide » ; anneau : 200
+(1 683 m²) → 154 (1 242 m²). Coût : +35 ms de compilation sur Cœur.
+
+Ce qui reste, ce sont des marches de 0,6 à 6,6 m entre une rue au niveau du sol
+et une route abaissée qui se chevauchent dans les données : Rue Bridge (les
+deux chaussées n'ont pas le même profil sous la voie ferrée), Avenue Girouard
+(une voie parallèle au niveau du sol déborde d'un mètre sur la trémie),
+Taschereau, Gosford, des Lacquiers. Chaque cas demande de corriger le profil,
+pas le sol.
+
+## Raccords rue ↔ pont et pied des bretelles (8 octobre)
+
+- **Peinture continue.** Un bout de rue surélevé ou abaissé (`s…`, `street:
+  true`) se peignait comme une route de montagne (double jaune, lignes de rive
+  blanches) et la peinture de la rue s'arrêtait quelques mètres avant lui. Il
+  porte maintenant `streetCls` (la classe de sa rue) et `markings.js` le peint
+  avec les lignes de sa rue ; les lignes de la rue vont jusqu'au bout de leur
+  tracé quand c'est son propre bout surélevé qui suit (`continues`). Résultat :
+  voies et ligne centrale continues à travers le raccord (Sherbrooke,
+  Charlevoix, René-Lévesque).
+- **Pied des bretelles.** Une bretelle qui descend sur une rue
+  (`streetLandings`) s'arrête au bord de la rue, mais sa tranchée (même à
+  20 cm sous le sol) perçait la rue : un trou sous les roues au pied de la
+  bretelle. `layout.js` retire de la tranchée la partie dans la rue (rue
+  prise localement, `nearRuns`). Cœur : 42 → 39 trous ; +100 ms de compilation.
+- Essayé sans effet et retiré : garder les tuiles d'asphalte de rue à moitié
+  sous une route (`streets.js`). Les taches grises vues à Sherbrooke/Saint-Denis
+  sont le terre-plein entre deux chaussées OSM, couleur « lot ».
+- Outil de diagnostic : un lancer de rayons vertical dans la page
+  (`window.__mtl.scene`) qui imprime une carte de lettres par maillage touché ;
+  c'est ce qui a montré le vide au pied de la bretelle de la Montagne.
+
+## Turcot : chaussées jumelles (8 octobre)
+
+Chemin Upper Lachine passe au-dessus des bretelles de Turcot en deux
+chaussées à sens unique (`s526`, `s527`) qui se chevauchent. Elles croisaient
+la même bretelle à 2,40 et 2,55 m au-dessus d'elle ; le seuil de 2,5 m de
+`separateCrossings` en faisait descendre une au niveau de la bretelle
+(« croisement à niveau ») et monter l'autre au gabarit : 3 m de mur entre
+deux voies côte à côte.
+
+- Un bout de rue ne rejoint une route à niveau que si les données les relient
+  (un sommet commun à 40 m près, `joined`) ; sinon il passe dessus ou dessous.
+- `levelTwins` : deux chaussées d'une même rue divisée, côte à côte en sens
+  inverse, prennent la plus haute des deux hauteurs (jamais dans quelque chose
+  qui passe au-dessus, jamais à moins de 15 m d'un bout), avant et après le
+  lissage des pentes.
+
+Cœur : obstacles 78 → 70 (365 → 265 m), trous 39 → 37 ; profils à revoir :
+pente 6 → 5, gabarit 30 → 24. Anneau : gabarit 38 → 32, obstacles 171 → 163.

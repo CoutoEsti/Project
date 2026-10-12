@@ -68,9 +68,12 @@ export function compile(map) {
   taperJunctions(roads);
   tl = lap('pin', tl);
   separateCrossings(roads);
+  levelTwins(roads);
   tl = lap('cross', tl);
   settleEnds(roads, map.streets, terrain);
   relaxSamples(roads);
+  // Relaxing each carriageway on its own lets the twins drift apart again.
+  for (const r of levelTwins(roads)) relaxRoad(r, r.hard || new Set());
   bindSideJoins(roads);
   tl = lap('relax', tl);
   carve(terrain, roads);
@@ -124,12 +127,58 @@ export function compile(map) {
       }
     }
   }
-  const sunken = [], tunnels = [];
+  // Where a ramp comes down onto a street (map/junctions.js streetLandings),
+  // its deck stops at the street's edge and the street carries it the rest of
+  // the way: no trench may open inside that street, however shallow the
+  // ramp's foot. Outside the street the ramp is drawn as ever.
+  const landings = [];
   for (const r of roads) {
-    sunken.push(...runs(r, (p) => p.y - p.gs < SUNKEN && !p.tunnel, 0.5));
-    tunnels.push(...runs(r, (p) => p.tunnel, 0.5));
+    if (r.loop) continue;
+    const S = r.samples;
+    for (const end of ['start', 'end']) {
+      if ((r.junctions || []).some((j) => j.end === end)) continue;
+      const k0 = end === 'start' ? 0 : S.length - 1, dir = end === 'start' ? 1 : -1;
+      const run = [], on = new Set();
+      for (let k = k0; k >= 0 && k < S.length; k += dir) {
+        const p = S[k];
+        // Only where the ramp is at the street's level: deeper, keeping the
+        // ground laid it over the ramp (Jacques-Cartier on Sainte-Hélène).
+        if (Math.abs(p.y - p.gs) > 0.35) break;
+        const here = streetsAt(p.x, p.n, 0, tmp).filter((st) => st.cls !== 'plaza');
+        if (!here.length) break;
+        for (const st of here) on.add(st);
+        run.push([p.x, p.n]);
+      }
+      if (!on.size) continue;
+      if (run.length === 1) run.push([run[0][0] + S[k0].tx * dir, run[0][1] + S[k0].tn * dir]);
+      try {
+        // Past the road's end by a little, but not past the run inward: there
+        // the road goes down into its trench, and closing the trench over it
+        // laid the ground on top of the road.
+        const out = r.half + 1;
+        const tip = [run[0][0] - S[k0].tx * dir * out, run[0][1] - S[k0].tn * dir * out];
+        const local = G.bufferPolyline([tip, ...run], r.half + 1, 0);
+        // Only the stretch of each street near the landing: buffering whole
+        // streets costs more than all the rest of the trenches.
+        const bb = G.ringBBox(run), pad = r.half + 1;
+        const foot = G.unionAll([...on].flatMap((st) => nearRuns(st.path, bb.x0 - pad - st.half, bb.n0 - pad - st.half, bb.x1 + pad + st.half, bb.n1 + pad + st.half)
+          .map((pts) => G.bufferPolyline(pts, st.half, 0))));
+        const part = G.pc.intersection(local, foot);
+        if (part.length) landings.push(part);
+      } catch (e) { /* the trench stays as it was */ }
+    }
+  }
+  const sunken = [], tunnels = [];
+  // Under a street, a trench opens no wider than its road: the half metre left
+  // around it elsewhere, so the ground stops short of the walls, would be a
+  // strip of void across the street where it meets or crosses the road.
+  const margin = (r, p) => (streetsAt(p.x, p.n, r.half + 0.5, tmp).some((st) => st.cls !== 'plaza') ? 0 : 0.5);
+  for (const r of roads) {
+    sunken.push(...runs(r, (p) => p.y - p.gs < SUNKEN && !p.tunnel, (p) => margin(r, p)));
+    tunnels.push(...runs(r, (p) => p.tunnel, () => 0.5));
   }
   let holes = G.unionAll(sunken);
+  if (landings.length && holes.length) holes = G.pc.difference(holes, ...landings);
   if (coverers.size && holes.length) {
     holes = G.pc.difference(holes, ...[...coverers].map((st) => G.bufferPolyline(st.path, st.half, 0)));
   }
@@ -554,10 +603,15 @@ function separateCrossings(roads) {
       open.delete(o);
       const dy = run.dy / run.k;
       if (Math.abs(dy) > 0.45 && Math.abs(dy) < HEADROOM) {
-        const delta = Math.abs(dy) < 2.5 ? -dy : Math.sign(dy) * HEADROOM - dy;
+        // A piece of street meets a road at grade only where the data joins
+        // them; otherwise it passes over or under. Upper Lachine's two
+        // carriageways crossed the same Turcot ramp 2.40 and 2.55 m above it:
+        // one came down onto it, the other went over, side by side.
+        const atGrade = Math.abs(dy) < 2.5 && (!r.street || joined(r, o, run));
+        const delta = atGrade ? -dy : (dy < 0 ? -1 : 1) * HEADROOM - dy;
         shifts.push({ s0: run.s0, s1: run.s1, delta });
         // Crossing at grade: those samples stand on the major road.
-        if (Math.abs(dy) < 2.5) for (const i of run.idx) (r.hard ||= new Set()).add(i);
+        if (atGrade) for (const i of run.idx) (r.hard ||= new Set()).add(i);
       }
     };
     for (const p of S) {
@@ -574,6 +628,7 @@ function separateCrossings(roads) {
         run.dy += p.y - h.y;
         run.k++;
         run.idx.push(p.i);
+        run.x = p.x; run.n = p.n;
       }
       for (const o of [...open.keys()]) if (!seen.has(o)) close(o);
     }
@@ -592,6 +647,61 @@ function separateCrossings(roads) {
     }
     for (let i = 0; i < S.length; i++) S[i].y += add[i];
   }
+}
+
+/**
+ * The two carriageways of a divided street, lifted or sunk as separate pieces
+ * side by side, share one height: the higher of the two where they overlap
+ * (a carriageway raised over a ramp leaves its twin a wall's height below it
+ * otherwise). Never raised into something passing above.
+ */
+function levelTwins(roads) {
+  const pieces = roads.filter((r) => r.street && r.oneway && r.name);
+  const changed = [];
+  if (pieces.length < 2) return changed;
+  const index = createRoadIndex(roads);
+  const tmp = [];
+  for (const r of pieces) {
+    const raise = new Float64Array(r.samples.length);
+    let any = false;
+    const L = r.samples[r.samples.length - 1].s;
+    r.samples.forEach((p, i) => {
+      // Near its ends a carriageway meets the next piece, not its twin.
+      if (p.s < 15 || p.s > L - 15) return;
+      let top = p.y;
+      // Within reach of this carriageway's own edge: the twin's footprint overlaps or touches it.
+      for (const h of index.surfacesAt(p.x, p.n, (p.h ?? r.half) + 1, tmp)) {
+        const o = h.road;
+        if (o === r || !o.street || o.name !== r.name || !o.oneway) continue;
+        const q = o.samples[h.i];
+        if (p.tx * q.tx + p.tn * q.tn > -0.8) continue;      // the other way, alongside
+        if (h.y > top) top = h.y;
+      }
+      if (top - p.y < 0.3) return;
+      // Room above: nothing within a headroom over the new height.
+      for (const h of index.surfacesAt(p.x, p.n, 0, tmp)) {
+        if (h.road !== r && h.road.name !== r.name && h.y > p.y + 0.5 && h.y < top + HEADROOM) return;
+      }
+      raise[i] = top - p.y;
+      any = true;
+    });
+    if (!any) continue;
+    r.samples.forEach((p, i) => { p.y += raise[i]; });
+    changed.push(r);
+  }
+  return changed;
+}
+
+/** Whether two roads share a point of the data near where `run` crossed. */
+function joined(r, o, run) {
+  const R = 40;
+  const P = r.path || r.pts, Q = o.path || o.pts;
+  if (!P || !Q) return true;
+  for (const a of P) {
+    if (Math.abs(a[0] - run.x) > R || Math.abs(a[1] - run.n) > R) continue;
+    for (const b of Q) if (Math.abs(a[0] - b[0]) < 0.3 && Math.abs(a[1] - b[1]) < 0.3) return true;
+  }
+  return false;
 }
 
 /**
@@ -771,19 +881,60 @@ function nearestIndex(samples, [x, n]) {
  * half-width plus `margin`. Runs are simplified before buffering so a 9 km
  * carriageway costs a few hundred quads, not five thousand.
  */
+/** The runs of a polyline's segments that touch a box, each as a polyline. */
+function nearRuns(path, x0, n0, x1, n1) {
+  const out = [];
+  let cur = null;
+  for (let i = 0; i + 1 < path.length; i++) {
+    const a = path[i], b = path[i + 1];
+    const hit = Math.max(a[0], b[0]) >= x0 && Math.min(a[0], b[0]) <= x1 && Math.max(a[1], b[1]) >= n0 && Math.min(a[1], b[1]) <= n1;
+    if (!hit) { cur = null; continue; }
+    if (!cur) out.push(cur = [a]);
+    cur.push(b);
+  }
+  return out;
+}
+
+/**
+ * Footprints of the stretches of a road where `test` holds, each widened by
+ * margin(sample) beyond the road's half width. Where the margin changes, the
+ * two pieces share a sample so they meet.
+ */
 function runs(road, test, margin) {
   const out = [];
-  let cur = [];
-  const flush = () => {
+  let cur = [], m = 0, joinStart = false;
+  // Where the margin changes the run is cut in two pieces that share a
+  // sample. Square ends there left a wedge of ground on the outside of any
+  // bend, over the road: each piece reaches a metre into the next.
+  const JOIN = 1;
+  const flush = (joinEnd = false) => {
     if (cur.length >= 2) {
       const pts = G.simplify(cur.map((p) => [p.x, p.n]), 0.25);
-      const fp = G.bufferPolyline(pts, road.half + margin, 0);
+      const reach = (i, j, d) => {
+        const a = pts[i], b = pts[j], l = Math.hypot(a[0] - b[0], a[1] - b[1]) || 1;
+        return [a[0] + ((a[0] - b[0]) / l) * d, a[1] + ((a[1] - b[1]) / l) * d];
+      };
+      if (joinStart) pts[0] = reach(0, 1, JOIN);
+      if (joinEnd) pts[pts.length - 1] = reach(pts.length - 1, pts.length - 2, JOIN);
+      // As wide as the road is drawn: wider where it tapers into a fork.
+      let half = road.half;
+      for (const p of cur) if (p.h > half) half = p.h;
+      const fp = G.bufferPolyline(pts, half + m, 0);
       if (fp.length) out.push(fp);
     }
     cur = [];
+    joinStart = joinEnd;
   };
   for (const p of road.samples) {
-    if (test(p)) cur.push(p); else flush();
+    if (!test(p)) { flush(); continue; }
+    const mp = margin(p);
+    if (cur.length && mp !== m) {
+      const last = cur[cur.length - 1];
+      flush(true);
+      cur.push(last);
+    }
+    m = mp;
+    cur.push(p);
   }
   flush();
   return out;

@@ -20,16 +20,24 @@ const PROFILES = {
   circuit: [[0.25, 0], [0.25, 1.15], [0.2, 1.2]],
 };
 
-export function buildRoads(THREE, layout, S, M) {
+/**
+ * @param opts.split one mesh per road, side join and joint, named after it
+ *   (the export: something to pick and edit in an engine). The page draws
+ *   them merged, three draw calls for every road.
+ */
+export function buildRoads(THREE, layout, S, M, opts = {}) {
   const out = [];
   const top = new GeoBuilder();
   const under = new GeoBuilder();
   const circuit = new GeoBuilder();
   const joins = layout.joins || [];
   const landings = layout.landings || [];
+  const pieces = new Pieces(opts.split);
+  const byId = layout.roadById || {};
   for (const r of layout.roads) {
     const [i0, i1, sunk] = drawRange(r, joins);
-    const b = r.cls === 'circuit' ? circuit : top;
+    const b = pieces.of(r.id, () => roadLabel(r), roadData(r), 'Asphalt', r.cls === 'circuit' ? circuit : top);
+    const under_ = pieces.of(r.id, null, null, 'Concrete_Dark', under);
     // Edges slid onto the street a ramp comes down to (map/junctions.js).
     const edges = new Map();
     for (const l of landings) if (l.road === r.id) for (const [k, e] of l.edges) edges.set(k, e);
@@ -37,7 +45,7 @@ export function buildRoads(THREE, layout, S, M) {
     // Undersides where the deck is carried on pillars.
     let run = [];
     const flush = () => {
-      if (run.length >= 2) ribbon(under, run, 0, run.length - 1, (p) => p.y - r.rules.deck, halfOf(r), true);
+      if (run.length >= 2) ribbon(under_, run, 0, run.length - 1, (p) => p.y - r.rules.deck, halfOf(r), true);
       run = [];
     };
     for (let i = i0; i <= i1; i++) {
@@ -45,11 +53,15 @@ export function buildRoads(THREE, layout, S, M) {
     }
     flush();
   }
-  for (const j of joins) joinSurface(top, j);
+  for (const j of joins) {
+    const lbl = () => `Jonction ${roadLabel(byId[j.road] || { id: j.road })} > ${roadLabel(byId[j.major] || { id: j.major })}`;
+    joinSurface(pieces.of(`join:${j.road}:${j.end}`, lbl, { kind: 'jonction', road: j.road, major: j.major }, 'Asphalt', top), j);
+  }
   // Joints: the wedges where two ways meet end to end at an angle.
-  for (const j of layout.joints || []) joint(top, j);
+  (layout.joints || []).forEach((j, k) => joint(pieces.of(`joint:${k}`, () => `Raccord ${k}`, { kind: 'raccord' }, 'Asphalt', top), j));
   // What is actually drawn, for the streets to give way to (world/streets.js).
-  layout.roadCover = coverIndex([top, circuit]);
+  layout.roadCover = coverIndex([top, circuit, ...pieces.builders('Asphalt')]);
+  for (const m of pieces.meshes(THREE, M)) push(out, m, 'routes');
   push(out, meshOf(THREE, top, M.Asphalt, 'Routes'), 'routes');
   push(out, meshOf(THREE, circuit, M.Asphalt, 'Circuit'), 'ile-notre-dame');
   push(out, meshOf(THREE, under, M.Concrete_Dark, 'Dessous_tabliers'), 'routes');
@@ -206,35 +218,48 @@ function ribbon(b, S, i0, i1, yOf, halfAt, down, edges = null) {
 
 // ------------------------------------------------------------ structures --
 
-export function buildStructureMeshes(THREE, layout, S, M) {
+export function buildStructureMeshes(THREE, layout, S, M, opts = {}) {
   const out = [];
-  const concrete = new GeoBuilder();
-  const tunnel = new GeoBuilder();
-  const metal = new GeoBuilder();
-  const fence = new GeoBuilder();
-  const darkConcrete = new GeoBuilder();
-  const asphalt = new GeoBuilder();
-  const stripes = new GeoBuilder();
+  const shared = {
+    concrete: new GeoBuilder(), tunnel: new GeoBuilder(), metal: new GeoBuilder(), fence: new GeoBuilder(),
+    darkConcrete: new GeoBuilder(), asphalt: new GeoBuilder(), stripes: new GeoBuilder(),
+  };
+  const { concrete, tunnel, metal, fence, darkConcrete, asphalt, stripes } = shared;
+  // With opts.split, what stands along a road is that road's, one object
+  // per road and material.
+  const pieces = new Pieces(opts.split);
+  const byId = layout.roadById || {};
+  const MAT = { concrete: 'Concrete', tunnel: 'Tunnel', metal: 'Metal', fence: 'Fence', darkConcrete: 'Concrete_Dark', asphalt: 'Asphalt', stripes: 'Marking_Red' };
+  const of = (road) => {
+    if (!opts.split || road == null) return shared;
+    const r = byId[road] || { id: road };
+    const g = {};
+    for (const k in MAT) g[k] = pieces.of(`ouvrage:${road}`, () => `Ouvrages ${roadLabel(r)}`, { kind: 'ouvrages', road }, MAT[k], shared[k]);
+    return g;
+  };
 
   // Walls: thick polylines, both faces and a top. Tunnel walls are tiled on
   // the face that looks at the road.
   for (const w of S.walls) {
     const tunnelWall = w.kind === 'tunnel';
-    thickWall(concrete, simplifyN(w.pts, TOL), w.thickness, tunnelWall ? tunnel : null, w.side);
+    const B = of(w.road);
+    thickWall(B.concrete, simplifyN(w.pts, TOL), w.thickness, tunnelWall ? B.tunnel : null, w.side);
   }
 
   // Barriers.
   for (const bar of S.barriers) {
-    if (bar.kind === 'guardrail') { guardrail(metal, bar.pts); continue; }
+    const B = of(bar.road);
+    if (bar.kind === 'guardrail') { guardrail(B.metal, bar.pts); continue; }
     const prof = PROFILES[bar.kind] || PROFILES.jersey;
     const pts = simplifyN(bar.pts, TOL);
-    extrude(concrete, pts, prof);
-    if (bar.kind === 'parapet') railOnTop(metal, pts, 1.18);
+    extrude(B.concrete, pts, prof);
+    if (bar.kind === 'parapet') railOnTop(B.metal, pts, 1.18);
   }
 
   // The deck between twin carriageways: a concrete top between their two
   // barriers and, where they are up on pillars, an underside.
   for (const md of S.medians || []) {
+    const { concrete, darkConcrete } = of(md.road);
     for (let i = 0; i + 1 < md.pts.length; i++) {
       const p = md.pts[i], q = md.pts[i + 1];
       const quad = (b, dy, down) => {
@@ -252,6 +277,7 @@ export function buildStructureMeshes(THREE, layout, S, M) {
 
   // Pillars: a column and, under wide decks, a hammerhead cap.
   for (const p of S.pillars) {
+    const { concrete } = of(p.road);
     const ux = p.cap ? p.cap.tx : 1, un = p.cap ? p.cap.tn : 0;
     if (p.twin) {
       for (const [cx, cn] of pillarColumns(p)) concrete.box(cx, cn, p.y0, p.y1, ux, un, p.w / 2, p.w / 2);
@@ -264,6 +290,7 @@ export function buildStructureMeshes(THREE, layout, S, M) {
 
   // Tunnel and cover ceilings, facing down.
   for (const c of S.ceilings) {
+    const { darkConcrete } = of(c.road);
     const r = layout.roadById[c.road];
     const seg = r.samples.slice(c.i0, c.i1 + 1);
     const ys = c.ys;
@@ -272,6 +299,7 @@ export function buildStructureMeshes(THREE, layout, S, M) {
 
   // Cover faces where the trench opens again under a street.
   for (const f of S.fascias) {
+    const { concrete } = of(f.road);
     const dx = f.b[0] - f.a[0], dn = f.b[1] - f.a[1];
     const len = Math.hypot(dx, dn) || 1;
     const ux = dx / len, un = dn / len;
@@ -279,7 +307,10 @@ export function buildStructureMeshes(THREE, layout, S, M) {
   }
 
   // Fences: posts, rails and chain-link.
-  for (const f of S.fences) fenceMesh(f.kind === 'rail' ? null : fence, metal, simplifyN(f.pts, TOL), f.height);
+  for (const f of S.fences) {
+    const B = of(f.road);
+    fenceMesh(f.kind === 'rail' ? null : B.fence, B.metal, simplifyN(f.pts, TOL), f.height);
+  }
 
   // Street bridges over the canal.
   for (const d of S.decks) {
@@ -296,6 +327,7 @@ export function buildStructureMeshes(THREE, layout, S, M) {
   // Closures: a row of barriers across, striped boards, and a sign.
   const signs = [];
   for (const c of S.closures) {
+    const { concrete, metal, stripes } = of(c.road);
     const half = c.width / 2 + 0.5;
     const pts = [];
     for (let k = -1; k <= 1.0001; k += 0.1) pts.push([c.x + c.lx * half * k, c.n + c.ln * half * k, c.y]);
@@ -308,6 +340,7 @@ export function buildStructureMeshes(THREE, layout, S, M) {
     signs.push(closureSign(THREE, M, c));
   }
 
+  for (const m of pieces.meshes(THREE, M)) push(out, m, 'routes');
   push(out, meshOf(THREE, concrete, M.Concrete, 'Structures_beton'), 'routes');
   push(out, meshOf(THREE, darkConcrete, M.Concrete_Dark, 'Plafonds'), 'routes');
   push(out, meshOf(THREE, tunnel, M.Tunnel, 'Tunnel_parois'), 'routes');
@@ -317,6 +350,57 @@ export function buildStructureMeshes(THREE, layout, S, M) {
   push(out, meshOf(THREE, stripes, M.Marking_Red, 'Barricades'), 'routes');
   for (const s of signs) push(out, s, 'routes');
   return out;
+}
+
+/** "s5411-0 Pont de la Concorde": the id finds it in map.json, the name in the scene. */
+export function roadLabel(r) {
+  return r.name ? `${r.id} ${r.name}` : String(r.id);
+}
+
+function roadData(r) {
+  return { kind: r.street ? 'pont-de-rue' : 'route', id: r.id, name: r.name || null, ref: r.ref || null, cls: r.cls, oneway: !!r.oneway, width: r.width };
+}
+
+/**
+ * One builder per object and material, or the shared builder when not split.
+ * An object made of several materials comes out as a group of meshes, one
+ * per material, under the object's name.
+ */
+export class Pieces {
+  constructor(split) { this.split = !!split; this.list = new Map(); }
+  of(key, label, data, mat, fallback) {
+    if (!this.split) return fallback;
+    let p = this.list.get(key);
+    if (!p) this.list.set(key, p = { label: null, data: null, mats: new Map() });
+    if (label && !p.label) { p.label = label(); p.data = data; }
+    let b = p.mats.get(mat);
+    if (!b) p.mats.set(mat, b = new GeoBuilder());
+    return b;
+  }
+  builders(mat) {
+    const out = [];
+    for (const p of this.list.values()) if (p.mats.has(mat)) out.push(p.mats.get(mat));
+    return out;
+  }
+  meshes(THREE, M) {
+    const out = [];
+    for (const [key, p] of this.list) {
+      const parts = [...p.mats].map(([mat, b]) => meshOf(THREE, b, M[mat], `${p.label || key} · ${mat}`)).filter(Boolean);
+      if (!parts.length) continue;
+      if (parts.length === 1) {
+        parts[0].name = p.label || key;
+        parts[0].userData.piece = p.data || {};
+        out.push(parts[0]);
+        continue;
+      }
+      const g = new THREE.Group();
+      g.name = p.label || key;
+      g.userData.piece = p.data || {};
+      g.add(...parts);
+      out.push(g);
+    }
+    return out;
+  }
 }
 
 function push(out, mesh, zone) {
