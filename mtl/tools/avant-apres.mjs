@@ -6,6 +6,7 @@
 //   node mtl/tools/avant-apres.mjs                       → HEAD against the working tree
 //   node mtl/tools/avant-apres.mjs --base origin/main    → against another revision
 //   node mtl/tools/avant-apres.mjs --only decarie-centre,turcot --out DIR --nuit
+//   node mtl/tools/avant-apres.mjs --views vues.json     → other views (as shots.mjs --views)
 //
 // The numbers of tools/filet.mjs say whether something moved; these say what
 // it looks like. Slow (SwiftShader, twice), so not part of check.mjs.
@@ -37,8 +38,9 @@ async function main() {
     git('worktree', 'add', '--detach', tree, sha);
   }
   console.log(`avant : ${BASE} (${sha}), après : la copie de travail`);
-  const before = await shoot({ root: path.join(tree, 'mtl'), views: JUNCTIONS, out: path.join(OUT, 'avant'), day: DAY, only: ONLY, query, clean: true });
-  const after = await shoot({ root: ROOT, views: JUNCTIONS, out: path.join(OUT, 'apres'), day: DAY, only: ONLY, query, clean: true });
+  const views = arg('--views', null) ? JSON.parse(await fs.readFile(arg('--views', null), 'utf8')) : JUNCTIONS;
+  const before = await shoot({ root: path.join(tree, 'mtl'), views, out: path.join(OUT, 'avant'), day: DAY, only: ONLY, query, clean: true });
+  const after = await shoot({ root: ROOT, views, out: path.join(OUT, 'apres'), day: DAY, only: ONLY, query, clean: true });
 
   const { chromium } = await loadPlaywright();
   const browser = await chromium.launch();
