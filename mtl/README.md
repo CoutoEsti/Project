@@ -261,10 +261,16 @@ non.
 - **Ce que ça ne fait pas encore** : l'image est la même qu'avant. Le gain
   vient ensuite : plus d'objets à l'écran (calcul sur la carte graphique),
   meilleurs effets de nuit.
-- **Correctif local** : `vendor/three.webgpu.min.js` est la r185 avec une
-  ligne changée (`this.swizzle=void 0` au lieu de `"rgba"`, deux fois) : la
-  r185 passe ce champ à `createView`, et un Chrome qui a l'ancienne forme de
-  ce champ plante dessus (vu sur Chromium 141). À refaire si on met three.js à jour.
+- **Correctifs locaux** : `vendor/three.webgpu.min.js` est la r185 avec deux
+  changements, à refaire si on met three.js à jour :
+  - `this.swizzle=void 0` au lieu de `"rgba"` (deux fois) : la r185 passe ce
+    champ à `createView`, et un Chrome qui a l'ancienne forme de ce champ
+    plante dessus (vu sur Chromium 141).
+  - Dans le code des `InstancedMesh` (fonction qui teste
+    `getUniformBufferLimit()`), les matrices d'instances passent toujours par
+    l'attribut, jamais par un tableau uniforme. Le tableau met le nombre
+    d'instances dans le shader : un shader par objet instancié (165 au départ,
+    +167 en survolant l'île, autant de saccades). Avec l'attribut : 60, +7.
 - **Tester sans carte graphique** : Chromium headless a besoin de
   `--enable-unsafe-webgpu --enable-features=Vulkan --use-vulkan=swiftshader
   --use-webgpu-adapter=swiftshader` ; `check.mjs` et `shots.mjs` les passent.

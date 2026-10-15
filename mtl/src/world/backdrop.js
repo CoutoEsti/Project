@@ -121,6 +121,10 @@ function skylinePanel(THREE, layout) {
   mesh.onBeforeRender = (renderer, scene, camera) => {
     mesh.position.set(camera.position.x, 0, camera.position.z);
     mesh.updateMatrixWorld();
+    // Painted for eyes near the ground: from the air it reads as a ring
+    // drawn round the city, dark by night. Gone above the panel's middle.
+    const y = camera.position.y;
+    mat.opacity = 1 - Math.min(1, Math.max(0, (y - 300) / 200));
     if (scene.fog) {
       const lum = scene.fog.color.r * 0.3 + scene.fog.color.g * 0.59 + scene.fog.color.b * 0.11;
       tint.copy(scene.fog.color).multiplyScalar(lum > 0.2 ? 0.9 : 1.5);
