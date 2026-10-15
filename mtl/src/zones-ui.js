@@ -1,6 +1,6 @@
 // zones.html — draw the part of Montréal to play. A flat plan of the real
 // streets and water, and shapes on top of it (polygon, freehand, rectangle,
-// ellipse); their union is the zone. The zone leaves as ?forme=… in the page's
+// ellipse) and routes (a road kept alone, map/routes.js); their union is the zone. The zone leaves as ?forme=… in the page's
 // address (shareable), in localStorage, and as a JSON to paste in carte.json.
 //
 // Frame: the game's own — metres, x east, n north, origin at Peel and
@@ -9,6 +9,7 @@
 import * as G from './map/geom.js';
 import { decodeRoads, decodeSurfaces, decodeBuildings, fetchReader } from './map/source.js';
 import { ZONES, makeZone, normalizeShape, encodeShape, decodeShape } from './map/zones.js';
+import { buildRoadGraph, pickRoad, routeBetween, twinRoute, roadHalf, ROUTE_MARGIN } from './map/routes.js';
 
 const $ = (id) => document.getElementById(id);
 const KEY = 'mtl.zones.v1';
@@ -18,6 +19,7 @@ const REGION = { x0: -5000, n0: -4200, x1: 7200, n1: 7200 };   // what the data 
 
 const S = {
   shapes: [],               // { kind: 'poly' | 'rect' | 'ellipse', pts: [[x, n]…], p?: { cx, cn, w, h, rot } }
+                            // or { kind: 'route', pts: centre line, h: half width, nom }
   sel: -1,
   tool: 'select',
   nom: '',
@@ -25,8 +27,11 @@ const S = {
   draft: null,              // a polygon being clicked out: { pts }, or a drag in progress
   drag: null,
   cursor: null,             // world position of the pointer
+  from: null,               // route tool: where the next piece starts (a pickRoad point)
+  pick: null,               // route tool: the street under the pointer
+  preview: null,            // route tool: the way from `from` to `pick`
 };
-const data = { roads: [], water: [], green: [], quartiers: [], centroids: null, ready: false };
+const data = { roads: [], water: [], green: [], quartiers: [], centroids: null, graph: null, ready: false };
 
 // -------------------------------------------------------------- shapes ------
 
@@ -62,7 +67,18 @@ function moveShape(sh, dx, dn) {
 }
 
 function polygons() {
-  return S.shapes.map((s) => s.pts).filter((r) => r.length >= 3);
+  return S.shapes.filter((s) => s.kind !== 'route').map((s) => s.pts).filter((r) => r.length >= 3);
+}
+
+const isRoute = (sh) => sh && sh.kind === 'route';
+
+function routeDist(sh, x, n) {
+  let best = Infinity;
+  for (let i = 0; i + 1 < sh.pts.length; i++) {
+    const a = sh.pts[i], b = sh.pts[i + 1];
+    best = Math.min(best, G.segDist2(x, n, a[0], a[1], b[0], b[1]).d2);
+  }
+  return Math.sqrt(best);
 }
 
 // --------------------------------------------------------------- view -------
@@ -169,9 +185,20 @@ function drawBase() {
   c.fillStyle = d ? 'rgba(255,255,255,.5)' : 'rgba(0,0,0,.55)';
   c.font = '11px system-ui, sans-serif';
   for (const z of Object.values(ZONES)) {
-    const [a, b, e, f] = z.box;
-    c.strokeRect(sx(a), sy(f), (e - a) * ppm, (f - b) * ppm);
-    c.fillText(z.nom, sx(a) + 4, sy(f) + 13);
+    if (z.box) {
+      const [a, b, e, f] = z.box;
+      c.strokeRect(sx(a), sy(f), (e - a) * ppm, (f - b) * ppm);
+      c.fillText(z.nom, sx(a) + 4, sy(f) + 13);
+      continue;
+    }
+    for (const ring of z.poly) {
+      c.beginPath();
+      ring.forEach(([x, n], i) => (i ? c.lineTo(sx(x), sy(n)) : c.moveTo(sx(x), sy(n))));
+      c.closePath();
+      c.stroke();
+    }
+    const [x, n] = z.poly[0].reduce((m, p) => (p[1] > m[1] ? p : m));
+    c.fillText(z.nom, sx(x) + 4, sy(n) + 13);
   }
   c.setLineDash([]);
   c.beginPath();
@@ -220,6 +247,7 @@ function drawOver() {
   c.setTransform(dpr, 0, 0, dpr, 0, 0);
   c.clearRect(0, 0, W, H);
   S.shapes.forEach((sh, i) => {
+    if (isRoute(sh)) return;
     path(c, sh.pts);
     c.fillStyle = i === S.sel ? 'rgba(255,176,58,.30)' : 'rgba(255,176,58,.20)';
     c.fill();
@@ -227,6 +255,31 @@ function drawOver() {
     c.lineWidth = i === S.sel ? 2.5 : 1.6;
     c.stroke();
   });
+  // Routes: the corridor the zone keeps, and the road down its middle.
+  c.lineCap = 'round'; c.lineJoin = 'round';
+  S.shapes.forEach((sh, i) => {
+    if (!isRoute(sh)) return;
+    line(c, sh.pts);
+    c.strokeStyle = i === S.sel ? 'rgba(255,176,58,.5)' : 'rgba(255,176,58,.32)';
+    c.lineWidth = Math.max(4, sh.h * 2 * S.view.ppm);
+    c.stroke();
+    c.strokeStyle = ACCENT;
+    c.lineWidth = i === S.sel ? 2.5 : 1.5;
+    c.stroke();
+  });
+  if (S.tool === 'route') {
+    if (S.preview) {
+      c.setLineDash([6, 4]); c.strokeStyle = ACCENT; c.lineWidth = 2.5;
+      for (const r of S.preview) { line(c, r.pts); c.stroke(); }
+      c.setLineDash([]);
+    }
+    for (const p of [S.from, S.pick]) {
+      if (!p) continue;
+      c.beginPath(); c.arc(sx(p.x), sy(p.n), p === S.from ? 6 : 4, 0, Math.PI * 2);
+      c.fillStyle = p === S.from ? ACCENT : '#fff'; c.fill();
+      c.strokeStyle = '#1b1204'; c.lineWidth = 1.5; c.stroke();
+    }
+  }
   // The draft.
   const dr = S.draft;
   if (dr) {
@@ -246,7 +299,7 @@ function drawOver() {
   }
   // Handles of the chosen shape.
   const sh = S.shapes[S.sel];
-  if (sh && S.tool === 'select') {
+  if (sh && !isRoute(sh) && S.tool === 'select') {
     for (const h of handles(sh)) {
       c.beginPath();
       if (h.type === 'vertex') c.arc(h.px, h.py, 5, 0, Math.PI * 2);
@@ -261,6 +314,11 @@ function drawOver() {
     const rp = rotateHandle(sh);
     c.strokeStyle = ACCENT; c.lineWidth = 1; c.beginPath(); c.moveTo(tp[0], tp[1]); c.lineTo(rp[0], rp[1]); c.stroke();
   }
+}
+
+function line(c, pts) {
+  c.beginPath();
+  pts.forEach((p, i) => (i ? c.lineTo(sx(p[0]), sy(p[1])) : c.moveTo(sx(p[0]), sy(p[1]))));
 }
 
 function path(c, pts) {
@@ -333,6 +391,7 @@ over.addEventListener('pointermove', (e) => {
     invalidate();
     return;
   }
+  if (S.tool === 'route' && !S.drag) hoverRoute(p);
   if (S.drag) move(p, e); else if (S.draft && S.draft.kind === 'poly') invalidate(false);
   over.style.cursor = S.drag ? 'grabbing' : S.tool === 'select' ? cursorFor(p) : 'crosshair';
 });
@@ -358,7 +417,8 @@ addEventListener('keydown', (e) => {
   if (e.target instanceof HTMLInputElement) return;
   if (e.code === 'Space') { spaceDown = true; e.preventDefault(); return; }
   const k = e.key.toLowerCase();
-  if (k === 'escape') { S.draft = null; S.drag = null; setTool('select'); invalidate(false); }
+  if (k === 'escape' && S.tool === 'route' && S.from) { S.from = null; S.preview = null; invalidate(false); }
+  else if (k === 'escape') { S.draft = null; S.drag = null; setTool('select'); invalidate(false); }
   else if (k === 'enter') finishPoly(false);
   else if ((k === 'delete' || k === 'backspace') && S.sel >= 0) removeSel();
   else if (k === 'v') setTool('select');
@@ -366,6 +426,7 @@ addEventListener('keydown', (e) => {
   else if (k === 'd') setTool('free');
   else if (k === 'r') setTool('rect');
   else if (k === 'o') setTool('ellipse');
+  else if (k === 't') setTool('route');
   else if (k === 'z' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); undo(); }
 });
 addEventListener('keyup', (e) => { if (e.code === 'Space') spaceDown = false; });
@@ -373,6 +434,7 @@ addEventListener('keyup', (e) => { if (e.code === 'Space') spaceDown = false; })
 const grab = () => (matchMedia('(pointer: coarse)').matches ? 16 : 10);
 
 function pickHandle(sh, p) {
+  if (isRoute(sh)) return null;
   let best = null, bd = grab();
   for (const h of handles(sh)) {
     const d = Math.hypot(h.px - p[0], h.py - p[1]);
@@ -384,7 +446,12 @@ function pickHandle(sh, p) {
 }
 
 function shapeAt(x, n) {
-  for (let i = S.shapes.length - 1; i >= 0; i--) if (G.pointInRing(x, n, S.shapes[i].pts)) return i;
+  // Routes first: they lie over the polygons, and are thin.
+  for (let i = S.shapes.length - 1; i >= 0; i--) {
+    const sh = S.shapes[i];
+    if (isRoute(sh) && routeDist(sh, x, n) <= Math.max(sh.h, grab() / S.view.ppm)) return i;
+  }
+  for (let i = S.shapes.length - 1; i >= 0; i--) if (!isRoute(S.shapes[i]) && G.pointInRing(x, n, S.shapes[i].pts)) return i;
   return -1;
 }
 
@@ -425,6 +492,7 @@ function down(p, e, pan) {
     invalidate(false);
     return;
   }
+  if (S.tool === 'route') { clickRoute(p); return; }
   if (S.tool === 'free') { S.drag = { type: 'free' }; S.draft = { kind: 'free', pts: [[x, n]] }; return; }
   if (S.tool === 'rect' || S.tool === 'ellipse') {
     S.drag = { type: 'box', a: [x, n] };
@@ -445,7 +513,13 @@ function down(p, e, pan) {
     }
   }
   const hit = shapeAt(x, n);
-  if (hit >= 0) {
+  if (hit >= 0 && isRoute(S.shapes[hit])) {
+    // A route follows the streets: chosen, never dragged off them.
+    S.sel = hit;
+    syncButtons();
+    S.drag = { type: 'pan', from: p, cx: S.view.cx, cn: S.view.cn };
+    invalidate(false);
+  } else if (hit >= 0) {
     S.sel = hit;
     snapshot();
     S.drag = { type: 'move', from: [x, n], moved: false };
@@ -543,6 +617,49 @@ function addShape(sh) {
   changed();
 }
 
+// ------------------------------------------------------------- routes -------
+
+/** The street under a screen point, within a few pixels. */
+function streetAt(p) {
+  if (!data.graph) return null;
+  return pickRoad(data.graph, wx(p[0]), wn(p[1]), Math.max(2, 14 / S.view.ppm));
+}
+
+const roadName = (r) => [r.name, r.ref].filter(Boolean).join(' · ') || 'rue sans nom';
+
+function hoverRoute(p) {
+  S.pick = streetAt(p);
+  S.preview = null;
+  if (S.pick) {
+    const r = data.graph.edges[S.pick.e].road;
+    $('hover').textContent = roadName(r) + (S.from ? ' — clic : garder jusqu’ici' : ' — clic : la route commence ici');
+    if (S.from) {
+      const way = routeBetween(data.graph, S.from, S.pick);
+      if (way) S.preview = [way];
+    }
+  } else if (!data.graph) $('hover').textContent = 'Chargement des rues…';
+  invalidate(false);
+}
+
+function clickRoute(p) {
+  const at = streetAt(p);
+  if (!at) return;
+  if (!S.from) { S.from = at; invalidate(false); return; }
+  const way = routeBetween(data.graph, S.from, at);
+  if (!way) { $('warn').textContent = 'Pas de chemin par les rues entre ces deux points.'; return; }
+  snapshot();
+  const half = (w) => Math.ceil(Math.max(...w.edges.map((e) => roadHalf(e.road))) + ROUTE_MARGIN);
+  const nom = roadName(data.graph.edges[S.from.e].road);
+  S.shapes.push({ kind: 'route', pts: way.pts, h: half(way), nom });
+  // A divided road: the other carriageway between the same two places.
+  const twin = twinRoute(data.graph, S.from, at, way);
+  if (twin) S.shapes.push({ kind: 'route', pts: twin.pts, h: half(twin), nom });
+  S.sel = S.shapes.length - 1;
+  S.from = at;       // the next click carries on from here
+  S.preview = null;
+  changed();
+}
+
 function finishPoly(fromDouble) {
   const dr = S.draft;
   if (!dr || dr.kind !== 'poly') return;
@@ -565,6 +682,7 @@ function removeSel() {
 function setTool(t) {
   S.tool = t;
   if (t !== 'poly') { S.draft = S.draft && S.draft.kind === 'poly' ? null : S.draft; $('finish').hidden = true; }
+  if (t !== 'route') { S.from = null; S.pick = null; S.preview = null; }
   for (const b of document.querySelectorAll('[data-tool]')) b.classList.toggle('on', b.dataset.tool === t);
   over.style.cursor = t === 'select' ? 'grab' : 'crosshair';
   invalidate(false);
@@ -595,9 +713,12 @@ $('clear').addEventListener('click', () => {
 });
 document.querySelectorAll('[data-preset]').forEach((b) => b.addEventListener('click', () => {
   const z = ZONES[b.dataset.preset];
-  const [x0, n0, x1, n1] = z.box;
   snapshot();
-  S.shapes = [paramShape('rect', (x0 + x1) / 2, (n0 + n1) / 2, x1 - x0, n1 - n0)];
+  if (z.poly) S.shapes = z.poly.map((pts) => ({ kind: 'poly', pts: pts.map((p) => p.slice()) }));
+  else {
+    const [x0, n0, x1, n1] = z.box;
+    S.shapes = [paramShape('rect', (x0 + x1) / 2, (n0 + n1) / 2, x1 - x0, n1 - n0)];
+  }
   S.sel = 0;
   if (!S.nom) { S.nom = z.nom; $('nom').value = S.nom; }
   changed();
@@ -609,9 +730,12 @@ $('nom').addEventListener('input', () => { S.nom = $('nom').value; changed(false
 // ------------------------------------------------------ persistence, stats --
 
 function shape() {
-  const poly = polygons().map((r) => r.map(([x, n]) => [Math.round(x), Math.round(n)]));
-  return { nom: S.nom.trim(), poly };
+  const round = (r) => r.map(([x, n]) => [Math.round(x), Math.round(n)]);
+  const poly = polygons().map(round);
+  const routes = S.shapes.filter(isRoute).map((sh) => ({ h: sh.h, pts: round(G.simplify(sh.pts, 0.5)) }));
+  return routes.length ? { nom: S.nom.trim(), poly, routes } : { nom: S.nom.trim(), poly };
 }
+const filled = (f) => f.poly.length > 0 || !!f.routes;
 
 let statTimer = 0;
 function changed(pushHistory = true) {
@@ -620,11 +744,11 @@ function changed(pushHistory = true) {
   const f = shape();
   try { localStorage.setItem(KEY, JSON.stringify({ nom: S.nom, shapes: S.shapes })); } catch (e) { /* private mode: not remembered */ }
   try {
-    const code = f.poly.length ? encodeShape(f) : '';
+    const code = filled(f) ? encodeShape(f) : '';
     history_replace(code);
     $('play').href = code ? `index.html?forme=${code}` : 'index.html';
   } catch (e) { /* the address is a courtesy */ }
-  $('play').classList.toggle('primary', f.poly.length > 0);
+  $('play').classList.toggle('primary', filled(f));
   clearTimeout(statTimer);
   statTimer = setTimeout(stats, 120);
 }
@@ -638,12 +762,12 @@ function history_replace(code) {
 
 function stats() {
   const f = shape();
-  const zone = f.poly.length ? makeZone(f) : null;
+  const zone = filled(f) ? makeZone(f) : null;
   const fmt = (v, d = 0) => v.toLocaleString('fr-CA', { maximumFractionDigits: d, minimumFractionDigits: d });
   const w = [];
   if (!zone) {
     for (const id of ['s-area', 's-bld', 's-len', 's-roads']) $(id).textContent = '—';
-    $('warn').textContent = f.poly.length ? 'Forme sans surface.' : 'Dessine une forme pour commencer.';
+    $('warn').textContent = filled(f) ? 'Forme sans surface.' : 'Dessine une forme ou choisis une route pour commencer.';
     return;
   }
   const km2 = zone.area / 1e6;
@@ -677,8 +801,8 @@ function stats() {
 
 $('export').addEventListener('click', () => {
   const f = shape();
-  if (!f.poly.length) return;
-  const doc = { zone: { nom: f.nom || 'Ma zone', poly: f.poly }, echelle: 100 };
+  if (!filled(f)) return;
+  const doc = { zone: { ...f, nom: f.nom || 'Ma zone' }, echelle: 100 };
   const blob = new Blob([JSON.stringify(doc, null, 1) + '\n'], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -706,19 +830,23 @@ function load() {
   const params = new URLSearchParams(location.search);
   let init = null;
   if (params.get('forme')) init = decodeShape(params.get('forme'));
-  else if (params.get('zone') && ZONES[params.get('zone')]) init = { nom: ZONES[params.get('zone')].nom, box: ZONES[params.get('zone')].box };
+  else if (params.get('zone') && ZONES[params.get('zone')]) {
+    const z = ZONES[params.get('zone')];
+    init = { nom: z.nom, box: z.box, poly: z.poly && z.poly.map((r) => r.map((p) => p.slice())), routes: z.routes };
+  }
   if (init) {
     S.nom = init.nom || '';
     S.shapes = init.box
       ? [paramShape('rect', (init.box[0] + init.box[2]) / 2, (init.box[1] + init.box[3]) / 2, init.box[2] - init.box[0], init.box[3] - init.box[1])]
       : init.poly.map((pts) => ({ kind: 'poly', pts }));
+    for (const r of init.routes || []) S.shapes.push({ kind: 'route', pts: r.pts, h: r.h, nom: '' });
     return true;
   }
   try {
     const saved = JSON.parse(localStorage.getItem(KEY) || 'null');
     if (saved && Array.isArray(saved.shapes)) {
       S.nom = saved.nom || '';
-      S.shapes = saved.shapes.filter((s) => Array.isArray(s.pts) && s.pts.length >= 3);
+      S.shapes = saved.shapes.filter((s) => Array.isArray(s.pts) && s.pts.length >= (isRoute(s) ? 2 : 3));
       return S.shapes.length > 0;
     }
   } catch (e) { /* nothing remembered */ }
@@ -739,6 +867,7 @@ async function loadData() {
     data.roads = { major: Float32Array.from(buckets.major), mid: Float32Array.from(buckets.mid), minor: Float32Array.from(buckets.minor) };
     // Estimates count what the game builds: streets a car can drive, not the alleys' worth of footpaths.
     data.wayList = roads.filter((r) => r.cls !== 'pedestrian').map((r) => r.pts);
+    data.graph = buildRoadGraph(roads);
     const s = decodeSurfaces(surf);
     const box = (poly) => { const b = G.ringBBox(poly[0][0]); for (const p of poly) { const c = G.ringBBox(p[0]); b.x0 = Math.min(b.x0, c.x0); b.n0 = Math.min(b.n0, c.n0); b.x1 = Math.max(b.x1, c.x1); b.n1 = Math.max(b.n1, c.n1); } return b; };
     data.water = s.water.map((w) => ({ poly: w.poly, bb: box(w.poly) }));

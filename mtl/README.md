@@ -23,15 +23,25 @@ Deux réglages, dans le bouton **Carte…** en haut (la page se reconstruit) :
 
 | Zone | Contenu |
 |---|---|
+| `coeur` (par défaut) | la carte de jeu : centre-ville, Vieux-Montréal, Vieux-Port, mont Royal, Saint-Henri, Turcot, les îles, la tête du pont Jacques-Cartier à Longueuil (36 km²) |
 | `centre` | centre-ville, Vieux-Montréal, Vieux-Port, Plateau, mont Royal, Ville-Marie, les îles (~7 × 7 km) |
 | `anneau` | le centre, plus Décarie, la Métropolitaine (A-40), Turcot, le Stade (~12 × 11 km) |
+
+`coeur` est un polygone, pas un rectangle : une forme qu'on lit d'un coup
+d'œil, comme la carte d'un monde ouvert. Le fleuve au sud et à l'est, le mont
+Royal au nord, Turcot à l'ouest, le canal de Lachine sous Saint-Henri. Les
+ponts qui mènent aux îles et à la rive sud restent entiers ; ceux qui sortent
+de la carte (Victoria, Champlain par Bonaventure) s'arrêtent sur une barrière.
+Décarie, la 40 et le Stade n'y sont pas : ils restent dans `anneau`.
 
 **Échelle** : 100 % (la vraie ville), 85 % ou 70 %. En dessous de 100 %,
 tout rapetisse d'autant — rues, bâtiments, relief — sauf la voiture et les
 dégagements sous les ponts et dans les tunnels, qui restent en vrais mètres.
 
-La valeur de départ est dans `carte.json` ; l'adresse la remplace :
-`?zone=centre&echelle=85` (ou `#centre-85`).
+La valeur de départ est dans `carte.json`. Le jeu se souvient ensuite de la
+dernière carte jouée sur ce navigateur (zone nommée ou dessinée, et échelle)
+et la recharge tant qu'on n'en choisit pas une autre. L'adresse l'emporte sur
+les deux : `?zone=centre&echelle=85` (ou `#centre-85`).
 
 ### Dessiner sa propre zone
 
@@ -43,9 +53,21 @@ pour un polygone, se déforme sommet par sommet (« En polygone » pour un
 rectangle ou une ellipse). Plusieurs formes = leur union. La page donne la
 surface en km² et une **estimation** des bâtiments et des rues gardés.
 
+**Outil Route** (touche T) : pour garder une route précise et rien autour —
+l'autoroute entre deux quartiers, un pont, une rue de liaison. Un clic sur la
+rue où elle commence, puis un clic à chaque endroit où elle passe : le tracé
+suit les rues réelles (graphe des rues, sens uniques respectés, il reste sur la
+même route quand il peut) et, sur une route à chaussées séparées, prend aussi
+l'autre sens. Échap termine. Le nom de la rue sous le curseur s'affiche avant
+le clic ; zoomer pour viser juste dans les échangeurs. Chaque tronçon devient un
+couloir : la chaussée plus 9 m de chaque côté (`map/routes.js`). Les rues qui le
+croisent sont coupées à son bord comme à n'importe quel contour. En ville, hors
+des formes, on ne voit que le décor en blocs.
+
 - **Jouer cette zone** ouvre `index.html?forme=…` ; le code est un polygone
-  arrondi au mètre, en base64url, donc le lien de la page se partage tel quel.
-- **Exporter** télécharge `{ "zone": { "nom", "poly" }, "echelle": 100 }` : à
+  arrondi au mètre (et les routes : ligne centrale et demi-largeur), en
+  base64url, donc le lien de la page se partage tel quel.
+- **Exporter** télécharge `{ "zone": { "nom", "poly", "routes" }, "echelle": 100 }` : à
   coller dans `carte.json` pour en faire la zone de départ.
 - La zone est aussi gardée dans `localStorage`.
 
@@ -55,6 +77,36 @@ l'impression que la ville continue : les vrais bâtiments hors zone (de 25 à
 1 500 m) réduits à des blocs, plus un horizon peint qui suit la caméra. Ce
 décor coûte 2 appels de rendu et ~10 triangles par bloc (`world/backdrop.js`),
 sans collision. Les zones `centre` et `anneau` restent des rectangles.
+
+### Mes objets : bâtiments et objets faits à la main
+
+`objets.html` (lien « Mes objets… » dans **Carte…**) place tes propres modèles
+`.glb` sur le plan : un bâtiment fait dans Blender, un banc téléchargé.
+
+1. **Ajouter des .glb…** (ou glisser le fichier sur le plan). glTF **binaire**,
+   sans compression Draco ; idéalement moins de 5 Mo. Un modèle de plus de
+   400 m de large est pris pour des centimètres et posé à l'échelle 0,01.
+2. **Placer**, puis glisser l'objet pour le déplacer, la poignée ronde pour le
+   tourner (crans de 15°, Maj pour tourner librement), la poignée carrée pour
+   l'agrandir ; ou taper X, N, rotation, échelle et hauteur dans le panneau.
+   Flèches : 1 m (Maj : 10 m), Q / E : 15°, Ctrl+D dupliquer, Ctrl+Z annuler.
+   Les bâtiments générés qu'il va remplacer sont en rouge.
+3. **Voir dans le jeu** ouvre `index.html?objets=local&voir=x,n` : le jeu avec
+   tes objets, sur ce navigateur seulement (copie de travail dans
+   `localStorage` et IndexedDB).
+4. **Exporter (.zip)** : `objets.json` et le dossier `objets/`, à mettre dans
+   `mtl/`. C'est ce que tous les joueurs chargent ; le même fichier pour tout
+   le monde, donc compatible avec le multijoueur.
+
+Ce que le jeu fait de chaque objet (`map/objets.js`, `world/objets.js`) :
+il aplanit le sol dessous (case « Aplanir le sol »), avant que les rues et les
+routes ne lisent le relief ; il retire les bâtiments générés et les arbres
+qu'il recouvre ; il lui donne des collisions, mesurées sur le modèle entre
+0,35 et 4 m au-dessus de sa base (comme les repères). Ces contours sont
+calculés par l'éditeur et écrits dans `objets.json` : le jeu n'a pas besoin
+d'ouvrir le modèle pour construire la carte, et `check.mjs` le vérifie sous
+node. Un objet ne glisse jamais hors d'une rue : il reste où on l'a mis.
+Sans `objets.json`, ou avec un modèle illisible, le monde se construit sans.
 
 ## Contrôles
 
@@ -67,7 +119,7 @@ sans collision. Les zones `centre` et `anneau` restent des rectangles.
 | clic droit + glisser | orbiter la caméra autour de la voiture (poursuite et lointaine) ; au relâchement, elle revient doucement derrière |
 | V ou 1 / 2 / 3 | changer de voiture (ou les boutons en bas de l’écran) |
 | M | grande carte ; un clic y téléporte |
-| N | nuit / jour |
+| N | ciel : suit l'horloge → nuit → jour |
 | F | vol libre (ou le bouton **Vol libre** en haut) |
 | E | exporter pour Unity (un `.zip` : `.glb` + `map.json`) |
 
@@ -106,12 +158,19 @@ La voiture reste où elle est ; la vitesse suit l'altitude.
 | F | revenir à la voiture |
 
 Autres paramètres d'URL : `?voiture=1|2|3`, `?spawn=decarie|metropolitaine|ville-marie|centre-ville|vieux-port|plateau|camillien-houde|jacques-cartier|stade|circuit`,
-`?day=1`, `?low=1` (réglages téléphone), `?fly=1` ou `#vol` (démarrer en vol
+`?day=1`, `?nuit=1`, `?cycle=<s>`, `?pluie=0..1` (voir « La nuit »), `?low=1` (réglages téléphone), `?fly=1` ou `#vol` (démarrer en vol
 libre), `?cam=x,n,h,tx,tn,th` (vol libre à un point précis).
 
 ## La nuit
 
-Le jeu se passe de nuit (N bascule le jour, pour lire la carte). Low poly,
+Le jeu se passe surtout de nuit. Le ciel suit une horloge commune
+(`world/daycycle.js`) : un cycle de 20 minutes, **15 min de nuit**, 45 s de
+crépuscule, **3 min 30 de jour**, 45 s d'aube. Comme il ne dépend que de
+l'heure de l'ordinateur, tous les joueurs voient le même ciel et la même pluie
+sans rien s'échanger (multijoueur). N fige la nuit, puis le jour, puis revient
+à l'horloge. `?nuit=1` ou `?day=1` figent le ciel, `?cycle=232` le fige à ce
+nombre de secondes dans le cycle (232 : plein crépuscule), `?pluie=0..1` force
+la pluie. Low poly,
 mais détaillé, et une couleur qui donne le ton sans faire futuriste : la
 Montréal humide d'un soir d'été, où les enseignes gagnent sur le sodium.
 
@@ -139,14 +198,39 @@ Montréal humide d'un soir d'été, où les enseignes gagnent sur le sodium.
   dans le vertex shader. Pas de vrais reflets (trop cher sur téléphone). Vues
   d'en haut, les flaques s'élargissent et s'éclairent : ce sont elles qui
   dessinent les rues la nuit.
+- **Crépuscule et aube** : ciel, brume, soleil rasant orangé et
+  environnement mélangés en continu ; lampadaires, fenêtres et flaques de
+  lumière s'allument progressivement. L'environnement réfléchi est recalculé
+  par paliers (toutes les ~2 s pendant la transition, moins sur téléphone).
+- **Pluie** : environ une nuit sur trois, choisie par le numéro du cycle
+  (la même pour tous), quelques minutes après la tombée de la nuit, avec une
+  entrée et une sortie de 40 s. Gouttes en traits autour de la caméra (un
+  seul appel de rendu, 6 000 traits, 2 500 sur téléphone), brume plus dense
+  et plus grise, chaussée plus sombre et plus lisse.
+- **Flou de vitesse** : au-delà de 110 km/h, les bords de l'image filent
+  vers l'extérieur (plein effet à 260 km/h) ; le centre reste net. Une passe
+  plein écran de huit lectures, coupée sur téléphone et en vol libre.
 - **Éclairage** : LED blanc froid sur les artères et les autoroutes, sodium
   orange dans les rues résidentielles, lanternes dans le Vieux.
+- **Fenêtres en creux** : la vitre est lue 7 à 24 cm derrière le mur, selon
+  l'angle de vue (parallaxe dans le shader des façades, aucune géométrie) ;
+  de biais, le tableau et le dessous du linteau apparaissent.
+- **Portes et relief** : sur la brique et la pierre, environ un rez-de-chaussée
+  sur trois a une porte peinte (cadre, panneaux, imposte vitrée, poignée),
+  en creux comme les fenêtres. Joints, cadres et allèges sont en relief
+  (normale perturbée dans le shader, s'efface au loin) : aucun triangle de plus.
+- **Plex** : galeries à chaque étage avec garde-corps ajourés, escalier
+  extérieur quand la cour le permet, corniche avant. Les galeries peuvent
+  surplomber le trottoir, jamais la chaussée ; l'escalier, qui touche le sol,
+  reste hors du trottoir.
 - **Détails** : corniches sur les toits plats, blocs techniques, couronnes
   lumineuses et feux d'avion clignotants sur les tours.
 - **Sol** (textures générées) : asphalte à granulat fin dont la répétition
   est cassée par un second échantillon plus large ; trottoirs en dalles de
   1,5 m bordés d'une bordure plus claire (même maillage, couleurs de sommet :
-  aucun appel de rendu en plus) ; toits en mosaïque de gris.
+  aucun appel de rendu en plus) ; toits en mosaïque de gris. Le trottoir est
+  12 cm au-dessus de la chaussée (`KERB_H`, `layout.js`), avec une face de
+  bordure verticale ; la physique le voit aussi (`sidewalkAt`, `surface.js`).
 - **Ouvrages** : carreaux des tunnels et dessous de tabliers légèrement
   éclairés la nuit ; houppiers des arbres ombrés par-dessous, sans facettes.
 
@@ -231,14 +315,59 @@ Rafraîchir les données (réseau requis, ~5 min) :
 ## Contrôles avant de commiter
 
 ```bash
-node mtl/tools/check.mjs                         # ~40 s : profils, repères, conduite
+node mtl/tools/check.mjs                         # ~2 min : profils, repères, conduite, filet
+node mtl/tools/check.mjs --vise decarie          # la modif vise Décarie : la carte peut changer là, nulle part ailleurs
 node mtl/tools/check.mjs --zone centre --echelle 85
 node mtl/tools/check.mjs --browser               # + la vraie page dans Chromium headless
 node mtl/tools/shots.mjs --day                   # captures → mtl/.shots/
 node mtl/tools/plan.mjs --png                    # régénère docs/plan.png
 node mtl/tools/export.mjs                        # export Unity → mtl/export/
 node mtl/tools/voitures.mjs                      # pointes des trois voitures (±5 %) et changement en roulant
+node mtl/tools/artefacts.mjs --zone coeur        # murs, glissières, bâtiments plantés sur la chaussée, et trous
+node mtl/tools/filet.mjs --vise decarie          # le filet seul, sur anneau et coeur
+node mtl/tools/filet.mjs --accepter              # les chiffres actuels deviennent la référence
+node mtl/tools/avant-apres.mjs                   # captures des jonctions, HEAD contre la copie de travail
 ```
+
+### Le filet de sécurité (`tools/filet.mjs`)
+
+Les jonctions se réparaient au cas par cas, et chaque rustine en cassait une
+autre ailleurs, sans qu'aucun contrôle ne le voie : deux corrections de
+Décarie passaient `check.mjs` (18/18) en retirant 4,5 km de bordures de
+viaduc à l'autre bout de la carte. Le filet mesure toute la carte et la
+compare à une référence commitée (`tools/filet/anneau.json`,
+`tools/filet/coeur.json`), cellule de 40 m par cellule de 40 m :
+
+| mesure | ce que c'est |
+|---|---|
+| `trou` | sous les roues, rien ou une surface 0,6 m plus bas (m²) |
+| `fente` | une bande vide entre deux chaussées côte à côte au même niveau (m) |
+| `obstacle` | mur, glissière, pilier, bâtiment sur la chaussée, à hauteur de voiture (m) |
+| `bout` | bout de route qui donne sur le vide (nombre) |
+| `sol` | relief dessiné au-dessus d'une route ouverte (m) |
+| `niveau` | point de route où la voiture ne tient pas à la hauteur de la route |
+| `mur …`, `glissière …`, `dalle`, `pilier` | longueur de chaque genre de structure (m) |
+
+Il échoue si une cellule change **hors** des zones nommées par `--vise` (dans
+un sens comme dans l'autre : des murs qui disparaissent loin de la modif,
+c'est une règle trop large), si un défaut **augmente**, même dans la zone
+visée, ou si les murs bougent un peu partout (plus de 25 m au total hors
+zone). Dans la zone visée, les murs peuvent changer et les défauts baisser :
+c'est la correction. Lieux connus de `--vise` : `decarie`, `turcot`,
+`savane`, `ville-marie`, `jacques-cartier`, `concorde` ; ou une boîte
+`x0,n0,x1,n1` en mètres. Après avoir regardé ce qui change (le rapport liste
+les endroits, et `avant-apres.mjs` les montre), `--accepter` écrit la
+nouvelle référence, à commiter avec la modif.
+
+Vérifié sur les deux corrections annulées le 9 octobre : le filet les refuse
+(667 cellules changent hors de Décarie sur `anneau`, +1,8 km d'obstacles sur
+la chaussée), là où `check.mjs` les laissait passer.
+
+`avant-apres.mjs` photographie neuf jonctions fixes (Décarie centre, terre-plein, nord et
+Savane, Turcot, Ville-Marie à Turcot, Bonaventure, la Concorde, l'île
+Sainte-Hélène) sur une révision commitée (un `git worktree`) et sur la copie
+de travail, de jour et sans les panneaux, et met côte à côte avant, après et
+les pixels qui changent en rouge (`mtl/.shots/avant-apres/`).
 
 `check.mjs` fait rouler un pilote automatique, voie de droite, sur Décarie
 dans les deux sens, la Métropolitaine dans les deux sens, le tunnel
@@ -251,29 +380,38 @@ aux zones `anneau` 100 % et 70 %, et `centre` 100 % et 85 %.
 
 ## La voiture
 
-Une Honda Civic générée (`src/game/car.js`) roule par défaut : un hull
-low-poly texturé par sa seule couleur, avec les proportions d'une 10e/11e
-génération — long capot bas, pavillon fastback, ligne de caractère marquée,
-phares fins, feux arrière en C, calandre noire, jantes à 5 branches.
+La voiture du joueur est la **Honda Civic SiR II EG (1992)** de Ko :
+`mtl/models/civic.glb` (2,9 Mo, ~96 000 triangles, ~57 appels de rendu).
+Elle sert aussi aux autres joueurs : `game/gltf-car.js` télécharge et lit le
+fichier une seule fois, puis donne à chaque voiture sa propre copie (géométrie
+et textures partagées, matériaux à elle, pour qu'elle ait sa couleur).
 
-Pour rouler avec un vrai modèle : déposer un fichier `mtl/models/civic.glb`
-(glTF **binaire**, sans Draco — `mtl/vendor` n'a pas le décodeur, seul
-`hop/vendor` l'a — idéalement sous 5 Mo, par exemple exporté depuis Blender en
-`.glb` sans cocher la compression Draco). Au chargement, `game/gltf-car.js`
-sonde ce chemin ; s'il est absent, la voiture générée reste en place, sans
-message dans la console. `?car=<url>` pointe vers un autre fichier.
+Les pièces de peinture (matériaux nommés `Paint…`) prennent la couleur de la
+voiture choisie au garage ; les roues (`wheel_front_left`…) braquent et
+tournent ; les feux (`headlight…`, `taillight…`) s'allument la nuit et au
+freinage. Le modèle est mis à l'échelle de la physique (4,30 m, empattement
+2,70 m), soit environ 5 % plus grand que la vraie EG (4,07 m) : c'est ce qui
+pose ses roues sur les essieux simulés.
 
-`hop/tools/prepare-model.mjs` (réduction de texture + Draco) n'est **pas**
-directement utilisable ici : il compresse toujours la géométrie en Draco, que
-`mtl/vendor` ne sait pas décoder. Pour un modèle déjà lourd, réduire les
-textures à la main (2048 px ou moins, WebP ou JPEG) et exporter sans Draco est
-la voie la plus sûre tant que `mtl/vendor` n'a pas son propre décodeur.
+Le `.blend` d'origine (Blender 2.79, Cycles) et ses textures ne sont pas dans
+le dépôt. Pour régénérer le `.glb` à partir d'eux :
 
-Le modèle est mis à l'échelle sur la longueur de la voiture générée (4,30 m),
-recentré, posé au sol, et ses roues sont retrouvées par leur nom
-(`wheel`/`tire`/`roue`/`pneu`…, avant/arrière par `front`/`avant` ou
-`rear`/`arrière`) pour le braquage et la rotation. Sans nœud reconnu comme
-roue, le modèle reste statique plutôt que de planter.
+```bash
+pip install bpy        # ou Blender 4.2+ : blender -b -P mtl/tools/civic-glb.py -- <...>
+python3 mtl/tools/civic-glb.py <dossier>/1992_Honda_Civic_SiR_II_EG.blend mtl/models/civic.glb
+```
+
+Le script refait chaque matériau Cycles en Principled BSDF (le seul que
+l'export glTF comprend), sépare les quatre roues, nomme peinture, feux et
+vitres, applique les transformations, fusionne les pièces fixes et exporte
+sans Draco, textures en WebP.
+
+Sans le fichier (ou s'il est illisible), la Civic générée (`src/game/car.js`)
+reprend sa place sans message. `?car=<url>` pointe vers un autre `.glb`
+(binaire, **sans Draco** : `mtl/vendor` n'a pas le décodeur). Les roues y sont
+retrouvées par leur nom (`wheel`/`tire`/`roue`/`pneu`…, avant/arrière par
+`front`/`avant` ou `rear`/`arrière`) ; sans roue reconnue, le modèle reste
+statique plutôt que de planter.
 
 ## La circulation
 
@@ -374,9 +512,6 @@ Voir [`unity/README.md`](unity/README.md).
   rue qui passe sous un tablier sans vrai tunnel, souvent à 5-6 m au lieu de
   6,2. Ça ne bloque pas la voiture ; les pires (routes en escalier, rues qui
   plongeaient dans la tranchée) sont corrigés.
-- Les bretelles de l'île Sainte-Hélène qui montent au pont Jacques-Cartier
-  sont trop courtes dans les données pour atteindre le tablier : elles
-  finissent sur une barrière « Fermé ».
 - À 70 %, les voies sont étroites (la voiture ne rapetisse pas).
 - Premier chargement lourd : ~25 s pour `anneau` sur un bon ordinateur. Au
   volant, 400 à 750 appels de rendu et 3 à 5 M triangles au centre-ville ;
@@ -385,4 +520,8 @@ Voir [`unity/README.md`](unity/README.md).
 - La circulation est une première version (voir « La circulation ») : pas
   de dépassement, les virages à gauche ne cèdent pas aux voitures d'en
   face, et les bretelles s'insèrent sans regarder à côté.
+- Des voitures stationnées bordent les rues assez larges (`placeParkedCars`
+  dans `map/props.js`) : 13 m et plus pour une rue à double sens, sinon la
+  voie de droite ne serait plus libre. Les rues de 11 m du Plateau n'en ont
+  donc pas encore.
 - Pas encore de piétons, ni de course jouable.

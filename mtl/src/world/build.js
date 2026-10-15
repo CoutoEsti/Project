@@ -8,8 +8,8 @@ import { compile, findJoints } from '../map/layout.js';
 import { junctionPatches, streetLandings } from '../map/junctions.js';
 import { buildStructures } from '../map/structures.js';
 import { tiling, byTile } from '../map/tiles.js';
-import { prepareBuildings } from '../map/buildings.js';
-import { placeStreetLamps, placeTrees } from '../map/props.js';
+import { prepareBuildings, clearRoads } from '../map/buildings.js';
+import { placeStreetLamps, placeTrees, placeParkedCars } from '../map/props.js';
 import { streetMarkings, roadMarkings } from '../map/markings.js';
 import { pointInRing, ringBBox } from '../map/geom.js';
 import { createMaterials } from './materials.js';
@@ -19,19 +19,26 @@ import { buildStreets } from './streets.js';
 import { buildRoads, buildStructureMeshes } from './roads.js';
 import { buildBuildings } from './buildings.js';
 import { buildLamps, buildTrees } from './props.js';
+import { bakeModel, foldParts, buildParked } from './parked.js';
+
+const PARK_CELL = 160;          // metres: the parked cars' culling cell
 import { buildMarkings } from './markings.js';
 import { buildLandmarks, buildJacquesCartier, landmarkFootprints } from './landmarks.js';
 import { buildSigns } from './signs.js';
 import { exitSigns } from '../map/exits.js';
 import { placeNeon } from '../map/neon.js';
 import { buildNeon } from './neon.js';
+import { buildObjets } from './objets.js';
+import { objetFootprints, underObjets } from '../map/objets.js';
 
 /**
  * @param THREE  the three.js namespace (world modules never import it)
  * @param source loadSource() output (map/source.js)
  * @param opts   { settings: { zone, echelle }, textures: bool, outside: bool,
  *                 onStep: (label) => void, pause: () => Promise — lets the
- *                 page repaint between steps }
+ *                 page repaint between steps,
+ *                 objets: the objets.json document, loadModel: async (modele)
+ *                 → THREE.Object3D — see map/objets.js }
  */
 export async function buildWorld(THREE, source, opts = {}) {
   const T = {};
@@ -45,7 +52,7 @@ export async function buildWorld(THREE, source, opts = {}) {
     return r;
   };
   const settings = opts.settings || { zone: 'centre', echelle: 100 };
-  const map = await step('carte', () => buildMap(source, settings));
+  const map = await step('carte', () => buildMap(source, settings, { objets: opts.objets }));
   const layout = await step('plan', () => compile(map));
   layout.joins = junctionPatches(layout);
   layout.landings = streetLandings(layout);
@@ -54,7 +61,7 @@ export async function buildWorld(THREE, source, opts = {}) {
   map.signs = (map.signs || []).concat(exitSigns(layout));
   const tiles = tiling(map);
   const styleAt = (x, n) => map.styleNear(x, n);
-  let buildings = await step('bâtiments', () => prepareBuildings(map, layout, tiles, styleAt));
+  let buildings = await step('bâtiments', () => clearRoads(prepareBuildings(map, layout, tiles, styleAt), structures.index, layout.streetsAt, layout.terrain, map.scale).buildings);
   const M = await step('matériaux', () => createMaterials(THREE, opts));
 
   const root = new THREE.Group();
@@ -96,6 +103,10 @@ export async function buildWorld(THREE, source, opts = {}) {
     return lm.objects;
   });
   const footprints = await step('emprises', () => clearStreets(layout, landmarks, landmarkFootprints(THREE, landmarks)));
+  // Custom objects stay where they were put: no sliding off the streets.
+  if (opts.onStep) opts.onStep('objets');
+  add(await buildObjets(THREE, map, opts.loadModel));
+  footprints.push(...objetFootprints(map.objets));
   const boxes = footprints.map((f) => ({ f, bb: ringBBox(f.ring) }));
   const under = (b) => boxes.some(({ f, bb }) => {
     if (b.cx < bb.x0 - 150 || b.cx > bb.x1 + 150 || b.cn < bb.n0 - 150 || b.cn > bb.n1 + 150) return false;
@@ -114,14 +125,37 @@ export async function buildWorld(THREE, source, opts = {}) {
   animated.push(buzzer(M.Neon_Buzz), blinker(M.Beacon_Red));
   const oldTown = (x, n) => styleAt(x, n) === 'oldstone';
   const lamps = await step('lampadaires', () => placeStreetLamps(layout, structures, oldTown));
-  const { trees, mapped } = await step('arbres', () => placeTrees(layout, structures, map, lamps));
+  const underObjet = underObjets(map.objets);
+  const { trees, mapped } = await step('arbres', () => {
+    const t = placeTrees(layout, structures, map, lamps);
+    return { ...t, trees: t.trees.filter((tr) => !underObjet(tr.x, tr.n)) };
+  });
   stats.trees = { total: trees.length, mapped };
+  const parked = await step('voitures stationnées', () => placeParkedCars(layout, structures));
+  stats.parked = parked.length;
   const strips = await step('marquage', () => [...streetMarkings(layout, structures), ...roadMarkings(layout)]);
   await step('maillage mobilier', () => {
     const allLamps = [...structures.lamps, ...lamps];
     for (const [key, list] of byTile(tiles, allLamps, (l) => [l.x, l.n])) add(buildLamps(THREE, list, M, key, (x, n) => layout.terrain.height(x, n)));
     for (const [key, list] of byTile(tiles, trees, (t) => [t.x, t.n])) add(buildTrees(THREE, list, M, key));
     for (const [key, list] of byTile(tiles, strips, (s) => s.pts[0])) add(buildMarkings(THREE, list, M, key));
+    // The model comes from the caller (world modules don't know the game's
+    // cars); without one the cars still collide, they just aren't drawn.
+    if (opts.parkedModel && parked.length) {
+      const { object, paint } = opts.parkedModel(THREE);
+      const baked = bakeModel(THREE, object);
+      const paintPart = baked.find((pt) => pt.material === paint) || null;
+      const parts = foldParts(THREE, baked, paintPart);
+      // In cells much smaller than a tile: they're hidden past a few hundred
+      // metres, and a whole tile of them is thousands of cars.
+      const cells = new Map();
+      for (const c of parked) {
+        const k = `${Math.floor(c.x / PARK_CELL)}_${Math.floor(c.n / PARK_CELL)}`;
+        if (!cells.has(k)) cells.set(k, []);
+        cells.get(k).push(c);
+      }
+      for (const list of cells.values()) add(buildParked(THREE, parts, paintPart, list, tiles.key(list[0].x, list[0].n)));
+    }
   });
 
   // Small things per tile, for the renderer to drop when the tile is far.
@@ -134,7 +168,7 @@ export async function buildWorld(THREE, source, opts = {}) {
   });
 
   return {
-    root, map, layout, structures, buildings, lamps, trees, landmarks, footprints,
+    root, map, layout, structures, buildings, lamps, trees, parked, landmarks, footprints,
     materials: M, timings: T, animated, tiles, details, stats, settings,
   };
 }

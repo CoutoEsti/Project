@@ -8,7 +8,7 @@
 // Facades: the district's style decides — grey stone in Old Montréal, brick
 // and outdoor staircases on the Plateau, curtain wall downtown.
 
-import { hash01 } from './geom.js';
+import { hash01, ringBBox, pointInRing, bufferPolyline, closeRing, openRing, pc } from './geom.js';
 
 // District styles: facades to pick from, floor height, whether plexes get the
 // outdoor staircase. Referenced by name from map/montreal.js (QUARTIERS).
@@ -69,13 +69,131 @@ export function prepareBuildings(map, layout, tiles, styleAt) {
     else if (real > 55 && hash01(seed * 1000, 3) < 0.6) roof = 'crown';
     // The outdoor staircase: plexes facing a street.
     let front = null;
-    if (style.stairs && real <= 13 && area < 320 && b.kind !== 'outbuilding') front = facing(layout, b, tmp);
+    let yard = 0;
+    if (style.stairs && real <= 13 && area < 320 && b.kind !== 'outbuilding') {
+      const f = facing(layout, b, ring, tmp);
+      if (f) { front = f.dir; yard = f.yard; }
+    }
     out.push({
-      id: b.id, name: b.name, ring, base, h, minH: b.minH || 0, facade, roof, floorH, front, stairs: !!front,
+      id: b.id, name: b.name, ring, base, h, minH: b.minH || 0, facade, roof, floorH, front, yard, stairs: !!front,
       tile: tiles.key(b.cx, b.cn), cx: b.cx, cn: b.cn, kind: b.kind, scale: s,
     });
   }
   return out;
+}
+
+/**
+ * Buildings out of the way of the roads and streets. OpenStreetMap draws what
+ * stands under a bridge (a pavilion under Jacques-Cartier on Île
+ * Sainte-Hélène, a depot under a ramp) with the ground's footprint only, the
+ * roads' heights are inferred, and a street's width comes from its class: a
+ * building can come up through a deck, or stand a metre or two into a
+ * street. A road over a building keeps it, cut 1.5 m under the deck (the
+ * deck's own thickness). A road or a street through its ground floor, where
+ * the car would drive into a wall, takes its carriageway out of the
+ * footprint: what is left on either side stays a building. Tunnels, covered
+ * roads, trenches below the base and passages over a street (min_height) are
+ * left alone.
+ * @param index      the road index (map/query.js createRoadIndex)
+ * @param streetsAt  layout.streetsAt
+ * @param T          the terrain
+ * @returns { buildings, cut, notched, removed }
+ */
+export function clearRoads(buildings, index, streetsAt, T, s = 1) {
+  const out = [];
+  const hits = [], stHits = [];
+  let cut = 0, notched = 0, removed = 0;
+  for (const b of buildings) {
+    const bb = ringBBox(b.ring);
+    // A probe every 2 m finds the narrow lanes of the Vieux; 4 m on the big ones.
+    const step = ((bb.x1 - bb.x0) * (bb.n1 - bb.n0) < 3600 * s * s ? 2 : 4) * s;
+    const pts = b.ring.slice();
+    pts.push([b.cx, b.cn]);
+    const nx = Math.ceil((bb.x1 - bb.x0) / step), nn = Math.ceil((bb.n1 - bb.n0) / step);
+    if (nx * nn <= 900) {
+      for (let i = 1; i < nx; i++) {
+        for (let j = 1; j < nn; j++) {
+          const x = bb.x0 + i * step, n = bb.n0 + j * step;
+          if (pointInRing(x, n, b.ring)) pts.push([x, n]);
+        }
+      }
+    }
+    // Probes along the walls too: a street grazing a corner misses the grid.
+    for (let i = 0; i < b.ring.length; i++) {
+      const a = b.ring[i], c = b.ring[(i + 1) % b.ring.length];
+      const k = Math.floor(Math.hypot(c[0] - a[0], c[1] - a[1]) / step);
+      for (let j = 1; j < k; j++) pts.push([a[0] + ((c[0] - a[0]) * j) / k, a[1] + ((c[1] - a[1]) * j) / k]);
+    }
+    const top0 = b.base + b.h, floor = b.base + (b.minH || 0);
+    let top = top0;
+    const through = new Set();
+    for (const [x, n] of pts) {
+      for (const h of index.surfacesAt(x, n, -0.5 * s, hits)) {
+        if (h.covered || h.tunnel) continue;
+        if (h.y < floor + 0.5 * s || h.y > top + 0.5 * s) continue;
+        if (h.y - floor < 5 * s) through.add(h.road);
+        else top = Math.min(top, h.y - 1.5 * s);
+      }
+      if (b.minH > 2 * s) continue;
+      for (const st of streetsAt(x, n, -0.5 * s, stHits)) {
+        if (st.cls === 'plaza') continue;
+        if (T.height(x, n) - floor < 5 * s) through.add(st);
+      }
+    }
+    let parts = [b];
+    if (through.size) {
+      parts = notch(b, [...through], bb, s);
+      if (!parts.length) { removed++; continue; }
+      notched++;
+    }
+    if (top < top0) {
+      if (top - floor < 2.2 * s) { removed++; continue; }
+      cut++;
+      parts = parts.map((q) => ({ ...q, h: top - q.base }));
+    }
+    out.push(...parts);
+  }
+  return { buildings: out, cut, notched, removed };
+}
+
+// The footprint less the carriageways running through it: a road's ribbon
+// and a metre (its barrier), a street's and 30 cm (its kerb). The pieces big
+// enough to be a building stay one.
+function notch(b, ways, bb, s) {
+  const ribbons = [];
+  for (const w of ways) {
+    const road = !!w.samples;
+    const line = road ? w.samples.map((p) => [p.x, p.n]) : w.path;
+    const half = road ? (w.maxHalf ?? w.half) + 1 * s : w.half + 0.3 * s;
+    // Runs of segments that come near the footprint.
+    let run = [];
+    const flush = () => { if (run.length > 1) ribbons.push(bufferPolyline(run, half, 0)); run = []; };
+    for (let i = 0; i + 1 < line.length; i++) {
+      const a = line[i], c = line[i + 1];
+      const near = Math.max(a[0], c[0]) > bb.x0 - half && Math.min(a[0], c[0]) < bb.x1 + half
+        && Math.max(a[1], c[1]) > bb.n0 - half && Math.min(a[1], c[1]) < bb.n1 + half;
+      if (!near) { flush(); continue; }
+      if (!run.length) run.push(a);
+      run.push(c);
+    }
+    flush();
+  }
+  let left;
+  try {
+    left = pc.difference([closeRing(b.ring)], ...ribbons.filter((m) => m.length));
+  } catch (e) {
+    return [b];
+  }
+  const parts = [];
+  for (const poly of left) {
+    const ring = openRing(poly[0]);
+    const area = Math.abs(ringArea(ring));
+    if (ring.length < 3 || area < 25 * s * s) continue;
+    let cx = 0, cn = 0;
+    for (const [x, n] of ring) { cx += x; cn += n; }
+    parts.push({ ...b, ring, cx: cx / ring.length, cn: cn / ring.length, front: null, stairs: false });
+  }
+  return parts;
 }
 
 function guessHeight(b, area, style, seed) {
@@ -92,10 +210,15 @@ function guessHeight(b, area, style, seed) {
 }
 
 /** Outward direction of the wall that faces the nearest street, or null. */
-function facing(layout, b, tmp) {
+/**
+ * The nearest street's direction from the building, and the yard: the
+ * distance from the front wall to the edge of that street's asphalt
+ * (sidewalk included). Balconies and stairs must fit in it.
+ */
+function facing(layout, b, ring, tmp) {
   const near = layout.streetsAt(b.cx, b.cn, 16, tmp);
   if (!near.length) return null;
-  let best = null, bd = Infinity;
+  let best = null, bd = Infinity, bst = null;
   for (const st of near) {
     const P = st.path;
     for (let i = 0; i + 1 < P.length; i++) {
@@ -104,12 +227,15 @@ function facing(layout, b, tmp) {
       const t = Math.max(0, Math.min(1, ((b.cx - a[0]) * dx + (b.cn - a[1]) * dn) / l2));
       const px = a[0] + dx * t, pn = a[1] + dn * t;
       const d = Math.hypot(px - b.cx, pn - b.cn);
-      if (d < bd) { bd = d; best = [px - b.cx, pn - b.cn]; }
+      if (d < bd) { bd = d; best = [px - b.cx, pn - b.cn]; bst = st; }
     }
   }
   if (!best) return null;
   const l = Math.hypot(best[0], best[1]) || 1;
-  return [best[0] / l, best[1] / l];
+  const dir = [best[0] / l, best[1] / l];
+  let wall = 0;
+  for (const [x, n] of ring) wall = Math.max(wall, (x - b.cx) * dir[0] + (n - b.cn) * dir[1]);
+  return { dir, yard: bd - wall - bst.half };
 }
 
 function ringArea(ring) {

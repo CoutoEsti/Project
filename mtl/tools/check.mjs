@@ -3,10 +3,14 @@
 // Métropolitaine, the Ville-Marie tunnel, the mountain, the bridge, the
 // circuit, and a few hundred ordinary streets picked at random.
 //
-//   node mtl/tools/check.mjs              → node only (~40 s)
+//   node mtl/tools/check.mjs              → node only (~2 min)
 //   node mtl/tools/check.mjs --browser    → plus the real page in headless
 //                                           Chromium: loads, no errors, drives
 //   node mtl/tools/check.mjs --zone centre --echelle 85
+//   node mtl/tools/check.mjs --forme <code>   → a drawn zone (?forme= of zones.html)
+//   node mtl/tools/check.mjs --vise decarie   → the change aims at Décarie: the
+//                                           safety net (tools/filet.mjs) lets
+//                                           the map change there, nowhere else
 //
 // Driving is measured, not eyeballed: an autopilot follows each motorway from
 // one OpenStreetMap way to the next in the right-hand lane, and every impact,
@@ -19,7 +23,9 @@ import * as THREE from '../vendor/three.module.min.js';
 import { buildWorld } from '../src/world/build.js';
 import { validate } from '../src/map/validate.js';
 import { createSurface } from '../src/map/surface.js';
-import { buildSolids } from '../src/map/collide.js';
+import { buildSolids, Solids, resolveCollisions } from '../src/map/collide.js';
+import { buildMap } from '../src/map/real.js';
+import { objetFootprints } from '../src/map/objets.js';
 import { projectOnRoad, SPACING } from '../src/map/layout.js';
 import { resolveSpawn } from '../src/game/spawn.js';
 import { pointInRing, ringBBox, hash01, segDist2 } from '../src/map/geom.js';
@@ -27,15 +33,19 @@ import { Driver } from '../src/game/drive.js';
 import { buildNetwork, span, pointOn, lightAt, insideBox } from '../src/traffic/network.js';
 import { createDensity } from '../src/traffic/density.js';
 import { Traffic, TrafficReplica, TICK, CAR_LENGTH } from '../src/traffic/sim.js';
+import { skyAt, CYCLE_LENGTH } from '../src/world/daycycle.js';
 import { loadSourceNode } from './lib/source-node.mjs';
 import { serve } from './lib/serve.mjs';
 import { loadPlaywright } from './lib/playwright.mjs';
+import { measure, compare, readRef, parseTargets } from './filet.mjs';
+import { decodeShape } from '../src/map/zones.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
 const arg = (k, d) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : d; };
 const BROWSER = args.includes('--browser');
 const settings = { zone: arg('--zone', 'anneau'), echelle: Number(arg('--echelle', 100)) };
+if (arg('--forme', null)) Object.assign(settings, { zone: 'perso', forme: decodeShape(arg('--forme', null)) });
 const STEP = 1 / 120;
 const TRACE = !!process.env.TRACE;
 const ONLY = arg('--only', null);
@@ -54,7 +64,7 @@ const world = await buildWorld(THREE, source, { settings });
 const { layout, structures } = world;
 const s = layout.map.scale;
 const surface = createSurface(layout, structures);
-const solids = buildSolids(layout, structures, world.buildings, { lamps: world.lamps, trees: world.trees, footprints: world.footprints });
+const solids = buildSolids(layout, structures, world.buildings, { lamps: world.lamps, trees: world.trees, parked: world.parked, footprints: world.footprints });
 const game = { layout, structures, surface, solids };
 console.log(`zone ${settings.zone} à ${settings.echelle} % construite en ${((performance.now() - t0) / 1000).toFixed(1)} s — `
   + `${layout.streets.length} rues, ${layout.roads.length} routes, ${world.buildings.length} bâtiments, ${solids.count} obstacles\n`);
@@ -153,6 +163,8 @@ console.log(`zone ${settings.zone} à ${settings.echelle} % construite en ${((pe
   // A landmark's footprint must leave every street and every road free.
   const bad = [];
   for (const f of world.footprints) {
+    // Custom objects stand where they were put, on a plaza if need be.
+    if (f.objet) continue;
     const hits = new Set();
     const bb = ringBBox(f.ring);
     const reach = Math.hypot(bb.x1 - bb.x0, bb.n1 - bb.n0) / 2;
@@ -379,10 +391,13 @@ function autopilot(road, { vmax = 30, aLat = 6, pedals = null, maxTime = 600 } =
 
 function drive(label, [name, x, n, heading, max], opts = {}, limits = {}) {
   if (ONLY && !label.includes(ONLY)) return null;
-  const road = route(name, x, n, heading, max);
+  // Outside this zone: nothing to drive (a drawn zone's bounding box is not
+  // the zone: the start of Décarie lies in the box of `coeur`, not in it).
+  const Z = layout.map.zone;
+  const inZone = Z ? Z.contains(x * s, n * s)
+    : x * s >= layout.map.world.x0 && x * s <= layout.map.world.x1 && n * s >= layout.map.world.n0 && n * s <= layout.map.world.n1;
+  const road = inZone ? route(name, x, n, heading, max) : null;
   if (!road) {
-    // Outside this zone: nothing to drive.
-    const inZone = x * s >= layout.map.world.x0 && x * s <= layout.map.world.x1 && n * s >= layout.map.world.n0 && n * s <= layout.map.world.n1;
     check(label, !inZone, inZone ? `${name} introuvable` : 'hors de la zone');
     return null;
   }
@@ -489,7 +504,8 @@ drive('circuit Gilles-Villeneuve', ['Circuit Gilles-Villeneuve', 2300, -3200, 18
       }
     }
   }
-  check('les rues passent sous la 40', tried > 10 && low === 0 && bad.length === 0,
+  if (!viaduct.length) check('les rues passent sous la 40', true, 'hors de la zone');
+  else check('les rues passent sous la 40', tried > 10 && low === 0 && bad.length === 0,
     `${tried} rues sous le viaduc, ${low} avec moins de 6,8 m sous le tablier${bad.length ? ` ; ${bad.length} accrochent : ${bad.slice(0, 4).join(' ; ')}` : ''}`);
 }
 
@@ -538,6 +554,38 @@ drive('circuit Gilles-Villeneuve', ['Circuit Gilles-Villeneuve', 2300, -3200, 18
   for (const o of net.nodes) by[o.control] = (by[o.control] || 0) + 1;
   check('réseau de circulation', net.edges.length > 1000 && (by.signal || 0) > 50 && (by.stop || 0) > 50,
     `${net.edges.length} tronçons, ${by.signal || 0} carrefours à feux, ${by.stop || 0} arrêts, ${by.merge || 0} bretelles, en ${ms.toFixed(0)} ms`);
+
+  // Parked cars (map/props.js) stand clear of every lane the traffic drives,
+  // between its stop lines: a car's half-width each, and a little air.
+  {
+    const cell = 8, grid = new Map(), sp = {}, q = {};
+    for (let ed = 0; ed < net.edges.length * 2; ed++) {
+      span(net, ed, sp);
+      for (const lat of sp.offsets) {
+        for (let d = sp.s0; d <= sp.s1; d += 1.5) {
+          pointOn(net, ed, d, lat, q);
+          const k = `${Math.floor(q.x / cell)},${Math.floor(q.n / cell)}`;
+          let a = grid.get(k);
+          if (!a) grid.set(k, a = []);
+          a.push(q.x, q.n);
+        }
+      }
+    }
+    let bad = 0, worst = Infinity, at = null;
+    for (const p of world.parked || []) {
+      const cx = Math.floor(p.x / cell), cn = Math.floor(p.n / cell);
+      let m = Infinity;
+      for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) {
+        const a = grid.get(`${cx + i},${cn + j}`);
+        if (a) for (let k = 0; k < a.length; k += 2) m = Math.min(m, Math.hypot(a[k] - p.x, a[k + 1] - p.n));
+      }
+      if (m < 2) bad++;
+      if (m < worst) { worst = m; at = p; }
+    }
+    const n = (world.parked || []).length;
+    check('autos stationnées hors des voies du trafic', bad === 0,
+      `${n} autos stationnées, ${bad} sur une voie${at ? `, au plus près ${worst.toFixed(1)} m (${Math.round(at.x)}, ${Math.round(at.n)})` : ''}`);
+  }
 
   // Lights: two ways that cross are never green together, at any junction
   // of a cluster (a boulevard's two carriageways are one junction).
@@ -697,6 +745,85 @@ drive('circuit Gilles-Villeneuve', ['Circuit Gilles-Villeneuve', 2300, -3200, 18
   }
 }
 
+// ----------------------------------------------------------- safety net --
+
+{
+  // The whole map measured against tools/filet/<zone>.json: nothing may change
+  // outside the boxes named by --vise, and no defect may grow anywhere. A
+  // change that passes everything else here and still moves walls on the
+  // other side of town is a rule too broad (tools/filet.mjs).
+  const ref = !settings.forme && readRef(settings.zone);
+  if (ref && ref.echelle === settings.echelle) {
+    const res = compare(ref, measure(world), parseTargets(arg('--vise', null)), world, (arg('--permet', '') || '').split(',').filter(Boolean));
+    if (!res.ok || res.changed.length) for (const l of res.lines) console.log(l);
+    check('filet : rien ne bouge hors de la zone visée, aucun défaut en plus', res.ok,
+      res.ok ? `${res.changed.length} changements de cellule, tous visés` : res.fails.join(' ; '));
+  } else if (!settings.forme && settings.echelle === 100) {
+    check('filet : référence présente', false, `node mtl/tools/filet.mjs --accepter --zone ${settings.zone}`);
+  }
+}
+
+{
+  // A custom object (objets.json): the ground under it is level, the
+  // generated building it covers is gone, and a car stops at its wall.
+  let target = null, bd = Infinity;
+  for (const b of source.buildings) {
+    let x = 0, n = 0;
+    for (const p of b.ring) { x += p[0]; n += p[1]; }
+    x /= b.ring.length; n /= b.ring.length;
+    const d = Math.hypot(x - 300, n - 300);
+    if (d < bd) { bd = d; target = [x, n]; }
+  }
+  const box = [[-15, -10], [15, -10], [15, 10], [-15, 10]];
+  const objets = { objets: [{ id: 'essai', modele: 'objets/essai.glb', x: target[0], n: target[1], cap: 30, echelle: 1,
+    origine: [0, 0, 0], emprise: box, solides: [{ ring: box, y0: 0, y1: 12 }], hauteur: 12 }] };
+  const plain = buildMap(source, settings);
+  const map = buildMap(source, settings, { objets });
+  const o = map.objets[0];
+  const T = map.terrain;
+  let spread = 0;
+  for (const [x, n] of o.emprise) for (const [u, v] of o.emprise) spread = Math.max(spread, Math.abs(T.height(x, n) - T.height(u, v)));
+  const cleared = plain.buildings.length - map.buildings.length;
+  // Drive at it from 12 m off its centre, at 50 km/h.
+  const S2 = new Solids();
+  for (const f of objetFootprints(map.objets)) {
+    for (let i = 0; i < f.ring.length; i++) {
+      const a = f.ring[i], c = f.ring[(i + 1) % f.ring.length];
+      S2.add(a[0], a[1], c[0], c[1], f.y0, f.y1, 0);
+    }
+  }
+  const car = { x: o.x - 22 * s, n: o.n, vx: 14, vn: 0, yawRate: 0 };
+  let inside = false;
+  for (let i = 0; i < 240; i++) {
+    car.x += car.vx * STEP; car.n += car.vn * STEP;
+    resolveCollisions(S2, car, Math.PI / 2, o.y);
+    if (pointInRing(car.x, car.n, o.emprise)) inside = true;
+  }
+  check('objet placé (objets.json)', spread < 0.02 && cleared >= 1 && !inside,
+    `sol à ${(spread * 100).toFixed(1)} cm près, ${cleared} bâtiment(s) retiré(s), ${inside ? 'la voiture le traverse' : 'la voiture s’y arrête'}`);
+}
+
+// ------------------------------------------------------------- the sky --
+// The cycle from the shared clock: 15 min of night between the transitions,
+// a short day, and rain on some nights — the same for any two players.
+{
+  const secs = {};
+  for (let t = 0; t < CYCLE_LENGTH; t++) { const p = skyAt(t).phase; secs[p] = (secs[p] || 0) + 1; }
+  let rainy = 0, day = 0;
+  for (let c = 0; c < 500; c++) {
+    let r = false;
+    for (let t = 0; t < CYCLE_LENGTH; t += 5) {
+      const s = skyAt(c * CYCLE_LENGTH + t);
+      if (s.rain > 0) r = true;
+      if (s.rain > 0 && s.phase !== 'nuit') day++;
+    }
+    if (r) rainy++;
+  }
+  const same = skyAt(1.7e9 + 777).rain === skyAt(1.7e9 + 777).rain;
+  check('cycle jour / nuit', secs.nuit === 900 && secs.jour >= 180 && secs.jour <= 240 && rainy > 100 && rainy < 250 && day === 0 && same,
+    `nuit ${secs.nuit / 60} min, jour ${(secs.jour / 60).toFixed(1)} min, crépuscule ${secs['crépuscule']} s, aube ${secs.aube} s ; pluie ${rainy} nuits sur 500`);
+}
+
 // ---------------------------------------------------------------- browser --
 
 if (BROWSER) {
@@ -708,16 +835,16 @@ if (BROWSER) {
   page.on('pageerror', (e) => errors.push(String(e)));
   page.on('console', (m) => {
     if (m.type() !== 'error') return;
-    // The optional civic.glb (mtl/README.md, "La voiture") is absent in this
-    // checkout by design — game/gltf-car.js probes it with a HEAD request and
-    // falls back silently, but Chromium still logs the failed HTTP request
-    // itself to the console; no amount of catching in page JS suppresses
-    // that. Expected, not a bug — only swallow this one exact 404.
+    // models/civic.glb (mtl/README.md, "La voiture") may be absent, in an
+    // older checkout or a trimmed deploy — game/gltf-car.js probes it with a
+    // HEAD request and falls back silently, but Chromium still logs the failed
+    // HTTP request itself to the console; no amount of catching in page JS
+    // suppresses that. Expected, not a bug — only swallow this one exact 404.
     if (/Failed to load resource.*404/.test(m.text()) && /\/models\/civic\.glb$/.test(m.location().url || '')) return;
     errors.push(m.text());
   });
   const tl = Date.now();
-  await page.goto(`${url}/index.html?spawn=decarie&zone=${settings.zone}&echelle=${settings.echelle}`);
+  await page.goto(`${url}/index.html?spawn=decarie&${settings.forme ? `forme=${arg('--forme', '')}` : `zone=${settings.zone}`}&echelle=${settings.echelle}`);
   await page.waitForFunction(() => window.__mtl && window.__mtl.ready, null, { timeout: 300000 });
   await page.waitForFunction(() => window.__mtl.frames() > 3, null, { timeout: 120000 });
   const load = (Date.now() - tl) / 1000;
@@ -756,15 +883,57 @@ if (BROWSER) {
       window.__mtl.look(a - 150, b - 150, T.height(a, b) + 120, a, b, T.height(a, b));
       return best;
     });
+    // On SwiftShader, the first frames over downtown compile its materials
+    // and take a while: the landing waits for them.
     await page.keyboard.press('KeyG');
-    const back = await page.waitForFunction(() => !document.body.classList.contains('fly'), null, { timeout: 30000 })
+    const back = await page.waitForFunction(() => !document.body.classList.contains('fly'), null, { timeout: 120000 })
       .then(() => true, () => false);
     const st = await page.evaluate(() => window.__mtl.state());
     const d = Math.hypot(st.x - tx, st.n - tn);
     check('vol libre (F, Espace, G)', on && h1 > h0 + 20 && back && d < 20,
       `monté de ${(h1 - h0).toFixed(0)} m, voiture posée à ${d.toFixed(1)} m du centre de la vue (${st.where ? st.where.name : '?'})`);
   }
+  {
+    // N: the sky leaves the clock for night, then day, then follows it again.
+    const modes = [];
+    for (let i = 0; i < 3; i++) {
+      const before = await page.evaluate(() => window.__mtl.sky().mode);
+      await page.keyboard.press('KeyN');
+      await page.waitForFunction((m) => window.__mtl.sky().mode !== m, before, { timeout: 30000 }).catch(() => {});
+      modes.push(await page.evaluate(() => window.__mtl.sky().mode));
+    }
+    check('ciel (N)', modes.join() === 'night,day,cycle', modes.join(' → '));
+  }
   check('aucune erreur dans la page', errors.length === 0, errors.slice(0, 5).join(' | ') || '0');
+  {
+    // The objects editor: a .glb made on the spot, placed on the plan, then
+    // the game's local preview builds it, levelled and solid.
+    errors.length = 0;
+    await page.goto(`${url}/objets.html`, { timeout: 180000 });
+    await page.waitForFunction(() => window.__objets && window.__objets.ready, null, { timeout: 120000 });
+    const placed = await page.evaluate(async () => {
+      const THREE = await import('three');
+      const { GLTFExporter } = await import('three/addons/exporters/GLTFExporter.js');
+      const mesh = new THREE.Mesh(new THREE.BoxGeometry(24, 12, 16), new THREE.MeshStandardMaterial({ color: 0xff8800 }));
+      const glb = await new GLTFExporter().parseAsync(mesh, { binary: true });
+      const O = window.__objets;
+      O.state.objets.length = 0;
+      await O.importFiles([new File([glb], 'Essai bloc.glb')], [300, 300]);
+      await new Promise((r) => setTimeout(r, 400));     // the save is debounced
+      const o = O.state.objets[0];
+      return o ? { solides: o.solides.length, w: Math.round(o.emprise.reduce((m, p) => Math.max(m, p[0]), 0) * 2) } : null;
+    });
+    await page.goto(`${url}/index.html?objets=local&voir=300,300&zone=centre&echelle=${settings.echelle}`);
+    await page.waitForFunction(() => window.__mtl && window.__mtl.ready, null, { timeout: 300000 });
+    const seen = await page.evaluate(() => {
+      const W = window.__mtl.world;
+      let model = null;
+      W.root.traverse((o) => { if (o.userData.objet) model = o; });
+      return { model: !!model, solids: W.footprints.filter((f) => f.objet).length, flying: document.body.classList.contains('fly') };
+    });
+    check('éditeur d’objets et aperçu dans le jeu', placed && placed.solides > 0 && placed.w === 24 && seen.model && seen.solids > 0 && seen.flying && !errors.length,
+      `${placed ? `bloc de ${placed.w} m, ${placed.solides} emprise(s) solide(s)` : 'rien de placé'} ; dans le jeu : ${seen.model ? 'modèle posé' : 'pas de modèle'}, ${seen.solids} collision(s)${errors.length ? ` ; ${errors.slice(0, 3).join(' | ')}` : ''}`);
+  }
   await browser.close();
   server.close();
 }
