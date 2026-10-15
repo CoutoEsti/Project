@@ -329,17 +329,50 @@ export function walls(world) {
   return out;
 }
 
+// ------------------------------------------------------------------- backs --
+// A wall seen from behind: every metre of tunnel and retaining wall, 0.7 m
+// out from its centre on the side away from its own road, must not be over
+// the lanes of another covered road at that level. Where it is, the wall
+// stands in that road's tunnel and shows its bare concrete back there (two
+// bores side by side, each with its own wall). Amount: metres.
+export function backs(world) {
+  const { structures, index, byId } = context(world);
+  const out = [], hits = [];
+  for (const w of structures.walls) {
+    if (w.kind !== 'tunnel' && w.kind !== 'retaining') continue;
+    const own = byId.get(w.road);
+    for (let i = 0; i + 1 < w.pts.length; i++) {
+      const a = w.pts[i], b = w.pts[i + 1], len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (len < 1e-6) continue;
+      const nx = -(b[1] - a[1]) / len, nn = (b[0] - a[0]) / len;
+      for (let d = 0; d < len; d += 1) {
+        const x = a[0] + (b[0] - a[0]) * d / len, n = a[1] + (b[1] - a[1]) * d / len, y = a[2] + 0.5;
+        // The back is the side its own road is not on.
+        const sOwn = index.surfacesAt(x + nx * 0.7, n + nn * 0.7, 0, hits).some((q) => q.road === own) ? -1 : 1;
+        const bx = x + nx * 0.7 * sOwn, bn = n + nn * 0.7 * sOwn;
+        if (index.surfacesAt(bx, bn, 0, hits).some((q) => q.road !== own && q.covered && Math.abs(q.y - y) < 2)) {
+          out.push({ x, n, y, road: roadName(own), len: 1 });
+        }
+      }
+    }
+  }
+  return out;
+}
+
 // ------------------------------------------------------------------- leaks --
 // What the eye sees, not what the wheels find: rays cast through the meshes
 // as drawn. In a tunnel (and under a street over a trench), from the car's
 // eye every 10 m, rays up, to the sides and in between must all meet a wall
 // or the ceiling within 40 m; one that meets nothing looks out through a
-// hole into the void or the sky (`fuite`). Over every road every 4 m, at the
-// centre and 70 % of the way to each edge, a ray down from 3 m above must
+// hole into the void or the sky (`fuite`), and so does one that crosses open
+// ground before it meets a wall: it went out through a gap between two. Over
+// every road every 4 m, at the centre and 70 % of the way to each edge, a ray
+// down from 3 m above must
 // meet the road's own surface within 0.3 m (`troué`): the asphalt as drawn,
 // not the surface the physics believes in.
 // Amount: rays (each one a direction where the hole shows).
 const CELL3 = 8;
+const WALL_REACH = 1.2;   // past the lanes: the wall's offset and thickness (map/structures.js)
 
 export function triangles(world, wanted) {
   const grid = new Map(), P = [];
@@ -447,9 +480,22 @@ export function leaks(world) {
   const { cast } = triangles(world, wanted);
   const out = [];
   const DIRS = [[0, 1], [0.5, 0.87], [-0.5, 0.87], [0.87, 0.5], [-0.87, 0.5], [1, 0], [-1, 0]];   // [across, up]
+  // Before it meets anything, a sight line must stay over a covered road at
+  // this level (its lanes, or up to the wall beyond): one that crosses open
+  // ground first went out through a gap between two walls.
+  const { index } = context(world);
+  const hits = [];
+  const roofed = (px, pn, y0) => index.surfacesAt(px, pn, WALL_REACH, hits).some((q) => q.covered && Math.abs(q.y - y0) < 3);
   for (const [x, n, y, lx, ln, what] of inside) {
     for (const [a, u] of DIRS) {
-      if (cast(x, n, y, lx * a, ln * a, u, 40) === Infinity) out.push({ kind: 'fuite', x, n, y, road: what, len: 1, dir: [a, u] });
+      const t = cast(x, n, y, lx * a, ln * a, u, 40);
+      let open = t === Infinity;
+      if (!open && a) {
+        for (let d = 0.5; d < t * Math.abs(a); d += 0.5) {
+          if (!roofed(x + lx * Math.sign(a) * d, n + ln * Math.sign(a) * d, y - 1.5)) { open = true; break; }
+        }
+      }
+      if (open) out.push({ kind: 'fuite', x, n, y, road: what, len: 1, dir: [a, u] });
     }
   }
   for (const [x, n, y, what] of down) {

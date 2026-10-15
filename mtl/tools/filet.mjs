@@ -22,7 +22,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { artefacts, openEnds, slits, groundOver, offLevel, walls, leaks } from './lib/mesures.mjs';
+import { artefacts, openEnds, slits, groundOver, offLevel, walls, leaks, backs } from './lib/mesures.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REF = (zone) => path.join(HERE, 'filet', `${zone}.json`);
@@ -49,6 +49,7 @@ const DEFECTS = {
   niveau: { unit: '', tol: 1, what: 'points de route mal posés' },
   'troué': { unit: '', tol: 1, what: 'points sans asphalte dessiné' },
   fuite: { unit: '', tol: 1, what: 'trous dans les tunnels' },
+  envers: { unit: 'm', tol: 2, what: 'murs de tunnel vus de dos' },
 };
 const WALL_TOL = 2;       // metres of wall in a cell
 const DRIFT = 25;         // metres of wall, summed over every cell outside the boxes
@@ -71,6 +72,7 @@ export function measure(world) {
   for (const p of offLevel(world)) add('niveau', p.x, p.n, p.len);
   for (const w of walls(world)) add(w.kind, w.x, w.n, w.len);
   for (const l of leaks(world)) add(l.kind, l.x, l.n, l.len);
+  for (const p of backs(world)) add('envers', p.x, p.n, p.len);
   const totals = {};
   for (const [m, c] of Object.entries(cells)) {
     for (const k of Object.keys(c)) c[k] = Math.round(c[k] * 10) / 10;
