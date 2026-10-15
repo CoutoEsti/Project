@@ -3,7 +3,11 @@
 //
 //   node mtl/tools/shots.mjs                    → mtl/.shots/*.png
 //   node mtl/tools/shots.mjs --out DIR --only decarie,plateau --day --zone centre --echelle 85
+//   node mtl/tools/shots.mjs --views vues.json   (a list of [name, x, n, h, tx, tn, th], as VIEWS)
+//   node mtl/tools/shots.mjs --jonctions         → the junctions of JUNCTIONS instead
+//   node mtl/tools/shots.mjs --cycle 1000 --pluie 1   → at dusk, in the rain
 //   node mtl/tools/shots.mjs --rendu webgpu     → the WebGPU renderer (default: WebGL)
+// Night by default (the sky would otherwise follow the clock).
 //
 // Chromium runs headless on SwiftShader when there is no GPU: slow, but the
 // pictures are the real renderer's.
@@ -20,7 +24,6 @@ const arg = (k, d) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] :
 const OUT = path.resolve(arg('--out', path.join(ROOT, '.shots')));
 const ONLY = arg('--only', null);
 const DAY = args.includes('--day');
-const RENDU = arg('--rendu', 'webgl');
 const W = Number(arg('--w', 1280)), H = Number(arg('--h', 720));
 
 // [name, camera x, n, h, target x, n, h]: real metres in the street-grid
@@ -42,45 +45,89 @@ export const VIEWS = [
   ['iles', 1800, -1600, 300, 2600, -2500, 0],
 ];
 
-async function main() {
-  await fs.mkdir(OUT, { recursive: true });
-  const { server, url } = await serve(ROOT);
+// Fixed places where roads meet: tools/avant-apres.mjs shoots them before and
+// after a change to the map.
+export const JUNCTIONS = [
+  ['decarie-centre', -3830, 3600, 30, -3845, 3100, 0],
+  // Down in the trench, over the median: heights are above the relief, so
+  // negative ones are below the trench's rim.
+  ['decarie-terre-plein', -3830, 3430, -2, -3830, 3395, -7.5],
+  ['decarie-nord', -3700, 4700, 40, -3770, 4550, 0],
+  ['decarie-savane', -3580, 5820, 45, -3634, 5700, 0],
+  ['turcot', -4150, -250, 90, -4300, -500, 0],
+  ['ville-marie-turcot', -3650, 60, 50, -3744, -22, 0],
+  ['bonaventure', 150, -1600, 50, 71, -1702, 15],
+  ['concorde', 2200, -2200, 50, 2313, -2318, 8],
+  ['jacques-cartier-ile', 3250, -1300, 50, 3405, -1490, 8],
+];
+
+/**
+ * Loads the game served from `root` once and shoots each view.
+ * @param clean  hide the page's panels over the scene
+ * @returns [{ name, file }]
+ */
+export async function shoot({ root, views, out, day = false, query = {}, w = 1280, h = 720, only = null, clean = false, log = console.log }) {
+  await fs.mkdir(out, { recursive: true });
+  const { server, url } = await serve(root);
   const { chromium } = await loadPlaywright();
   const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist',
     '--enable-unsafe-webgpu', '--enable-features=Vulkan', '--use-vulkan=swiftshader', '--use-webgpu-adapter=swiftshader'] });
-  const page = await browser.newPage({ viewport: { width: W, height: H } });
-  const errors = [];
+  const page = await browser.newPage({ viewport: { width: w, height: h } });
+  const errors = [], shots = [];
   page.on('pageerror', (e) => errors.push(String(e)));
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
-  const t0 = Date.now();
-  const q = new URLSearchParams();
-  if (DAY) q.set('day', '1');
-  q.set('rendu', RENDU);
-  if (arg('--zone', null)) q.set('zone', arg('--zone', null));
-  if (arg('--echelle', null)) q.set('echelle', arg('--echelle', null));
-  await page.goto(`${url}/index.html?${q}`);
-  await page.waitForFunction(() => window.__mtl && window.__mtl.ready, null, { timeout: 300000 });
-  console.log(`rendu ${await page.evaluate(() => window.__mtl.rendu)}`);
-  console.log(`chargé en ${((Date.now() - t0) / 1000).toFixed(1)} s`, JSON.stringify(await page.evaluate(() => window.__mtl.world.timings)));
-  for (const [name, ...v] of VIEWS) {
-    if (ONLY && !ONLY.split(',').includes(name)) continue;
-    await page.evaluate((v) => {
-      const m = window.__mtl;
-      if (v[0] === null) { m.act('overview'); m.fly.overview(false); return; }
-      const L = m.game.layout, s = L.map.scale, T = L.terrain;
-      const [x, n, h, tx, tn, th] = v;
-      m.look(x * s, n * s, T.height(x * s, n * s) + h, tx * s, tn * s, T.height(tx * s, tn * s) + th);
-    }, v);
-    const f0 = await page.evaluate(() => window.__mtl.frames());
-    await page.waitForFunction((f) => window.__mtl.frames() > f + 2, f0, { timeout: 120000 });
-    const file = path.join(OUT, `${name}${DAY ? '-jour' : ''}.png`);
-    await page.screenshot({ path: file, timeout: 180000 });
-    const st = await page.evaluate(() => window.__mtl.stats());
-    console.log(`${name}: ${st.calls} appels, ${(st.triangles / 1000).toFixed(0)} k triangles`);
+  try {
+    const t0 = Date.now();
+    const q = new URLSearchParams();
+    // Night unless told otherwise: the sky would follow the clock.
+    if (day) q.set('day', '1');
+    else if (query.cycle == null) q.set('nuit', '1');
+    for (const [k, v] of Object.entries(query)) if (v != null) q.set(k, v);
+    await page.goto(`${url}/index.html?${q}`);
+    await page.waitForFunction(() => window.__mtl && window.__mtl.ready, null, { timeout: 300000 });
+    log(`rendu ${await page.evaluate(() => window.__mtl.rendu || 'webgl')}`);
+    log(`chargé en ${((Date.now() - t0) / 1000).toFixed(1)} s`, JSON.stringify(await page.evaluate(() => window.__mtl.world.timings)));
+    // clean: the scene alone, without the panels, the mini-map and the
+    // district names, which would cover what is being compared.
+    if (clean) {
+      await page.evaluate(() => {
+        const c = document.querySelector('canvas');
+        for (const el of document.body.querySelectorAll('*')) if (el !== c && !el.contains(c)) el.style.visibility = 'hidden';
+      });
+    }
+    for (const [name, ...v] of views) {
+      if (only && !only.includes(name)) continue;
+      await page.evaluate((v) => {
+        const m = window.__mtl;
+        if (v[0] === null) { m.act('overview'); m.fly.overview(false); return; }
+        const L = m.game.layout, s = L.map.scale, T = L.terrain;
+        const [x, n, h, tx, tn, th] = v;
+        m.look(x * s, n * s, T.height(x * s, n * s) + h, tx * s, tn * s, T.height(tx * s, tn * s) + th);
+      }, v);
+      const f0 = await page.evaluate(() => window.__mtl.frames());
+      await page.waitForFunction((f) => window.__mtl.frames() > f + 2, f0, { timeout: 120000 });
+      const file = path.join(out, `${name}${day ? '-jour' : ''}.png`);
+      await page.screenshot({ path: file, timeout: 180000 });
+      const st = await page.evaluate(() => window.__mtl.stats());
+      log(`${name}: ${st.calls} appels, ${(st.triangles / 1000).toFixed(0)} k triangles`);
+      shots.push({ name, file });
+    }
+  } finally {
+    if (errors.length) log('ERREURS:\n' + errors.join('\n'));
+    await browser.close();
+    server.close();
   }
-  if (errors.length) console.log('ERREURS:\n' + errors.join('\n'));
-  await browser.close();
-  server.close();
+  return shots;
+}
+
+async function main() {
+  const views = arg('--views', null) ? JSON.parse(await fs.readFile(arg('--views', null), 'utf8'))
+    : args.includes('--jonctions') ? JUNCTIONS : VIEWS;
+  await shoot({
+    root: ROOT, views, out: OUT, day: DAY, w: W, h: H, only: ONLY ? ONLY.split(',') : null,
+    query: { zone: arg('--zone', null), forme: arg('--forme', null), echelle: arg('--echelle', null),
+      cycle: DAY ? null : arg('--cycle', null), pluie: arg('--pluie', null), rendu: arg('--rendu', 'webgl') },
+  });
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {

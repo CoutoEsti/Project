@@ -1,28 +1,39 @@
 // MTL — the map, driven. Loads real Montréal, builds the chosen zone at the
 // chosen scale, puts a car in it, and lets you drive it or fly over it.
 //
-// Settings come from carte.json, then the address overrides them:
-//   ?zone=centre|anneau  &echelle=100|85|70   (or #centre-85 in the preview)
+// Settings come from carte.json, then the last map played on this browser
+// (localStorage), then the address overrides them:
+//   ?zone=coeur|centre|anneau  &echelle=100|85|70   (or #centre-85 in the preview)
 //   ?forme=<code>         a zone drawn in zones.html (the address that tool gives)
 // Other parameters:
 //   ?spawn=<id>           start driving at a spawn point (see map/montreal.js)
 //   ?fly=1  or  #vol      start in free flight, over the whole map
 //   ?cam=x,n,h,tx,tn,th   start in free flight, camera and target (map frame)
 //   ?voiture=1|2|3       the car: 180, 250 or 350 km/h (V or 1 2 3 in the game)
-//   ?day=1                start by day
+//   ?day=1  ?nuit=1       a fixed sky: day or night (by default the sky follows
+//                         the shared clock: 15 min of night, 3 min 30 of day)
+//   ?cycle=<seconds>      the sky frozen that far into the cycle (1000: dusk)
+//   ?pluie=0..1           how hard it rains, whatever the clock says
 //   ?low=1                phone settings: no bloom, lower resolution
 //   ?rendu=webgl|webgpu   force a renderer (default: WebGPU where there is one, WebGL on phones)
 //   ?trafic=0             empty streets (?trafic=40: 40 cars at full density)
 //   ?heure=17:30          time of day for the traffic (trafic.json says "reelle": the clock)
+//   ?objets=local         custom objects from objets.html's working copy, not objets.json
+//   ?voir=x,n             start in free flight, looking at (x, n), real metres
 
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { buildWorld } from './world/build.js';
 import { createSky } from './world/sky.js';
-import { applyMaterialNodes, applySkyNodes } from './world/nodes.js';
+import { applyMaterialNodes, applySkyNodes, applyRainNodes, createGpuPost } from './world/nodes.js';
+import { GradeShader } from './world/grade.js';
+import { SpeedBlurShader, blurAt } from './world/speedblur.js';
+import { createRain } from './world/rain.js';
+import { skyAt, sharedClock } from './world/daycycle.js';
 import { loadSource, fetchReader } from './map/source.js';
 import { ZONES, ECHELLES, resolveSettings } from './map/zones.js';
 import { resolveSpawn } from './game/spawn.js';
@@ -41,6 +52,8 @@ import { buildNetwork } from './traffic/network.js';
 import { Traffic, TICK } from './traffic/sim.js';
 import { createTrafficView } from './traffic/render.js';
 import { createDensity, startHour } from './traffic/density.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { readDoc, getModel } from './objets-store.js';
 
 const params = new URLSearchParams(location.search);
 // The preview only passes a bare #anchor: tokens like #centre-85-vol.
@@ -50,6 +63,7 @@ for (const t of hashTokens) {
   else if (/^\d+$/.test(t)) params.set('echelle', t);
   else if (t === 'vol') params.set('fly', '1');
   else if (t === 'jour') params.set('day', '1');
+  else if (t === 'nuit') params.set('nuit', '1');
 }
 const LOW = params.has('low') || /iPhone|iPad|Android/i.test(navigator.userAgent);
 const STEP = 1 / 120;           // physics rate, independent of the display
@@ -60,7 +74,7 @@ let canvas = $('view');
 
 // The renderer: WebGPU where the browser has it, the WebGL one otherwise, on
 // phones, or with ?rendu=webgl. Same scene either way; WebGPU only needs the
-// custom shaders written again in TSL (world/nodes.js) and its own bloom.
+// custom shaders written again in TSL (world/nodes.js) and its own post chain.
 const gpu = await startWebGPU();
 const renderer = gpu ? gpu.renderer
   : new THREE.WebGLRenderer({ canvas, antialias: !LOW, powerPreference: 'high-performance' });
@@ -75,38 +89,30 @@ const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.3, 12
 // The WebGPU namespace brings its own PMREMGenerator for the sky's reflections.
 const sky = createSky(gpu ? gpu.THREE : THREE, scene, renderer);
 if (gpu) applySkyNodes(gpu.THREE, gpu.TSL, sky);
+const { composer, bloom, speedBlur } = gpu
+  ? createGpuPost(gpu.THREE, gpu.TSL, gpu.bloomNode, renderer, scene, camera, { grade: !LOW })
+  : glPost();
 
-const composer = gpu ? gpuComposer(gpu, scene, camera) : glComposer();
-const bloom = composer.bloom;
-
-function glComposer() {
-  const c = new EffectComposer(renderer);
-  c.addPass(new RenderPass(scene, camera));
-  c.bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.7, 0.4, 0.88);
-  c.addPass(c.bloom);
-  c.addPass(new OutputPass());
-  return c;
-}
-
-/** The same chain on WebGPU: scene, bloom (night only), tone mapping. */
-function gpuComposer({ THREE: G, TSL, bloomNode }, scene, camera) {
-  const color = TSL.pass(scene, camera).getTextureNode('output');
-  const glow = bloomNode(color, 0.7, 0.4, 0.88);
-  const pipeline = new G.RenderPipeline(renderer, color.add(glow));
-  let on = true;
-  return {
-    bloom: {
-      get enabled() { return on; },
-      set enabled(v) {
-        if (v === on) return;
-        on = v;
-        pipeline.outputNode = v ? color.add(glow) : color;
-        pipeline.needsUpdate = true;
-      },
-    },
-    render() { pipeline.render(); },
-    setSize() { /* the pass follows the renderer */ },
-  };
+function glPost() {
+  // The composer renders into its own targets, which ignore the canvas's
+  // `antialias`: without samples here every edge in the city is a staircase.
+  const pixels = new THREE.Vector2();
+  renderer.getDrawingBufferSize(pixels);
+  const composer = new EffectComposer(renderer, new THREE.WebGLRenderTarget(pixels.x, pixels.y, {
+    type: THREE.HalfFloatType, samples: LOW ? 0 : 4,
+  }));
+  composer.addPass(new RenderPass(scene, camera));
+  const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.7, 0.4, 0.88);
+  composer.addPass(bloom);
+  const speedBlur = new ShaderPass(SpeedBlurShader);
+  speedBlur.uniforms.centre.value = new THREE.Vector2(0.5, 0.45);
+  speedBlur.enabled = false;
+  composer.addPass(speedBlur);
+  composer.addPass(new OutputPass());
+  const grade = new ShaderPass(GradeShader);
+  grade.enabled = !LOW;
+  composer.addPass(grade);
+  return { composer, bloom, speedBlur, grade };
 }
 
 async function startWebGPU() {
@@ -149,6 +155,13 @@ async function startWebGPU() {
 }
 
 // --- the world ---------------------------------------------------------------
+/** The parked cars' model: the generated Civic, painted per instance, lights off. */
+function parkedCar(THREE) {
+  const c = createCar(THREE, { color: 0xffffff });
+  c.setLights(false, false);
+  c.group.userData.headMat.color.setHex(0x2a2a2a);
+  return { object: c.group, paint: c.group.children[0].material };
+}
 const stepLabel = $('loading-step');
 const nextFrame = () => new Promise((r) => requestAnimationFrame(() => r()));
 let fileSettings = {};
@@ -156,11 +169,55 @@ try {
   const r = await fetch('carte.json');
   if (r.ok) fileSettings = await r.json();
 } catch (e) { /* no file: the defaults */ }
-const settings = resolveSettings(fileSettings, params);
+// The map you chose last time — a named zone or one you drew — until you
+// pick another: the address only when it names one.
+const MAP_KEY = 'mtl.carte.v1';
+let remembered = null;
+try { remembered = JSON.parse(localStorage.getItem(MAP_KEY) || 'null'); } catch (e) { /* private mode */ }
+const named = ['zone', 'forme', 'echelle'].some((k) => params.has(k));
+const settings = resolveSettings(!named && remembered ? { ...fileSettings, ...remembered } : fileSettings, params);
+try {
+  localStorage.setItem(MAP_KEY, JSON.stringify({ zone: settings.zone === 'perso' ? settings.forme : settings.zone, echelle: settings.echelle }));
+} catch (e) { /* private mode: not remembered */ }
+// Custom objects (map/objets.js): the published objets.json, or the editor's
+// working copy for a preview. Missing or broken, the world simply has none.
+const LOCAL_OBJETS = params.get('objets') === 'local';
+let objets = null;
+if (LOCAL_OBJETS) objets = readDoc();
+else {
+  try {
+    const r = await fetch('objets.json');
+    if (r.ok) objets = await r.json();
+  } catch (e) { /* no custom objects */ }
+}
+const gltf = new GLTFLoader();
+const models = new Map();
+/** One parse per model file, however many times it is placed. */
+function loadModel(path) {
+  if (!models.has(path)) {
+    models.set(path, (async () => {
+      try {
+        let bytes = LOCAL_OBJETS ? await getModel(path) : null;
+        if (!bytes) {
+          const r = await fetch(path);
+          if (!r.ok) return null;
+          bytes = await r.arrayBuffer();
+        }
+        const g = await gltf.parseAsync(bytes, '');
+        return g.scene || (g.scenes && g.scenes[0]) || null;
+      } catch (e) {
+        console.warn(`[mtl] objet ${path} illisible`, e);
+        return null;
+      }
+    })());
+  }
+  return models.get(path);
+}
 stepLabel.textContent = 'données';
 const source = await loadSource(fetchReader('data/'));
 const world = await buildWorld(THREE, source, {
-  settings, onStep: (s) => { stepLabel.textContent = s; }, pause: nextFrame,
+  settings, onStep: (s) => { stepLabel.textContent = s; }, pause: nextFrame, objets, loadModel,
+  parkedModel: parkedCar,
 });
 if (gpu) applyMaterialNodes(gpu.THREE, gpu.TSL, world.materials);
 scene.add(world.root);
@@ -169,7 +226,7 @@ await nextFrame();
 const { layout, structures } = world;
 const surface = createSurface(layout, structures);
 const solids = buildSolids(layout, structures, world.buildings, {
-  lamps: world.lamps, trees: world.trees, footprints: world.footprints,
+  lamps: world.lamps, trees: world.trees, parked: world.parked, footprints: world.footprints,
 });
 const game = { layout, structures, surface, solids };
 
@@ -233,6 +290,18 @@ async function setCar(index, announce = false) {
   car = model || createCar(THREE, { color: def.color, lowering: def.lowering, spoiler: def.spoiler });
   car.group.name = 'Voiture';
   scene.add(car.group);
+  dressCar();
+}
+/** Give the car its own reflections (see carEnvironment in world/sky.js). */
+function dressCar() {
+  const env = sky.carEnvironment();
+  if (!car || !env) return;
+  car.group.traverse((o) => {
+    if (!o.material || !o.material.isMeshStandardMaterial) return;
+    o.material.envMap = env;
+    o.material.envMapIntensity = night ? 0.9 : 1;
+    o.material.needsUpdate = true;
+  });
 }
 const garage = $('garage');
 for (const [i, def] of CARS.entries()) {
@@ -268,19 +337,56 @@ if (wantsTouch()) {
   input.bindTouch($('touch'));
 }
 
-// --- night and day -----------------------------------------------------------
-let night = !params.has('day');
+// --- night and day, and rain --------------------------------------------------
+// The sky follows the shared clock (world/daycycle.js): every player sees the
+// same hour and the same rain without a word exchanged. The address or N can
+// fix it at night or by day instead.
+const SKY_MODES = ['cycle', 'night', 'day'];
+let skyMode = params.has('day') ? 'day' : params.has('nuit') ? 'night' : 'cycle';
+const frozenAt = params.has('cycle') ? Number(params.get('cycle')) || 0 : null;
+const forcedRain = params.has('pluie') ? Math.min(1, Math.max(0, Number(params.get('pluie')) || 0)) : null;
+let night = true;      // more night than day: for what simply switches on or off
+let nightK = 1;        // 0 by day, 1 by night, in between at dusk and dawn
+let rainK = 0;
 let fogBase = 0;
-function setNight(v) {
-  night = v;
-  sky.set(night ? 'night' : 'day');
-  world.materials.setNight(night);
-  bloom.enabled = night && !LOW;
-  if (trafficView) trafficView.setNight(night);
-  renderer.toneMappingExposure = night ? 1.15 : 1.0;
-  fogBase = scene.fog.density;
+let lastSky = null;
+const rain = createRain(THREE, { count: LOW ? 2500 : 6000 });
+if (gpu) applyRainNodes(gpu.THREE, gpu.TSL, rain.object);
+scene.add(rain.object);
+
+function skyNow() {
+  let s;
+  if (skyMode === 'day') s = { daylight: 1, twilight: 0, rain: 0 };
+  else if (skyMode === 'night') s = { daylight: 0, twilight: 0, rain: 0 };
+  else s = skyAt(frozenAt ?? sharedClock());
+  if (forcedRain != null) s.rain = forcedRain;
+  return s;
 }
-setNight(night);
+function applySky(force = false) {
+  const s = skyNow();
+  const same = (k) => Math.abs(lastSky[k] - s[k]) < 0.002;
+  if (!force && lastSky && same('daylight') && same('twilight') && same('rain')) return;
+  lastSky = s;
+  const was = night;
+  // On a phone the environment is baked again less often: it costs a stall.
+  night = sky.set(s, { step: LOW ? 0.2 : 0.05 });
+  nightK = 1 - s.daylight;
+  rainK = s.rain;
+  world.materials.setNight(nightK);
+  world.materials.setWet(rainK);
+  bloom.enabled = nightK > 0.05 && !LOW;
+  bloom.strength = 0.7 * Math.min(1, nightK * 1.5);
+  if (trafficView) trafficView.setNight(nightK);
+  renderer.toneMappingExposure = 1 + 0.15 * nightK;
+  fogBase = scene.fog.density;
+  if (force || was !== night) dressCar();
+}
+/** Fix the sky at night (true) or by day (false). */
+function setNight(v) {
+  skyMode = v ? 'night' : 'day';
+  applySky(true);
+}
+applySky(true);
 
 // --- free flight -------------------------------------------------------------
 const fly = new FlyCamera(camera, canvas, game);
@@ -325,7 +431,8 @@ for (const b of document.querySelectorAll('[data-mode]')) {
     // The preview keeps only a bare #anchor; a local server keeps both.
     const tokens = [zoneSel.value, scaleSel.value];
     if (flying) tokens.push('vol');
-    if (!night) tokens.push('jour');
+    if (skyMode === 'day') tokens.push('jour');
+    else if (skyMode === 'night') tokens.push('nuit');
     location.hash = tokens.join('-');
     location.reload();
   });
@@ -411,7 +518,12 @@ function act(action) {
     case 'camera': if (!flying) chase.cycle(); break;
     case 'map': hud.toggleMap(info()); break;
     case 'close': hud.closeMap(); break;
-    case 'night': setNight(!night); break;
+    case 'night': {
+      skyMode = SKY_MODES[(SKY_MODES.indexOf(skyMode) + 1) % SKY_MODES.length];
+      applySky(true);
+      toast({ cycle: 'Ciel : suit l’horloge (15 min de nuit)', night: 'Ciel : nuit', day: 'Ciel : jour' }[skyMode]);
+      break;
+    }
     case 'fly': setFlying(!flying); break;
     case 'overview': setFlying(true); fly.overview(); break;
     case 'drop': {
@@ -482,8 +594,14 @@ function updateDetails(dt) {
   for (const [key, list] of world.details) {
     const b = world.tiles.bounds(key);
     const dx = Math.max(b.x0 - cx, 0, cx - b.x1), dn = Math.max(b.n0 - cn, 0, cn - b.n1);
-    const show = Math.hypot(dx, dn) < reach;
-    for (const o of list) o.visible = show;
+    const d = Math.hypot(dx, dn);
+    // Some things carry their own, shorter reach (parked cars: a thousand
+    // triangles each, unreadable past a few hundred metres).
+    for (const o of list) {
+      if (!o.userData.reach) { o.visible = d < reach; continue; }
+      const c = o.boundingSphere.center;
+      o.visible = Math.hypot(c.x - cx, -c.z - cn) - o.boundingSphere.radius < o.userData.reach;
+    }
   }
   const far = flying ? 40000 : 7000;
   if (camera.far !== far) { camera.far = far; camera.updateProjectionMatrix(); }
@@ -547,13 +665,13 @@ function frame(now) {
   car.group.rotation.set(-(pose.pitch + v.bodyPitch), Math.PI - pose.heading, -pose.roll, 'YXZ');
   car.setSteer(-v.steerAngle);
   car.setSpin(v.wheelSpin);
-  car.setLights(night, input.brake > 0.1 && v.u > 0.5);
-  car.setUnderglow(night, 0x22ccff, 1);
+  car.setLights(nightK > 0.35, input.brake > 0.1 && v.u > 0.5);
+  car.setUnderglow(nightK > 0.15, 0x22ccff, nightK);
   const fx = Math.sin(pose.heading), fn = Math.cos(pose.heading);
   headlight.position.set(pose.x + fx * 2.1, pose.y + 0.8, -(pose.n + fn * 2.1));
   headlight.target.position.set(pose.x + fx * 28, pose.y - 0.4, -(pose.n + fn * 28));
   headlight.target.updateMatrixWorld();
-  headlight.intensity = night ? 260 : 0;
+  headlight.intensity = 260 * Math.min(1, Math.max(0, (nightK - 0.2) / 0.5));
 
   // Camera. From above, the fog thins out, or the map would vanish in it.
   if (flying) {
@@ -608,6 +726,11 @@ function frame(now) {
   }
 
   const t = clock.getElapsedTime();
+  applySky();
+  rain.update(t, camera, rainK, nightK);
+  const blur = flying || LOW ? 0 : blurAt(driver.kmh);
+  speedBlur.enabled = blur > 0.001;
+  speedBlur.uniforms.amount.value = blur;
   for (const a of world.animated) a.update(t);
   sky.follow(camera);
   composer.render();
@@ -617,10 +740,18 @@ function frame(now) {
 
 hud.show();
 $('loading').classList.add('done');
+if (LOCAL_OBJETS) toast(`Aperçu local : ${(world.map.objets || []).length} objet(s) de l’éditeur`, 4);
 if (params.has('cam')) {
   const c = params.get('cam').split(',').map(Number);
   setFlying(true);
   fly.lookAt(...c);
+} else if (params.has('voir')) {
+  // Looking at one spot from the air: what objets.html's « Voir dans le jeu » opens.
+  const [vx, vn] = params.get('voir').split(',').map(Number);
+  const k = layout.map.scale, T = layout.terrain;
+  const tx = (vx || 0) * k, tn = (vn || 0) * k, th = T.height(tx, tn);
+  setFlying(true);
+  fly.lookAt(tx - 55, tn - 75, th + 55, tx, tn, th + 4);
 } else if (params.has('fly') || location.hash === '#vol') {
   setFlying(true);
   fly.overview(false);
@@ -639,6 +770,8 @@ window.__mtl = {
   camera,
   scene,
   setNight,
+  /** The sky now: { daylight, twilight, rain, phase }. */
+  sky: () => ({ ...lastSky, mode: skyMode }),
   frames: () => frames,
   /** Free-flight view from (x, n, h) towards (tx, tn, th), map frame. */
   look(x, n, h, tx, tn, th) {

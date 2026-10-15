@@ -23,12 +23,60 @@ const FRONT_PATTERN = /front|fore|avant|_f[lr]?\b|_av|f[lr]$|\bfw/i;
 const REAR_PATTERN = /rear|back|arriere|arrière|_r[lr]?\b|_ar|r[lr]$|\brw/i;
 const GLASS_PATTERN = /glass|window|windshield|windscreen|vitre|verre|pare.?brise/i;
 const LIGHT_PATTERN = /head.?l(ight|amp)|phare|tail.?l(ight|amp)|feu/i;
+const PAINT_PATTERN = /paint|peinture/i;
 
 let loader = null;
 
 function getLoader() {
   if (!loader) loader = new GLTFLoader();
   return loader;
+}
+
+// One download and one parse per file, however many cars use it: the player
+// switching cars, and every other player's car in multiplayer. Each call gets
+// its own copy, materials included, since each car is painted its own colour.
+const cache = new Map();
+
+function parsed(url) {
+  if (!cache.has(url)) cache.set(url, parse(url));
+  return cache.get(url).then((root) => (root ? copy(root) : null));
+}
+
+async function parse(url) {
+  let gltf;
+  try {
+    gltf = await getLoader().loadAsync(url);
+  } catch (err) {
+    if (/DRACOLoader/i.test(String(err && err.message))) {
+      console.warn(
+        `[mtl] ${url} est compressé avec Draco, non pris en charge ici ` +
+        '(mtl/vendor n\'a pas le décodeur) : ré-exporte sans Draco, par ' +
+        'exemple depuis Blender sans l\'option de compression, ou repasse-le ' +
+        'par hop/tools/prepare-model.mjs en sautant l\'étape draco. ' +
+        'On garde la voiture générée.',
+      );
+    } else {
+      console.warn('[mtl] modèle 3D illisible, on garde la voiture générée', err);
+    }
+    return null;
+  }
+  return gltf.scene || (gltf.scenes && gltf.scenes[0]) || null;
+}
+
+/** A deep copy that shares geometry and textures but not materials. */
+function copy(root) {
+  const out = root.clone(true);
+  const mats = new Map();
+  const own = (m) => {
+    if (!m) return m;
+    if (!mats.has(m)) mats.set(m, m.clone());
+    return mats.get(m);
+  };
+  out.traverse((o) => {
+    if (!o.material) return;
+    o.material = Array.isArray(o.material) ? o.material.map(own) : own(o.material);
+  });
+  return out;
 }
 
 /**
@@ -48,25 +96,7 @@ export async function loadCarModel(THREE, url, opts = {}) {
     return null;
   }
 
-  let gltf;
-  try {
-    gltf = await getLoader().loadAsync(url);
-  } catch (err) {
-    if (/DRACOLoader/i.test(String(err && err.message))) {
-      console.warn(
-        `[mtl] ${url} est compressé avec Draco, non pris en charge ici ` +
-        '(mtl/vendor n\'a pas le décodeur) : ré-exporte sans Draco, par ' +
-        'exemple depuis Blender sans l\'option de compression, ou repasse-le ' +
-        'par hop/tools/prepare-model.mjs en sautant l\'étape draco. ' +
-        'On garde la voiture générée.',
-      );
-    } else {
-      console.warn('[mtl] modèle 3D illisible, on garde la voiture générée', err);
-    }
-    return null;
-  }
-
-  const root = gltf.scene || (gltf.scenes && gltf.scenes[0]);
+  const root = await parsed(url);
   if (!root) return null;
 
   // --- normalise size and orientation --------------------------------------
@@ -114,6 +144,9 @@ export async function loadCarModel(THREE, url, opts = {}) {
       // Only take the outermost node of a wheel: a rim inside a tyre would
       // otherwise get spun twice.
       if (!wheels.some((w) => isAncestor(w.node, node))) {
+        // Steer about the car's vertical, then spin about the steered axle:
+        // in the default XYZ order the spin would tip a steered wheel.
+        node.rotation.reorder('YXZ');
         wheels.push({ node, front, baseRotation: node.rotation.clone() });
       }
       return;
@@ -125,8 +158,23 @@ export async function loadCarModel(THREE, url, opts = {}) {
   });
 
   // --- upgrade the materials ------------------------------------------------
+  // A model that names its paint ("Body Paint", "Paint DR"...) gets every one
+  // of those repainted, so doors and fuel flap match the body. Otherwise, a
+  // model with no textures at all is almost certainly untextured
+  // primary-colour placeholder art: its first plain material gets the paint.
   const paint = new THREE.Color(opts.color ?? 0xc0392b);
-  let repainted = false;
+  const named = [];
+  root.traverse((o) => {
+    if (!o.isMesh) return;
+    for (const m of [].concat(o.material)) if (m && PAINT_PATTERN.test(m.name || '')) named.push(m);
+  });
+  const repaint = (m) => {
+    m.color.copy(paint);
+    m.metalness = Math.min(0.3, m.metalness ?? 0.2);
+    m.roughness = 0.35;
+  };
+  for (const m of new Set(named)) repaint(m);
+  let repainted = named.length > 0;
 
   for (const mesh of bodies) {
     mesh.castShadow = true;
@@ -135,12 +183,8 @@ export async function loadCarModel(THREE, url, opts = {}) {
     for (const m of materials) {
       if (!m || !m.isMeshStandardMaterial) continue;
       m.envMapIntensity = 1.1;
-      // A model with no textures at all is almost certainly untextured
-      // primary-colour placeholder art: give it the game's paint.
       if (!m.map && !repainted && m.color && m.color.getHex() !== 0x000000) {
-        m.color.copy(paint);
-        m.metalness = Math.min(0.3, m.metalness ?? 0.2);
-        m.roughness = 0.35;
+        repaint(m);
         repainted = true;
       }
     }
@@ -209,8 +253,10 @@ export async function loadCarModel(THREE, url, opts = {}) {
       }
     },
     dispose() {
+      // Geometry and textures are shared with every other copy of this file
+      // (see parsed()): only this car's own materials and glow go.
+      glowGeo.dispose();
       group.traverse((o) => {
-        if (o.geometry) o.geometry.dispose();
         const mats = Array.isArray(o.material) ? o.material : [o.material];
         for (const m of mats) if (m && m.dispose) m.dispose();
       });

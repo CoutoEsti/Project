@@ -8,8 +8,13 @@
 
 // Roads built whole as a structure of their own rather than as streets.
 export const BRIDGES = {
-  // The main span clears the seaway by some 49 m.
-  'Pont Jacques-Cartier': { cls: 'bridge', peak: 30, structure: 'jacques-cartier' },
+  // The main span clears the river by some 49 m. On Île Sainte-Hélène the
+  // deck comes down to meet the island's ramps, 8 m over the ground under
+  // it (~29.5 m above sea level at the ramps, 10 to 12 m over the loop ramp
+  // and the island's road that pass under it). OpenStreetMap gives the bridge
+  // and its ramps layer 1 throughout, no height: the 8 m is where the ramps,
+  // drawn as they are, meet the deck within their grade.
+  'Pont Jacques-Cartier': { cls: 'bridge', peak: 30, island: 8, structure: 'jacques-cartier' },
   // The Formula 1 track: barriers and floodlights instead of sidewalks.
   'Circuit Gilles-Villeneuve': { cls: 'circuit' },
 };
@@ -90,11 +95,13 @@ export const LANDMARKS = [
 // Where you start: on a named road, near a point, facing roughly `heading`.
 // Resolved on the compiled map (the nearest sample of that road going that
 // way), so they survive any zone and any scale.
+// The first one in the zone is where the game starts when ?spawn= names none
+// (Décarie, else Sainte-Catherine).
 export const SPAWNS = [
   { id: 'decarie', name: 'Tranchée Décarie', road: 'Autoroute Décarie', x: -3780, n: 2600, heading: 180 },
   { id: 'metropolitaine', name: 'Sur la Métropolitaine', road: 'Autoroute Métropolitaine', x: 1200, n: 5900, heading: 90 },
-  { id: 'ville-marie', name: 'Tunnel Ville-Marie', road: 'Autoroute Ville-Marie', x: 300, n: -550, heading: 90 },
   { id: 'centre-ville', name: 'Rue Sainte-Catherine', road: 'Rue Sainte-Catherine Ouest', x: 0, n: 0, heading: 90 },
+  { id: 'ville-marie', name: 'Tunnel Ville-Marie', road: 'Autoroute Ville-Marie', x: 300, n: -550, heading: 90 },
   { id: 'vieux-port', name: 'Rue de la Commune', road: 'Rue de la Commune Ouest', x: 900, n: -1400, heading: 90 },
   { id: 'plateau', name: 'Avenue du Mont-Royal', road: 'Avenue du Mont-Royal Est', x: 2000, n: 1950, heading: 90 },
   { id: 'camillien-houde', name: 'Voie Camillien-Houde', road: 'Voie Camillien-Houde', x: 620, n: 1960, heading: 270 },
