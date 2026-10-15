@@ -234,6 +234,47 @@ Montréal humide d'un soir d'été, où les enseignes gagnent sur le sodium.
 - **Ouvrages** : carreaux des tunnels et dessous de tabliers légèrement
   éclairés la nuit ; houppiers des arbres ombrés par-dessous, sans facettes.
 
+## Rendu : WebGPU, repli WebGL
+
+Sur ordinateur, le jeu dessine en **WebGPU** (le `WebGPURenderer` de
+three.js) quand le navigateur l'a : Chrome et Edge, Safari 26, Firefox sur
+Windows. Sinon, ou avec `?rendu=webgl`, il prend l'ancien moteur WebGL, qui
+reste tel quel. **Les téléphones restent en WebGL** tant que WebGPU n'y a pas
+été mesuré : `?rendu=webgpu` pour l'essayer sur un iPhone. La scène, les matériaux et la physique sont les mêmes ; les
+deux rendus donnent la même image (comparées avec `shots.mjs --rendu`), à
+l'antialiasing près : en WebGPU les arêtes sont lissées (MSAA 4×), en WebGL
+non.
+
+- **Ce qui a été réécrit** : les shaders maison, en TSL (le langage de
+  nœuds de three.js, compilé en WGSL) dans `world/nodes.js` — façades
+  (fenêtres en creux, portes, relief des joints), asphalte sans répétition,
+  flaques de lumière étirées, ciel, pluie — et la chaîne d'effets : bloom
+  (`vendor/jsm/tsl/display/BloomNode.js`), flou de vitesse, étalonnage.
+  **Tout nouveau shader GLSL (`onBeforeCompile`, `ShaderMaterial`,
+  `ShaderPass`) doit avoir son double dans `world/nodes.js`**, sinon WebGPU
+  l'ignore sans erreur.
+- **Le bloom** : `UnrealBloomPass` ajoute son halo en mélange `SrcAlpha`, et
+  l'alpha du halo vaut force × 3 ; le `BloomNode` de WebGPU, non. Le halo
+  WebGPU est donc multiplié par son alpha pour donner la même nuit.
+- **Ce que ça coûte** : `three.webgpu.min.js` (650 Ko, ≈ 170 Ko compressé),
+  chargé seulement quand WebGPU est là.
+- **Ce que ça ne fait pas encore** : l'image est la même qu'avant. Le gain
+  vient ensuite : plus d'objets à l'écran (calcul sur la carte graphique),
+  meilleurs effets de nuit.
+- **Correctifs locaux** : `vendor/three.webgpu.min.js` est la r185 avec deux
+  changements, à refaire si on met three.js à jour :
+  - `this.swizzle=void 0` au lieu de `"rgba"` (deux fois) : la r185 passe ce
+    champ à `createView`, et un Chrome qui a l'ancienne forme de ce champ
+    plante dessus (vu sur Chromium 141).
+  - Dans le code des `InstancedMesh` (fonction qui teste
+    `getUniformBufferLimit()`), les matrices d'instances passent toujours par
+    l'attribut, jamais par un tableau uniforme. Le tableau met le nombre
+    d'instances dans le shader : un shader par objet instancié (165 au départ,
+    +167 en survolant l'île, autant de saccades). Avec l'attribut : 60, +7.
+- **Tester sans carte graphique** : Chromium headless a besoin de
+  `--enable-unsafe-webgpu --enable-features=Vulkan --use-vulkan=swiftshader
+  --use-webgpu-adapter=swiftshader` ; `check.mjs` et `shots.mjs` les passent.
+
 ## Comment c'est fait
 
 ```
@@ -318,8 +359,9 @@ Rafraîchir les données (réseau requis, ~5 min) :
 node mtl/tools/check.mjs                         # ~2 min : profils, repères, conduite, filet
 node mtl/tools/check.mjs --vise decarie          # la modif vise Décarie : la carte peut changer là, nulle part ailleurs
 node mtl/tools/check.mjs --zone centre --echelle 85
-node mtl/tools/check.mjs --browser               # + la vraie page dans Chromium headless
-node mtl/tools/shots.mjs --day                   # captures → mtl/.shots/
+node mtl/tools/check.mjs --browser               # + la vraie page dans Chromium headless (WebGPU)
+node mtl/tools/check.mjs --browser --rendu webgl # la même chose sur le rendu WebGL
+node mtl/tools/shots.mjs --day                   # captures → mtl/.shots/ (--rendu webgpu pour comparer)
 node mtl/tools/plan.mjs --png                    # régénère docs/plan.png
 node mtl/tools/export.mjs                        # export Unity → mtl/export/
 node mtl/tools/voitures.mjs                      # pointes des trois voitures (±5 %) et changement en roulant

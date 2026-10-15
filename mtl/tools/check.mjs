@@ -11,6 +11,8 @@
 //   node mtl/tools/check.mjs --vise decarie   → the change aims at Décarie: the
 //                                           safety net (tools/filet.mjs) lets
 //                                           the map change there, nowhere else
+//   node mtl/tools/check.mjs --browser --rendu webgl   → the page on WebGL
+//                                           (default: WebGPU, as players get it)
 //
 // Driving is measured, not eyeballed: an autopilot follows each motorway from
 // one OpenStreetMap way to the next in the right-hand lane, and every impact,
@@ -829,7 +831,9 @@ drive('circuit Gilles-Villeneuve', ['Circuit Gilles-Villeneuve', 2300, -3200, 18
 if (BROWSER) {
   const { server, url } = await serve(ROOT);
   const { chromium } = await loadPlaywright();
-  const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+  const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist',
+    '--enable-unsafe-webgpu', '--enable-features=Vulkan', '--use-vulkan=swiftshader', '--use-webgpu-adapter=swiftshader'] });
+  const rendu = arg('--rendu', 'webgpu');
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
@@ -844,12 +848,14 @@ if (BROWSER) {
     errors.push(m.text());
   });
   const tl = Date.now();
-  await page.goto(`${url}/index.html?spawn=decarie&${settings.forme ? `forme=${arg('--forme', '')}` : `zone=${settings.zone}`}&echelle=${settings.echelle}`);
+  await page.goto(`${url}/index.html?spawn=decarie&${settings.forme ? `forme=${arg('--forme', '')}` : `zone=${settings.zone}`}&echelle=${settings.echelle}&rendu=${rendu}`);
   await page.waitForFunction(() => window.__mtl && window.__mtl.ready, null, { timeout: 300000 });
   await page.waitForFunction(() => window.__mtl.frames() > 3, null, { timeout: 120000 });
   const load = (Date.now() - tl) / 1000;
   const stats = await page.evaluate(() => window.__mtl.stats());
   const settingsHidden = await page.evaluate(() => getComputedStyle(document.getElementById('settings')).display === 'none');
+  const got = await page.evaluate(() => window.__mtl.rendu);
+  check(`rendu ${rendu}`, got === rendu, got === rendu ? '' : `la page a démarré en ${got}`);
   check('la page se charge', settingsHidden, `${load.toFixed(1)} s (SwiftShader), ${stats.calls} appels, ${(stats.triangles / 1e6).toFixed(2)} M triangles${settingsHidden ? '' : ', le panneau Carte est ouvert'}`);
   const r = await page.evaluate(() => window.__mtl.simulate(6, { throttle: 1 }));
   check('conduite dans la page', r.kmh > 60 && !r.lost && r.maxImpact < 1, `${r.kmh.toFixed(0)} km/h, y = ${r.y.toFixed(2)}, ${r.where ? r.where.name : '?'}`);

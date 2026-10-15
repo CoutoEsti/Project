@@ -6,6 +6,7 @@
 //   node mtl/tools/shots.mjs --views vues.json   (a list of [name, x, n, h, tx, tn, th], as VIEWS)
 //   node mtl/tools/shots.mjs --jonctions         → the junctions of JUNCTIONS instead
 //   node mtl/tools/shots.mjs --cycle 1000 --pluie 1   → at dusk, in the rain
+//   node mtl/tools/shots.mjs --rendu webgpu     → the WebGPU renderer (default: WebGL)
 // Night by default (the sky would otherwise follow the clock).
 //
 // Chromium runs headless on SwiftShader when there is no GPU: slow, but the
@@ -69,7 +70,8 @@ export async function shoot({ root, views, out, day = false, query = {}, w = 128
   await fs.mkdir(out, { recursive: true });
   const { server, url } = await serve(root);
   const { chromium } = await loadPlaywright();
-  const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+  const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist',
+    '--enable-unsafe-webgpu', '--enable-features=Vulkan', '--use-vulkan=swiftshader', '--use-webgpu-adapter=swiftshader'] });
   const page = await browser.newPage({ viewport: { width: w, height: h } });
   const errors = [], shots = [];
   page.on('pageerror', (e) => errors.push(String(e)));
@@ -83,6 +85,7 @@ export async function shoot({ root, views, out, day = false, query = {}, w = 128
     for (const [k, v] of Object.entries(query)) if (v != null) q.set(k, v);
     await page.goto(`${url}/index.html?${q}`);
     await page.waitForFunction(() => window.__mtl && window.__mtl.ready, null, { timeout: 300000 });
+    log(`rendu ${await page.evaluate(() => window.__mtl.rendu || 'webgl')}`);
     log(`chargé en ${((Date.now() - t0) / 1000).toFixed(1)} s`, JSON.stringify(await page.evaluate(() => window.__mtl.world.timings)));
     // clean: the scene alone, without the panels, the mini-map and the
     // district names, which would cover what is being compared.
@@ -123,7 +126,7 @@ async function main() {
   await shoot({
     root: ROOT, views, out: OUT, day: DAY, w: W, h: H, only: ONLY ? ONLY.split(',') : null,
     query: { zone: arg('--zone', null), forme: arg('--forme', null), echelle: arg('--echelle', null),
-      cycle: DAY ? null : arg('--cycle', null), pluie: arg('--pluie', null) },
+      cycle: DAY ? null : arg('--cycle', null), pluie: arg('--pluie', null), rendu: arg('--rendu', 'webgl') },
   });
 }
 
