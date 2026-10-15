@@ -132,6 +132,39 @@ function classify(r, p, side, index, ground, layout) {
   // Two bores diverging under the ground: the lower one's wall would stand
   // in the upper one's lanes.
   if (p.covered && aboveInTunnel) return { kind: 'under' };
+  // Two bores side by side at one level, where a ramp leaves or joins: one
+  // wall between them, halfway, built by the road with the smaller id. Each
+  // its own stood back to back, the one in the other's lanes showing its bare
+  // concrete back there, and crossing each other in teeth where they diverge.
+  if (p.covered) {
+    const off = p.h + WALL_OFFSET + 0.3;
+    const wx = p.x + side * p.lx * off, wn = p.n + side * p.ln * off;
+    for (const o of index.surfacesAt(wx, wn, WALL_OFFSET + 0.6)) {
+      if (o.road === r || !o.covered || Math.abs(o.y - p.y) >= MERGE) continue;
+      const S = o.road.samples, a = S[o.i], b = S[Math.min(S.length - 1, o.i + 1)];
+      // Where one road hands over to the next, they touch end to end: each
+      // keeps its wall up to the seam.
+      if (o.s < 4 || o.s > S[S.length - 1].s - 4) continue;
+      // Across this one at an angle: no side by side to speak of.
+      if (Math.abs(a.tx * p.tx + a.tn * p.tn) < 0.9) continue;
+      const cx = a.x + (b.x - a.x) * o.t, cn = a.n + (b.n - a.n) * o.t;
+      // The other's near and far edges, across this road.
+      const D = side * ((cx - p.x) * p.lx + (cn - p.n) * p.ln), oh = a.h ?? o.road.half;
+      const edge = D - oh, far = D + oh;
+      // Within this road's own width (the same way twice in the data): the
+      // outer wall is this one's, once.
+      if (far < p.h + 0.3) {
+        if (far > p.h - 0.3 && r.id > o.road.id) return { kind: 'shared' };
+        continue;
+      }
+      // Overlapping, and wider on this side: its wall is the outer one.
+      if (edge < p.h) return { kind: 'merge' };
+      // Apart: each its own wall, back to back, unless they would overlap.
+      if (edge - p.h > 2 * (WALL_OFFSET + 0.3)) continue;
+      if (r.id > o.road.id) return { kind: 'shared' };
+      return { kind: p.tunnel ? 'tunnel' : 'covered', off: (p.h + edge) / 2 };
+    }
+  }
   if (p.covered) return { kind: p.tunnel ? 'tunnel' : 'covered' };
   const gk = ground.kindAt(qx, qn);
   if (gk === 'hole') {
@@ -257,7 +290,7 @@ function roadStructures(r, index, ground, layout, out) {
         // Up to the street, or to the deck of the street crossing over.
         const top = (p, j) => (ks[j].kind === 'covered' ? ceilingY(p) + 0.1 : ks[j].g + 0.05);
         out.walls.push({ kind: 'retaining', road: r.id, side, thickness: 0.6,
-          pts: seg.map((p, j) => [...at(p, p.h + WALL_OFFSET + 0.3), p.y - 0.5, top(p, j)]) });
+          pts: seg.map((p, j) => [...at(p, ks[j].off ?? p.h + WALL_OFFSET + 0.3), p.y - 0.5, top(p, j)]) });
         // A fence on the street side wherever the drop is worth falling into.
         // Split where a road passes over.
         let run = [], deep = false;
@@ -277,7 +310,7 @@ function roadStructures(r, index, ground, layout, out) {
         flush();
       } else if (kind === 'tunnel') {
         out.walls.push({ kind: 'tunnel', road: r.id, side, thickness: 0.6,
-          pts: seg.map((p) => [...at(p, p.h + WALL_OFFSET + 0.3), p.y - 0.5, ceilingY(p) + 0.1]) });
+          pts: seg.map((p, j) => [...at(p, ks[j].off ?? p.h + WALL_OFFSET + 0.3), p.y - 0.5, ceilingY(p) + 0.1]) });
       } else if (kind === 'drop') {
         out.barriers.push({ kind: 'guardrail', road: r.id, pts: seg.map((p) => [...at(p, p.h - 0.3), p.y]) });
       } else if (kind === 'grade' && r.cls === 'circuit') {
