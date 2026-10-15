@@ -144,7 +144,8 @@ export class ChaseCamera {
     let ceil = Infinity;
     for (const s of this.world.structures.index.surfacesAt(x, n, 3, this._tmp)) {
       if (!s.covered || Math.abs(s.y - y) > 2.5) continue;
-      ceil = Math.min(ceil, ceilingY(s));
+      // The hit carries the height, not the ground above: that is on the sample.
+      ceil = Math.min(ceil, ceilingY(s.road.samples[s.i] || s));
     }
     return ceil;
   }
