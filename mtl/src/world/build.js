@@ -8,7 +8,7 @@ import { compile, findJoints } from '../map/layout.js';
 import { junctionPatches, streetLandings } from '../map/junctions.js';
 import { buildStructures } from '../map/structures.js';
 import { tiling, byTile } from '../map/tiles.js';
-import { prepareBuildings, clearRoads } from '../map/buildings.js';
+import { prepareBuildings, clearRoads, dropModelsOnRoads } from '../map/buildings.js';
 import { placeStreetLamps, placeTrees, placeParkedCars } from '../map/props.js';
 import { streetMarkings, roadMarkings } from '../map/markings.js';
 import { pointInRing, ringBBox } from '../map/geom.js';
@@ -61,6 +61,8 @@ export async function buildWorld(THREE, source, opts = {}) {
   map.signs = (map.signs || []).concat(exitSigns(layout));
   const tiles = tiling(map);
   const styleAt = (x, n) => map.styleNear(x, n);
+  // City models over a road go whole (their mesh can't be notched).
+  const modelsOffRoad = dropModelsOnRoads(map, layout, structures);
   let buildings = await step('bâtiments', () => clearRoads(prepareBuildings(map, layout, tiles, styleAt), structures.index, layout.streetsAt, layout.terrain, map.scale).buildings);
   const M = await step('matériaux', () => createMaterials(THREE, opts));
 
@@ -167,9 +169,19 @@ export async function buildWorld(THREE, source, opts = {}) {
     list.push(o);
   });
 
+  // City models: the surveyed mesh up close, a box afar (see main.js).
+  const lods = new Map();
+  root.traverse((o) => {
+    if (!o.userData.lod) return;
+    let l = lods.get(o.userData.tile);
+    if (!l) { l = { near: [], far: [] }; lods.set(o.userData.tile, l); }
+    l[o.userData.lod].push(o);
+    o.visible = o.userData.lod === 'far';
+  });
+
   return {
     root, map, layout, structures, buildings, lamps, trees, parked, landmarks, footprints,
-    materials: M, timings: T, animated, tiles, details, stats, settings,
+    materials: M, timings: T, animated, tiles, details, lods, stats, settings,
   };
 }
 

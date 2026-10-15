@@ -42,7 +42,8 @@ export function prepareBuildings(map, layout, tiles, styleAt) {
   for (const b of map.buildings) {
     const ring = b.ring;
     let base = Infinity;
-    for (const [x, n] of ring) base = Math.min(base, T.height(x, n));
+    // A city model stands as one piece: every footprint of it on the lowest point of all.
+    for (const r of b.lod2Rings || [ring]) for (const [x, n] of r) base = Math.min(base, T.height(x, n));
     base = Math.min(base, T.height(b.cx, b.cn)) - 0.3 * s;
     const area = Math.abs(ringArea(ring)) / (s * s);         // real m²
     const style = STYLES[BY_KIND[b.kind] || styleAt(b.cx, b.cn)] || STYLES.walkups;
@@ -66,7 +67,7 @@ export function prepareBuildings(map, layout, tiles, styleAt) {
     let roof = 'flat';
     if ((b.roof === 'gabled' || b.roof === 'hipped' || b.roof === 'gambrel' || b.roof === 'saltbox') && ring.length === 4) roof = 'gable';
     else if (b.roof === 'mansard' && ring.length === 4) roof = 'mansard';
-    else if (real > 55 && hash01(seed * 1000, 3) < 0.6) roof = 'crown';
+    else if (real > 55 && hash01(seed * 1000, 3) < 0.6 && !b.lod2Rings) roof = 'crown';
     // The outdoor staircase: plexes facing a street.
     let front = null;
     let yard = 0;
@@ -76,7 +77,13 @@ export function prepareBuildings(map, layout, tiles, styleAt) {
     }
     out.push({
       id: b.id, name: b.name, ring, base, h, minH: b.minH || 0, facade, roof, floorH, front, yard, stairs: !!front,
-      tile: tiles.key(b.cx, b.cn), cx: b.cx, cn: b.cn, kind: b.kind, scale: s,
+      // A city model's footprints all go with its mesh, so its box and its
+      // mesh never show at once.
+      tile: b.lod2At ? tiles.key(b.lod2At[0], b.lod2At[1]) : tiles.key(b.cx, b.cn), cx: b.cx, cn: b.cn, kind: b.kind, scale: s,
+      lod2: b.lod2 || null, model: !!b.lod2Rings, lod2Rings: b.lod2Rings || null,
+      // A model's footprint holds a podium and a tower alike: the walls
+      // below this height take the district's ordinary facade.
+      facadeLow: style.facades[Math.floor(seed * style.facades.length)], tallFrom: style.tall ? 45 * s : Infinity,
     });
   }
   return out;
@@ -194,6 +201,51 @@ function notch(b, ways, bb, s) {
     parts.push({ ...b, ring, cx: cx / ring.length, cn: cn / ring.length, front: null, stairs: false });
   }
   return parts;
+}
+
+/**
+ * A city model whose walls stand on a road or a street, more than a metre
+ * in (a building since demolished, or the survey and OpenStreetMap
+ * disagreeing), goes, with all its footprints; the footprints it had
+ * replaced come back, for clearRoads to deal with as usual. Changes
+ * map.buildings in place; returns how many models went.
+ */
+export function dropModelsOnRoads(map, layout, structures, IN = 0.5 * map.scale) {
+  const T = layout.terrain, index = structures.index;
+  const groups = new Map();
+  for (const b of map.buildings) {
+    if (!b.lod2Rings) continue;
+    if (!groups.has(b.lod2Rings)) groups.set(b.lod2Rings, []);
+    groups.get(b.lod2Rings).push(b);
+  }
+  const hits = [], stTmp = [];
+  const onRoad = (x, n, y0, y1) => {
+    for (const h of index.surfacesAt(x, n, -IN, hits)) if (!h.covered && !h.tunnel && y1 >= h.y + 0.28 && y0 <= h.y + 1.45) return true;
+    for (const st of layout.streetsAt(x, n, -IN, stTmp)) {
+      const y = T.height(x, n);
+      if (st.cls !== 'plaza' && y1 >= y + 0.28 && y0 <= y + 1.45) return true;
+    }
+    return false;
+  };
+  const drop = new Set(), back = [];
+  for (const [rings, list] of groups) {
+    let base = Infinity;
+    for (const r of rings) for (const [x, n] of r) base = Math.min(base, T.height(x, n));
+    const bad = list.some((b) => b.ring.some((a, i) => {
+      const c = b.ring[(i + 1) % b.ring.length];
+      const L = Math.hypot(c[0] - a[0], c[1] - a[1]), k = Math.max(1, Math.ceil(L));
+      for (let j = 0; j <= k; j++) {
+        if (onRoad(a[0] + (c[0] - a[0]) * j / k, a[1] + (c[1] - a[1]) * j / k, base, base + b.h)) return true;
+      }
+      return false;
+    }));
+    if (!bad) continue;
+    for (const b of list) { drop.add(b); back.push(...b.replaced); }
+  }
+  if (!drop.size) return 0;
+  const kept = map.buildings.filter((b) => !drop.has(b));
+  map.buildings = kept.concat(back);
+  return [...groups.values()].filter((list) => drop.has(list[0])).length;
 }
 
 function guessHeight(b, area, style, seed) {

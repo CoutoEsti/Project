@@ -33,7 +33,7 @@ import { SpeedBlurShader, blurAt } from './world/speedblur.js';
 import { createRain } from './world/rain.js';
 import { skyAt, sharedClock } from './world/daycycle.js';
 import { loadSource, fetchReader } from './map/source.js';
-import { ZONES, ECHELLES, resolveSettings } from './map/zones.js';
+import { ZONES, ECHELLES, resolveSettings, makeZone, zoneDef } from './map/zones.js';
 import { resolveSpawn } from './game/spawn.js';
 import { createSurface } from './map/surface.js';
 import { buildSolids } from './map/collide.js';
@@ -159,7 +159,10 @@ function loadModel(path) {
   return models.get(path);
 }
 stepLabel.textContent = 'données';
-const source = await loadSource(fetchReader('data/'));
+const zoneNow = makeZone(zoneDef(settings));
+// The city's 3D buildings: ?lod2=0 keeps the extruded footprints instead.
+const useLod2 = params.get('lod2') !== '0';
+const source = await loadSource(fetchReader('data/'), { box: zoneNow && zoneNow.bbox, lod2: useLod2 });
 const world = await buildWorld(THREE, source, {
   settings, onStep: (s) => { stepLabel.textContent = s; }, pause: nextFrame, objets, loadModel,
   parkedModel: parkedCar,
@@ -545,6 +548,16 @@ function updateDetails(dt) {
       const c = o.boundingSphere.center;
       o.visible = Math.hypot(c.x - cx, -c.z - cn) - o.boundingSphere.radius < o.userData.reach;
     }
+  }
+  // City models: a few hundred thousand triangles a tile, so only the tiles
+  // around the camera draw them; the others show their boxes.
+  const nearReach = (flying ? Math.min(1500, 600 + alt) : 700) * Math.max(0.7, s);
+  for (const [key, l] of world.lods) {
+    const b = world.tiles.bounds(key);
+    const dx = Math.max(b.x0 - cx, 0, cx - b.x1), dn = Math.max(b.n0 - cn, 0, cn - b.n1);
+    const near = Math.hypot(dx, dn) < nearReach;
+    for (const o of l.near) o.visible = near;
+    for (const o of l.far) o.visible = !near;
   }
   const far = flying ? 40000 : 7000;
   if (camera.far !== far) { camera.far = far; camera.updateProjectionMatrix(); }

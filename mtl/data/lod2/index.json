@@ -1,0 +1,965 @@
+{
+ "tuiles": [
+  {
+   "nom": "CNNDG02_2020_GML",
+   "fichier": "CNNDG02_2020_GML.bin",
+   "arrondissement": "CDNNDG",
+   "annee": 2020,
+   "boite": [
+    -5001,
+    287,
+    -4166,
+    1332
+   ],
+   "batiments": 1207,
+   "triangles": 123128,
+   "octets": 1351217
+  },
+  {
+   "nom": "CNNDG07_2020_GML",
+   "fichier": "CNNDG07_2020_GML.bin",
+   "arrondissement": "CDNNDG",
+   "annee": 2020,
+   "boite": [
+    -5031,
+    1209,
+    -4568,
+    3115
+   ],
+   "batiments": 1072,
+   "triangles": 120177,
+   "octets": 1275228
+  },
+  {
+   "nom": "CNNDG08_2020_GML",
+   "fichier": "CNNDG08_2020_GML.bin",
+   "arrondissement": "CDNNDG",
+   "annee": 2020,
+   "boite": [
+    -4606,
+    1004,
+    -3905,
+    2675
+   ],
+   "batiments": 1413,
+   "triangles": 220955,
+   "octets": 2300923
+  },
+  {
+   "nom": "CNNDG09_2020_GML",
+   "fichier": "CNNDG09_2020_GML.bin",
+   "arrondissement": "CDNNDG",
+   "annee": 2020,
+   "boite": [
+    -4088,
+    148,
+    -3280,
+    2161
+   ],
+   "batiments": 1209,
+   "triangles": 230958,
+   "octets": 2420371
+  },
+  {
+   "nom": "CNNDG10_2020_GML",
+   "fichier": "CNNDG10_2020_GML.bin",
+   "arrondissement": "CDNNDG",
+   "annee": 2020,
+   "boite": [
+    -4359,
+    2211,
+    -3826,
+    4533
+   ],
+   "batiments": 1455,
+   "triangles": 173018,
+   "octets": 1832063
+  },
+  {
+   "nom": "CNNDG11_2020_GML",
+   "fichier": "CNNDG11_2020_GML.bin",
+   "arrondissement": "CDNNDG",
+   "annee": 2020,
+   "boite": [
+    -3843,
+    1883,
+    -1862,
+    2779
+   ],
+   "batiments": 1150,
+   "triangles": 210916,
+   "octets": 2199562
+  },
+  {
+   "nom": "CNNDG12_2020_GML",
+   "fichier": "CNNDG12_2020_GML.bin",
+   "arrondissement": "CDNNDG",
+   "annee": 2020,
+   "boite": [
+    -2365,
+    1655,
+    -676,
+    3214
+   ],
+   "batiments": 312,
+   "triangles": 105638,
+   "octets": 1116446
+  },
+  {
+   "nom": "CNNDG13_2020_GML",
+   "fichier": "CNNDG13_2020_GML.bin",
+   "arrondissement": "CDNNDG",
+   "annee": 2020,
+   "boite": [
+    -3823,
+    2767,
+    -2376,
+    3265
+   ],
+   "batiments": 727,
+   "triangles": 96118,
+   "octets": 1024451
+  },
+  {
+   "nom": "CNNDG14_2020_GML",
+   "fichier": "CNNDG14_2020_GML.bin",
+   "arrondissement": "CDNNDG",
+   "annee": 2020,
+   "boite": [
+    -3794,
+    3241,
+    -2353,
+    3761
+   ],
+   "batiments": 457,
+   "triangles": 81564,
+   "octets": 835073
+  },
+  {
+   "nom": "CNNDG15_2020_GML",
+   "fichier": "CNNDG15_2020_GML.bin",
+   "arrondissement": "CDNNDG",
+   "annee": 2020,
+   "boite": [
+    -2348,
+    3151,
+    -659,
+    3920
+   ],
+   "batiments": 774,
+   "triangles": 132532,
+   "octets": 1391520
+  },
+  {
+   "nom": "CNNDG16_2020_GML",
+   "fichier": "CNNDG16_2020_GML.bin",
+   "arrondissement": "CDNNDG",
+   "annee": 2020,
+   "boite": [
+    -3789,
+    3698,
+    -2337,
+    4313
+   ],
+   "batiments": 1117,
+   "triangles": 126294,
+   "octets": 1340579
+  },
+  {
+   "nom": "CNNDG17_2020_GML",
+   "fichier": "CNNDG17_2020_GML.bin",
+   "arrondissement": "CDNNDG",
+   "annee": 2020,
+   "boite": [
+    -2325,
+    3688,
+    -678,
+    4277
+   ],
+   "batiments": 547,
+   "triangles": 74695,
+   "octets": 783203
+  },
+  {
+   "nom": "CNNDG19_2020_GML",
+   "fichier": "CNNDG19_2020_GML.bin",
+   "arrondissement": "CDNNDG",
+   "annee": 2020,
+   "boite": [
+    -3767,
+    4304,
+    -2318,
+    4961
+   ],
+   "batiments": 557,
+   "triangles": 72514,
+   "octets": 768165
+  },
+  {
+   "nom": "CNNDG20_2020_GML",
+   "fichier": "CNNDG20_2020_GML.bin",
+   "arrondissement": "CDNNDG",
+   "annee": 2020,
+   "boite": [
+    -2302,
+    4240,
+    -637,
+    5150
+   ],
+   "batiments": 1081,
+   "triangles": 113489,
+   "octets": 1214539
+  },
+  {
+   "nom": "CNNDG21_2020_GML",
+   "fichier": "CNNDG21_2020_GML.bin",
+   "arrondissement": "CDNNDG",
+   "annee": 2020,
+   "boite": [
+    -3930,
+    4914,
+    -2670,
+    6154
+   ],
+   "batiments": 525,
+   "triangles": 73712,
+   "octets": 772149
+  },
+  {
+   "nom": "O01_2020_GML",
+   "fichier": "O01_2020_GML.bin",
+   "arrondissement": "O",
+   "annee": 2020,
+   "boite": [
+    -722,
+    2000,
+    730,
+    3436
+   ],
+   "batiments": 571,
+   "triangles": 96150,
+   "octets": 995907
+  },
+  {
+   "nom": "O02_2020_GML",
+   "fichier": "O02_2020_GML.bin",
+   "arrondissement": "O",
+   "annee": 2020,
+   "boite": [
+    -722,
+    2132,
+    799,
+    3649
+   ],
+   "batiments": 1544,
+   "triangles": 222512,
+   "octets": 2358776
+  },
+  {
+   "nom": "O03_2020_GML",
+   "fichier": "O03_2020_GML.bin",
+   "arrondissement": "O",
+   "annee": 2020,
+   "boite": [
+    -673,
+    3625,
+    824,
+    4565
+   ],
+   "batiments": 1422,
+   "triangles": 174272,
+   "octets": 1841516
+  },
+  {
+   "nom": "PMR01_2016_GML",
+   "fichier": "PMR01_2016_GML.bin",
+   "arrondissement": "PMR",
+   "annee": 2016,
+   "boite": [
+    391,
+    257,
+    1305,
+    1951
+   ],
+   "batiments": 1277,
+   "triangles": 215516,
+   "octets": 2257793
+  },
+  {
+   "nom": "PMR02_2016_GML",
+   "fichier": "PMR02_2016_GML.bin",
+   "arrondissement": "PMR",
+   "annee": 2016,
+   "boite": [
+    1270,
+    412,
+    1806,
+    1948
+   ],
+   "batiments": 1988,
+   "triangles": 200234,
+   "octets": 2154154
+  },
+  {
+   "nom": "PMR03_2016_GML",
+   "fichier": "PMR03_2016_GML.bin",
+   "arrondissement": "PMR",
+   "annee": 2016,
+   "boite": [
+    1772,
+    522,
+    2343,
+    1929
+   ],
+   "batiments": 1618,
+   "triangles": 235350,
+   "octets": 2495400
+  },
+  {
+   "nom": "PMR04_2016_GML",
+   "fichier": "PMR04_2016_GML.bin",
+   "arrondissement": "PMR",
+   "annee": 2016,
+   "boite": [
+    2343,
+    805,
+    2991,
+    1904
+   ],
+   "batiments": 750,
+   "triangles": 85132,
+   "octets": 921026
+  },
+  {
+   "nom": "PMR05_2016_GML",
+   "fichier": "PMR05_2016_GML.bin",
+   "arrondissement": "PMR",
+   "annee": 2016,
+   "boite": [
+    2963,
+    910,
+    3603,
+    1868
+   ],
+   "batiments": 1101,
+   "triangles": 84835,
+   "octets": 939261
+  },
+  {
+   "nom": "PMR06_2016_GML",
+   "fichier": "PMR06_2016_GML.bin",
+   "arrondissement": "PMR",
+   "annee": 2016,
+   "boite": [
+    3600,
+    1160,
+    4165,
+    2272
+   ],
+   "batiments": 398,
+   "triangles": 38201,
+   "octets": 414068
+  },
+  {
+   "nom": "PMR07_2016_GML",
+   "fichier": "PMR07_2016_GML.bin",
+   "arrondissement": "PMR",
+   "annee": 2016,
+   "boite": [
+    727,
+    1964,
+    1378,
+    3955
+   ],
+   "batiments": 2383,
+   "triangles": 346101,
+   "octets": 3640019
+  },
+  {
+   "nom": "PMR08_2016_GML",
+   "fichier": "PMR08_2016_GML.bin",
+   "arrondissement": "PMR",
+   "annee": 2016,
+   "boite": [
+    1326,
+    1946,
+    1850,
+    3479
+   ],
+   "batiments": 927,
+   "triangles": 93978,
+   "octets": 1021421
+  },
+  {
+   "nom": "PMR09_2016_GML",
+   "fichier": "PMR09_2016_GML.bin",
+   "arrondissement": "PMR",
+   "annee": 2016,
+   "boite": [
+    1832,
+    1924,
+    2367,
+    3128
+   ],
+   "batiments": 1179,
+   "triangles": 146640,
+   "octets": 1551413
+  },
+  {
+   "nom": "PMR10_2016_GML",
+   "fichier": "PMR10_2016_GML.bin",
+   "arrondissement": "PMR",
+   "annee": 2016,
+   "boite": [
+    2361,
+    1889,
+    3041,
+    3065
+   ],
+   "batiments": 1522,
+   "triangles": 124448,
+   "octets": 1368258
+  },
+  {
+   "nom": "PMR11_2016_GML",
+   "fichier": "PMR11_2016_GML.bin",
+   "arrondissement": "PMR",
+   "annee": 2016,
+   "boite": [
+    3013,
+    1850,
+    3723,
+    2954
+   ],
+   "batiments": 1182,
+   "triangles": 119649,
+   "octets": 1284906
+  },
+  {
+   "nom": "SO02_2016_GML",
+   "fichier": "SO02_2016_GML.bin",
+   "arrondissement": "SO",
+   "annee": 2016,
+   "boite": [
+    -5009,
+    -1957,
+    -3806,
+    -781
+   ],
+   "batiments": 1727,
+   "triangles": 169991,
+   "octets": 1860997
+  },
+  {
+   "nom": "SO03_2016_GML",
+   "fichier": "SO03_2016_GML.bin",
+   "arrondissement": "SO",
+   "annee": 2016,
+   "boite": [
+    -5177,
+    -1145,
+    -4237,
+    -254
+   ],
+   "batiments": 640,
+   "triangles": 50313,
+   "octets": 561906
+  },
+  {
+   "nom": "SO04_2016_GML",
+   "fichier": "SO04_2016_GML.bin",
+   "arrondissement": "SO",
+   "annee": 2016,
+   "boite": [
+    -4192,
+    -1840,
+    -2415,
+    -634
+   ],
+   "batiments": 86,
+   "triangles": 19586,
+   "octets": 207962
+  },
+  {
+   "nom": "SO05_2016_GML",
+   "fichier": "SO05_2016_GML.bin",
+   "arrondissement": "SO",
+   "annee": 2016,
+   "boite": [
+    -2418,
+    -2284,
+    -529,
+    -1160
+   ],
+   "batiments": 1578,
+   "triangles": 187887,
+   "octets": 2001416
+  },
+  {
+   "nom": "SO06_2016_GML",
+   "fichier": "SO06_2016_GML.bin",
+   "arrondissement": "SO",
+   "annee": 2016,
+   "boite": [
+    -2246,
+    -3396,
+    157,
+    -1497
+   ],
+   "batiments": 678,
+   "triangles": 74196,
+   "octets": 815464
+  },
+  {
+   "nom": "SO07_2016_GML",
+   "fichier": "SO07_2016_GML.bin",
+   "arrondissement": "SO",
+   "annee": 2016,
+   "boite": [
+    -5013,
+    -430,
+    -4255,
+    206
+   ],
+   "batiments": 21,
+   "triangles": 5354,
+   "octets": 64597
+  },
+  {
+   "nom": "SO08_2016_GML",
+   "fichier": "SO08_2016_GML.bin",
+   "arrondissement": "SO",
+   "annee": 2016,
+   "boite": [
+    -4225,
+    -1063,
+    -2095,
+    -278
+   ],
+   "batiments": 943,
+   "triangles": 86254,
+   "octets": 968489
+  },
+  {
+   "nom": "SO09_2016_GML",
+   "fichier": "SO09_2016_GML.bin",
+   "arrondissement": "SO",
+   "annee": 2016,
+   "boite": [
+    -2238,
+    -1624,
+    181,
+    -810
+   ],
+   "batiments": 335,
+   "triangles": 57147,
+   "octets": 602367
+  },
+  {
+   "nom": "SO10_2016_GML",
+   "fichier": "SO10_2016_GML.bin",
+   "arrondissement": "SO",
+   "annee": 2016,
+   "boite": [
+    -3971,
+    -774,
+    -1776,
+    82
+   ],
+   "batiments": 1002,
+   "triangles": 118414,
+   "octets": 1294110
+  },
+  {
+   "nom": "SO11_2016_GML",
+   "fichier": "SO11_2016_GML.bin",
+   "arrondissement": "SO",
+   "annee": 2016,
+   "boite": [
+    -2039,
+    -1025,
+    -770,
+    -381
+   ],
+   "batiments": 745,
+   "triangles": 123841,
+   "octets": 1332421
+  },
+  {
+   "nom": "V01_2016",
+   "fichier": "V01_2016.bin",
+   "arrondissement": "V",
+   "annee": 2016,
+   "boite": [
+    -4621,
+    -4216,
+    -2801,
+    -3435
+   ],
+   "batiments": 431,
+   "triangles": 80674,
+   "octets": 884141
+  },
+  {
+   "nom": "V02_2016",
+   "fichier": "V02_2016.bin",
+   "arrondissement": "V",
+   "annee": 2016,
+   "boite": [
+    -2719,
+    -4229,
+    -1945,
+    -3926
+   ],
+   "batiments": 98,
+   "triangles": 20903,
+   "octets": 216470
+  },
+  {
+   "nom": "V03_2016",
+   "fichier": "V03_2016.bin",
+   "arrondissement": "V",
+   "annee": 2016,
+   "boite": [
+    -3038,
+    -4195,
+    -1164,
+    -3143
+   ],
+   "batiments": 371,
+   "triangles": 113776,
+   "octets": 1140891
+  },
+  {
+   "nom": "V05_2016",
+   "fichier": "V05_2016.bin",
+   "arrondissement": "V",
+   "annee": 2016,
+   "boite": [
+    -5011,
+    -3195,
+    -4684,
+    -2611
+   ],
+   "batiments": 227,
+   "triangles": 50004,
+   "octets": 507343
+  },
+  {
+   "nom": "V06_2016",
+   "fichier": "V06_2016.bin",
+   "arrondissement": "V",
+   "annee": 2016,
+   "boite": [
+    -5009,
+    -3255,
+    -3950,
+    -2055
+   ],
+   "batiments": 1613,
+   "triangles": 101965,
+   "octets": 1167923
+  },
+  {
+   "nom": "V07_2016",
+   "fichier": "V07_2016.bin",
+   "arrondissement": "V",
+   "annee": 2016,
+   "boite": [
+    -4450,
+    -3133,
+    -3273,
+    -1749
+   ],
+   "batiments": 1767,
+   "triangles": 215708,
+   "octets": 2286121
+  },
+  {
+   "nom": "V08_2016",
+   "fichier": "V08_2016.bin",
+   "arrondissement": "V",
+   "annee": 2016,
+   "boite": [
+    -3822,
+    -2780,
+    -2596,
+    -1523
+   ],
+   "batiments": 1308,
+   "triangles": 116983,
+   "octets": 1286934
+  },
+  {
+   "nom": "V09_2016",
+   "fichier": "V09_2016.bin",
+   "arrondissement": "V",
+   "annee": 2016,
+   "boite": [
+    -3278,
+    -2975,
+    -2296,
+    -1567
+   ],
+   "batiments": 454,
+   "triangles": 72646,
+   "octets": 790192
+  },
+  {
+   "nom": "VM01_2020_GML",
+   "fichier": "VM01_2020_GML.bin",
+   "arrondissement": "VM",
+   "annee": 2020,
+   "boite": [
+    -80,
+    -2768,
+    2175,
+    -899
+   ],
+   "batiments": 347,
+   "triangles": 125781,
+   "octets": 1278795
+  },
+  {
+   "nom": "VM02_2020_GML",
+   "fichier": "VM02_2020_GML.bin",
+   "arrondissement": "VM",
+   "annee": 2020,
+   "boite": [
+    1597,
+    -3783,
+    4138,
+    -980
+   ],
+   "batiments": 321,
+   "triangles": 53949,
+   "octets": 538805
+  },
+  {
+   "nom": "VM03_2020_GML",
+   "fichier": "VM03_2020_GML.bin",
+   "arrondissement": "VM",
+   "annee": 2020,
+   "boite": [
+    -1724,
+    -1009,
+    -120,
+    -99
+   ],
+   "batiments": 380,
+   "triangles": 99648,
+   "octets": 1028996
+  },
+  {
+   "nom": "VM04_2020_GML",
+   "fichier": "VM04_2020_GML.bin",
+   "arrondissement": "VM",
+   "annee": 2020,
+   "boite": [
+    -123,
+    -1303,
+    1226,
+    -348
+   ],
+   "batiments": 285,
+   "triangles": 109710,
+   "octets": 1106881
+  },
+  {
+   "nom": "VM05_2020_GML",
+   "fichier": "VM05_2020_GML.bin",
+   "arrondissement": "VM",
+   "annee": 2020,
+   "boite": [
+    1215,
+    -877,
+    2832,
+    -363
+   ],
+   "batiments": 282,
+   "triangles": 75858,
+   "octets": 771942
+  },
+  {
+   "nom": "VM06_2020_GML",
+   "fichier": "VM06_2020_GML.bin",
+   "arrondissement": "VM",
+   "annee": 2020,
+   "boite": [
+    1211,
+    -1126,
+    4211,
+    -239
+   ],
+   "batiments": 243,
+   "triangles": 73457,
+   "octets": 736335
+  },
+  {
+   "nom": "VM07_2020_GML",
+   "fichier": "VM07_2020_GML.bin",
+   "arrondissement": "VM",
+   "annee": 2020,
+   "boite": [
+    -1587,
+    -305,
+    -67,
+    224
+   ],
+   "batiments": 578,
+   "triangles": 150939,
+   "octets": 1539990
+  },
+  {
+   "nom": "VM08_2020_GML",
+   "fichier": "VM08_2020_GML.bin",
+   "arrondissement": "VM",
+   "annee": 2020,
+   "boite": [
+    -61,
+    -332,
+    1227,
+    80
+   ],
+   "batiments": 140,
+   "triangles": 50225,
+   "octets": 502390
+  },
+  {
+   "nom": "VM09_2020_GML",
+   "fichier": "VM09_2020_GML.bin",
+   "arrondissement": "VM",
+   "annee": 2020,
+   "boite": [
+    1230,
+    -413,
+    2887,
+    -10
+   ],
+   "batiments": 591,
+   "triangles": 102059,
+   "octets": 1071749
+  },
+  {
+   "nom": "VM10_2020_GML",
+   "fichier": "VM10_2020_GML.bin",
+   "arrondissement": "VM",
+   "annee": 2020,
+   "boite": [
+    -1932,
+    118,
+    -1178,
+    1648
+   ],
+   "batiments": 517,
+   "triangles": 106562,
+   "octets": 1088643
+  },
+  {
+   "nom": "VM11_2020_GML",
+   "fichier": "VM11_2020_GML.bin",
+   "arrondissement": "VM",
+   "annee": 2020,
+   "boite": [
+    -1507,
+    113,
+    -30,
+    702
+   ],
+   "batiments": 589,
+   "triangles": 161225,
+   "octets": 1655599
+  },
+  {
+   "nom": "VM12_2020_GML",
+   "fichier": "VM12_2020_GML.bin",
+   "arrondissement": "VM",
+   "annee": 2020,
+   "boite": [
+    -45,
+    22,
+    1248,
+    839
+   ],
+   "batiments": 211,
+   "triangles": 59804,
+   "octets": 615553
+  },
+  {
+   "nom": "VM13_2020_GML",
+   "fichier": "VM13_2020_GML.bin",
+   "arrondissement": "VM",
+   "annee": 2020,
+   "boite": [
+    1251,
+    -50,
+    2918,
+    452
+   ],
+   "batiments": 900,
+   "triangles": 87017,
+   "octets": 963224
+  },
+  {
+   "nom": "VM14_2020_GML",
+   "fichier": "VM14_2020_GML.bin",
+   "arrondissement": "VM",
+   "annee": 2020,
+   "boite": [
+    1257,
+    154,
+    2938,
+    859
+   ],
+   "batiments": 535,
+   "triangles": 68134,
+   "octets": 733861
+  },
+  {
+   "nom": "VM16_2020_GML",
+   "fichier": "VM16_2020_GML.bin",
+   "arrondissement": "VM",
+   "annee": 2020,
+   "boite": [
+    3511,
+    -231,
+    4003,
+    1158
+   ],
+   "batiments": 979,
+   "triangles": 59442,
+   "octets": 676577
+  },
+  {
+   "nom": "VM17_2020_GML",
+   "fichier": "VM17_2020_GML.bin",
+   "arrondissement": "VM",
+   "annee": 2020,
+   "boite": [
+    3955,
+    -169,
+    4546,
+    1216
+   ],
+   "batiments": 850,
+   "triangles": 58230,
+   "octets": 670016
+  },
+  {
+   "nom": "VM18_2020_GML",
+   "fichier": "VM18_2020_GML.bin",
+   "arrondissement": "VM",
+   "annee": 2020,
+   "boite": [
+    -1682,
+    596,
+    836,
+    1951
+   ],
+   "batiments": 422,
+   "triangles": 119870,
+   "octets": 1261682
+  }
+ ],
+ "source": "Ville de Montréal, Bâtiments 3D (maquettes LOD2), CC BY 4.0"
+}
