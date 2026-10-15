@@ -93,6 +93,11 @@ export function createMaterials(THREE, opts = {}) {
   std('Metal_Black', { color: 0x1c1c1c, roughness: 0.6, metalness: 0.4 });
   const fence = std('Fence', { color: 0xaeb2b4, roughness: 0.5, metalness: 0.6, side: THREE.DoubleSide, alphaTest: 0.4 });
   if (canvasOk) fence.alphaMap = T.chainlink(THREE);
+  const rail = std('Railing', { color: 0x1a1a1c, roughness: 0.55, metalness: 0.5, side: THREE.DoubleSide, alphaTest: 0.5 });
+  if (canvasOk) {
+    rail.alphaMap = T.railing(THREE);
+    rail.alphaMap.repeat.set(1 / 0.6, 1);
+  }
   fence.transparent = false;
   std('Glass', { color: 0x2a3d4d, roughness: 0.08, metalness: 0.3 });
   std('Copper', { color: 0x5c8f7a, roughness: 0.55, metalness: 0.35 });
@@ -154,6 +159,7 @@ export function createMaterials(THREE, opts = {}) {
   M.Neon_Pool = npool;
 
   M.setNight = (night) => setNight(M, night);
+  M.setWet = (wet) => setWet(M, wet);
   return M;
 }
 
@@ -229,10 +235,11 @@ function facadeMaterial(THREE, atlas) {
     night: { value: 1 },
     litRatio: { value: 0.3 },
     winRect: { value: T.facadeWindows().map(([x, y, w, h]) => new THREE.Vector4(x, y, w, h)) },
+    bayWidth: { value: T.FACADES.map((f) => T.FACADE_BAY[f] || 3) },
   };
   m.userData.uniforms = uniforms;
   if (!atlas) return m;
-  m.customProgramCacheKey = () => 'facades-v4';
+  m.customProgramCacheKey = () => 'facades-v6';
   m.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
     shader.vertexShader = shader.vertexShader
@@ -253,6 +260,7 @@ uniform float facadeRows;
 uniform float night;
 uniform float litRatio;
 uniform vec4 winRect[${T.FACADES.length}];
+uniform float bayWidth[${T.FACADES.length}];
 varying vec2 vFacadeUv;
 flat varying float vFacade;
 flat varying float vSeed;
@@ -262,17 +270,131 @@ float fHash(vec3 p) {
   return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
 }
 float fGlass = 0.0;
-vec2 fCell = vec2(0.0);`)
+float fDoorGlass = 0.0;
+float fHeight = 0.0;
+vec2 fCell = vec2(0.0);
+// Brick and stone stand out of their mortar by a centimetre: the joints are
+// redrawn here, exactly where the atlas paints them, so they catch the light.
+float fJoint(float d, float halfW, float fw) {
+  return 1.0 - smoothstep(halfW, halfW + fw, d);
+}
+float fRelief(vec2 u, float kind) {
+  vec2 p = vec2(u.x, 1.0 - u.y) * 128.0;
+  vec2 fw = max(fwidth(p), vec2(0.001));
+  float mortar = 0.0;
+  if (kind < 4.5) {
+    float j = floor(p.y / 6.0);
+    float off = mod(j, 2.0) * 8.0;
+    mortar = max(fJoint(abs(mod(p.y - 0.5 + 3.0, 6.0) - 3.0), 0.6, fw.y),
+                 fJoint(abs(mod(p.x - off - 0.5 + 8.0, 16.0) - 8.0), 0.6, fw.x));
+  } else if (kind < 6.5) {
+    float j = floor(p.y / 32.0);
+    float off = mod(j, 2.0) * 24.0;
+    mortar = max(fJoint(abs(mod(p.y - 0.75 + 16.0, 32.0) - 16.0), 0.9, fw.y),
+                 fJoint(abs(mod(p.x - off - 0.75 + 24.0, 48.0) - 24.0), 0.9, fw.x));
+  }
+  return (1.0 - mortar) * 0.012;
+}`)
       .replace('#include <map_fragment>', `
 fCell = floor(vFacadeUv);
 vec2 ff = fract(vFacadeUv);
+// Recessed windows, by parallax: the glass sits a hand's depth behind the
+// wall, so from an angle the frame hides part of it and the reveal — the
+// jamb, the lintel's underside, the sill — shows. No geometry: the view
+// direction, in the wall's frame, shifts where the glass is read from.
+vec4 wr0 = winRect[int(vFacade + 0.5)];
+vec4 fWin = wr0;
+// Doors: on brick and stone, some ground-floor bays hold a door instead of a
+// shop window — recessed like the windows, by the same parallax.
+float fDoor = step(vFacade, 6.5) * (1.0 - step(1.0, fCell.y)) * step(fHash(vec3(fCell.x, vSeed, 41.0)), 0.3);
+if (fDoor > 0.5) wr0 = vec4(0.31, 0.03, 0.38, 0.73);
+vec2 fWallUv = ff;
+if (fDoor > 0.5) {
+  // Around the door, the window that would be there is bricked in: read the
+  // wall from beside it, a whole number of bricks away.
+  vec2 lo = fWin.xy - vec2(6.0, 8.0) / 128.0, hi = fWin.xy + fWin.zw + 4.0 / 128.0;
+  if (ff.x > lo.x && ff.x < hi.x && ff.y > lo.y && ff.y < hi.y) fWallUv.x = fract(ff.x + (ff.x < 0.5 ? -0.25 : 0.25));
+}
+float fReveal = 0.0;
+float fRevealShade = 1.0;
+vec2 inWin = step(wr0.xy, ff) * step(ff, wr0.xy + wr0.zw);
+float fNear = 1.0 - clamp(length(fwidth(vFacadeUv)) * 4.0 - 0.3, 0.0, 1.0);
+if (inWin.x * inWin.y > 0.5 && fNear > 0.0) {
+  vec3 fV = normalize(vViewPosition);
+  vec3 fN = normalize(vNormal);
+  vec3 fB = normalize((viewMatrix * vec4(0.0, 1.0, 0.0, 0.0)).xyz);
+  vec3 fT = normalize(cross(fB, fN));
+  float vn = max(dot(fV, fN), 0.2);
+  float depth = mix(0.24, 0.07, step(9.5, vFacade)) * fNear;
+  vec2 shift = vec2(dot(fV, fT) / bayWidth[int(vFacade + 0.5)], dot(fV, fB) / 3.3) * depth / vn;
+  vec2 g = ff - shift;
+  vec2 lo = wr0.xy, hi = wr0.xy + wr0.zw;
+  if (g.x < lo.x || g.x > hi.x || g.y < lo.y || g.y > hi.y) {
+    fReveal = 1.0;
+    // Lit from above: the lintel's underside darkest, the sill's top lightest.
+    fRevealShade = g.y > hi.y ? 0.35 : g.y < lo.y ? 0.95 : 0.6;
+  }
+  ff = clamp(g, lo + 0.002, hi - 0.002);
+}
 vec2 auv = vec2(ff.x, (facadeRows - vFacade - 1.0 + ff.y) / facadeRows);
 vec2 gx = dFdx(vFacadeUv) * vec2(1.0, 1.0 / facadeRows);
 vec2 gy = dFdy(vFacadeUv) * vec2(1.0, 1.0 / facadeRows);
 vec4 fs = textureGrad(facadeAtlas, auv, gx, gy);
 fGlass = 1.0 - fs.a;
+bool fInDoor = fDoor > 0.5 && inWin.x * inWin.y > 0.5;
+if (fDoor > 0.5 && !fInDoor) {
+  fs = textureGrad(facadeAtlas, vec2(fWallUv.x, (facadeRows - vFacade - 1.0 + fWallUv.y) / facadeRows), gx, gy);
+  fGlass = 0.0;
+}
+if (fInDoor && fReveal < 0.5) {
+  // A painted door: frame, two sunk panels, a glazed top, a brass knob.
+  vec2 du = (ff - wr0.xy) / wr0.zw;
+  float ph = fHash(vec3(fCell.x, vSeed, 43.0));
+  vec3 paint = ph < 0.25 ? vec3(0.1, 0.24, 0.14) : ph < 0.45 ? vec3(0.32, 0.06, 0.07)
+    : ph < 0.65 ? vec3(0.05, 0.05, 0.06) : ph < 0.85 ? vec3(0.34, 0.2, 0.1) : vec3(0.08, 0.16, 0.3);
+  float frame = 1.0 - step(0.07, min(min(du.x, 1.0 - du.x), (1.0 - du.y) * 0.5));
+  float inner = step(0.17, du.x) * step(du.x, 0.83);
+  float pane = inner * step(0.64, du.y) * step(du.y, 0.9);
+  float panel = inner * (step(0.08, du.y) * step(du.y, 0.28) + step(0.34, du.y) * step(du.y, 0.56));
+  vec3 col = paint * mix(1.0, 0.72, panel);
+  col = mix(col, vec3(0.74, 0.72, 0.66), frame);
+  float knob = 1.0 - step(0.035, length((du - vec2(0.86, 0.46)) * vec2(1.0, 2.6)));
+  col = mix(col, vec3(0.75, 0.6, 0.3), knob);
+  fs = vec4(col, 1.0 - pane);
+  fGlass = pane;
+  fDoorGlass = pane;
+  fHeight = (1.0 - panel) * (1.0 - pane) * 0.006 + frame * 0.01;
+}
+if (fReveal > 0.5) {
+  // The reveal is the wall's own material, read just beside the window.
+  vec2 wuv0 = vec2(max(min(wr0.x, fWin.x) - 0.04, 0.01), ff.y);
+  fs = textureGrad(facadeAtlas, vec2(wuv0.x, (facadeRows - vFacade - 1.0 + wuv0.y) / facadeRows), gx, gy);
+  fs.rgb *= fRevealShade;
+  fGlass = 0.0;
+}
+if (fReveal < 0.5 && !fInDoor) {
+  float h = fRelief(fWallUv, vFacade);
+  // Frames and sills stand proud of the wall.
+  vec2 wlo = fWin.xy - 3.0 / 128.0, whi = fWin.xy + fWin.zw + 3.0 / 128.0;
+  float onFrame = step(wlo.x, fWallUv.x) * step(fWallUv.x, whi.x) * step(wlo.y, fWallUv.y) * step(fWallUv.y, whi.y);
+  float onSill = step(fWin.x - 5.0 / 128.0, fWallUv.x) * step(fWallUv.x, fWin.x + fWin.z + 5.0 / 128.0)
+    * step(fWin.y - 7.0 / 128.0, fWallUv.y) * step(fWallUv.y, fWin.y - 3.0 / 128.0);
+  if (fDoor < 0.5 && vFacade < 9.5) h = max(h, max(onFrame * 0.02, onSill * 0.04));
+  fHeight = h * (1.0 - fGlass);
+}
+fHeight *= fNear;
 vec3 glassTint = mix(vec3(0.05, 0.07, 0.1), vec3(0.1, 0.16, 0.24), step(9.5, vFacade));
 diffuseColor.rgb *= mix(fs.rgb * (0.88 + 0.24 * fHash(vec3(vSeed, 3.0, 1.0))), glassTint, fGlass);`)
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+// Bump from the relief height, in metres: the joints, frames and door panels
+// shade with the sun and the street lamps. Fades out with distance.
+if (fNear > 0.0) {
+  vec3 dpx = dFdx(-vViewPosition), dpy = dFdy(-vViewPosition);
+  vec3 r1 = cross(dpy, normal), r2 = cross(normal, dpx);
+  float det = dot(dpx, r1);
+  vec3 grad = sign(det) * (dFdx(fHeight) * r1 + dFdy(fHeight) * r2);
+  normal = normalize(abs(det) * normal - grad);
+}`)
       .replace('#include <roughnessmap_fragment>', `
 // Far off, a window is less than a pixel: its reflection is noise. Glass
 // turns matte with distance, so the walls stop sparkling.
@@ -301,6 +423,7 @@ wcol = mix(wcol, tone < 0.7 ? vec3(0.82, 0.9, 1.0) : vec3(1.0, 0.86, 0.66), offi
 float st = fHash(vec3(fCell.x, vSeed, 3.0));
 vec3 scol = st < 0.45 ? vec3(1.0, 0.82, 0.62) : st < 0.62 ? vec3(0.2, 0.9, 1.0) : st < 0.8 ? vec3(1.0, 0.25, 0.65) : st < 0.9 ? vec3(0.6, 0.35, 1.0) : vec3(1.0, 0.6, 0.25);
 wcol = mix(wcol, scol, shop);
+wcol = mix(wcol, vec3(1.0, 0.7, 0.42), fDoorGlass);
 float shade = 0.45 + 0.55 * fHash(vec3(fCell, 5.0 + vSeed));
 // Inside the window: a room lit from its ceiling, brighter up top, the
 // corners in shadow, furniture dark along the sill. Curtains drawn to the
@@ -338,23 +461,52 @@ totalEmissiveRadiance += lcol * edge * strip * 2.5;`);
   return m;
 }
 
+/**
+ * How much night it is, 0 (day) to 1 (night): the sky passes through every
+ * value at dusk and dawn, so lamps, windows and pools come on gradually.
+ */
 function setNight(M, night) {
+  const k = Math.min(1, Math.max(0, Number(night)));
+  M.night = k;
   const u = M.Facades.userData.uniforms;
-  if (u) u.night.value = night ? 1 : 0;
-  for (const k of ['Lamp_Sodium', 'Lamp_White', 'Lamp_LED', 'Lamp_Tunnel', 'Neon_Red', 'Neon_White', 'Neon', 'Neon_Buzz', 'Neon_Cyan', 'Neon_Magenta', 'Beacon_Red']) {
-    if (!M[k]) continue;
-    M[k].userData.base = M[k].userData.base || M[k].color.clone();
-    M[k].userData.level = night ? 1 : 0.25;
-    M[k].color.copy(M[k].userData.base).multiplyScalar(M[k].userData.level);
+  if (u) u.night.value = k;
+  for (const name of ['Lamp_Sodium', 'Lamp_White', 'Lamp_LED', 'Lamp_Tunnel', 'Neon_Red', 'Neon_White', 'Neon', 'Neon_Buzz', 'Neon_Cyan', 'Neon_Magenta', 'Beacon_Red']) {
+    if (!M[name]) continue;
+    M[name].userData.base = M[name].userData.base || M[name].color.clone();
+    M[name].userData.level = 0.25 + 0.75 * k;
+    M[name].color.copy(M[name].userData.base).multiplyScalar(M[name].userData.level);
   }
-  if (M.Light_Pool) M.Light_Pool.visible = !!night;
-  if (M.Neon_Pool) M.Neon_Pool.visible = !!night;
-  if (M.Beacon) M.Beacon.visible = !!night;
-  // Streets look wet at night — the NFSU look — and dry by day.
-  if (M.Asphalt) M.Asphalt.roughness = night ? 0.42 : 0.82;
-  if (M.Concrete_Dark && M.Concrete_Dark.emissiveMap) M.Concrete_Dark.emissive.set(night ? 0x766e7c : 0x000000);
-  if (M.Tunnel && M.Tunnel.emissiveMap) M.Tunnel.emissive.set(night ? 0x766d5f : 0x000000);
+  if (M.Concrete_Dark && M.Concrete_Dark.emissiveMap) M.Concrete_Dark.emissive.set(0x766e7c).multiplyScalar(k);
+  if (M.Tunnel && M.Tunnel.emissiveMap) M.Tunnel.emissive.set(0x766d5f).multiplyScalar(k);
   // Sparse one-texel lamps: bright, or the mipmaps average them away.
-  if (M.Outskirts) M.Outskirts.emissive.setScalar(night ? 2.6 : 0);
-  if (M.Street_Asphalt) M.Street_Asphalt.roughness = night ? 0.42 : 0.82;
+  if (M.Outskirts) M.Outskirts.emissive.setScalar(2.6 * k);
+  wetGround(M);
+}
+
+/**
+ * How wet the streets are, 0..1 (rain). Night alone already makes them look
+ * damp — the NFSU look; rain makes them darker and glossier. The light
+ * pools stay as they are: longer or brighter, they overlap into one orange
+ * wash over the whole street (tried).
+ */
+function setWet(M, wet) {
+  M.wet = Math.min(1, Math.max(0, Number(wet)));
+  wetGround(M);
+}
+
+function wetGround(M) {
+  const night = M.night ?? 1, wet = M.wet ?? 0;
+  const pools = { Light_Pool: 0.2, Neon_Pool: 0.55, Beacon: 0.1 };
+  for (const [name, base] of Object.entries(pools)) {
+    if (!M[name]) continue;
+    M[name].visible = night > 0.02;
+    M[name].opacity = base * night;
+  }
+  for (const name of ['Asphalt', 'Street_Asphalt']) {
+    const m = M[name];
+    if (!m) continue;
+    m.userData.base = m.userData.base || m.color.clone();
+    m.roughness = 0.82 - 0.4 * night - 0.22 * wet;
+    m.color.copy(m.userData.base).multiplyScalar(1 - 0.3 * wet);
+  }
 }

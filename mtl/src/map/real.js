@@ -23,6 +23,8 @@ import { createTerrain } from './terrain.js';
 import * as G from './geom.js';
 import { ROAD_CLASS } from './layout.js';
 import OVERLAY from './montreal.js';
+import { WIDTH, LINK_WIDTH } from './routes.js';
+import { normalizeObjets, placeObjets, underObjets } from './objets.js';
 
 /** Real metres above (below) the ground for an OSM layer. */
 const LEVEL_Y = { 1: 7.6, 2: 14.2, 3: 20.8, 4: 27.4, [-1]: -8, [-2]: -13, [-3]: -18, [-4]: -22 };
@@ -36,13 +38,6 @@ const SINK = 7.4;
 // is allowed back to the ground, per class, real metres: a highway does not
 // dive between two overpasses 200 m apart, it stays on its embankment.
 const HOLD = { highway: 400, bridge: 400, ramp: 90, road: 30 };
-
-/** Street widths in real metres: [two-way, one-way]. */
-const WIDTH = {
-  motorway: [23, 12.4], trunk: [18, 9], primary: [19, 11], secondary: [15, 9.5], tertiary: [13, 8.5],
-  residential: [11, 8], unclassified: [10, 7.5], living_street: [7, 6], pedestrian: [8, 8], alley: [5, 5],
-};
-const LINK_WIDTH = 6.8;
 
 /** How a street is drawn and furnished (markings, lamps, trees). */
 function streetClass(r, width) {
@@ -59,8 +54,9 @@ const PRIORITY = { motorway: 6, trunk: 5, primary: 4, secondary: 3, tertiary: 2,
 /**
  * @param src      loadSource() output
  * @param settings { zone, echelle }
+ * @param extra    { objets: the objets.json document (map/objets.js) }
  */
-export function buildMap(src, settings) {
+export function buildMap(src, settings, extra = {}) {
   const s = settings.echelle / 100;
   const zone = makeZone(zoneDef(settings));
   if (!zone) throw new Error('zone vide');
@@ -73,6 +69,9 @@ export function buildMap(src, settings) {
   const river = src.surfaces.water.reduce((a, w) => (!a || area(w.poly) > area(a.poly) ? w : a), null);
   const base = river ? river.level : 6;
   const terrain = createTerrain(src.relief, { scale: s, base });
+  // Custom objects level their ground now: everything after reads the terrain.
+  const objets = placeObjets(normalizeObjets(extra.objets), terrain, s, inZone);
+  const underObjet = underObjets(objets);
   const water = [];
   for (const w of src.surfaces.water) {
     const clipped = clipMulti(w.poly, zone, zone.box ? 400 : 150);
@@ -179,6 +178,8 @@ export function buildMap(src, settings) {
           pts: sub.pts, levels: sub.edges.map(level), flags: sub.edges.map(flag), wet: sub.edges.map(wet),
           priority: PRIORITY[r.cls] || 0,
           street: true,
+          // Painted like the street it continues (map/markings.js).
+          streetCls: streetClass(r, width / s),
         });
         cursor = b;
       });
@@ -213,10 +214,11 @@ export function buildMap(src, settings) {
     const ring = b.ring.map(P);
     const cx = c[0] * s, cn = c[1] * s;
     if (landmarkPlots.some((p) => Math.hypot(cx - p.x, cn - p.n) < p.r)) continue;
+    if (underObjet(cx, cn, ring)) continue;
     buildings.push({ ...b, ring, cx, cn, h: S(b.h), minH: S(b.minH) });
   }
   // The city's own 3D models win over the extruded footprints they cover.
-  const lod2 = cityModels(src.lod2 || [], inZone, s, landmarkPlots);
+  const lod2 = cityModels(src.lod2 || [], inZone, s, landmarkPlots, underObjet);
   if (lod2.length) {
     const grid = new G.Grid(64);
     for (const b of lod2) {
@@ -225,15 +227,21 @@ export function buildMap(src, settings) {
       grid.insert(b, bb.x0, bb.n0, bb.x1, bb.n1);
     }
     const tmp = [];
-    const covered = (b) => {
+    // The model that covers a footprint keeps it, to give it back if the
+    // model has to go (map/buildings.js dropModelsOnRoads).
+    const coverer = (b) => {
       const bb = G.ringBBox(b.ring);
       for (const m of grid.query((bb.x0 + bb.x1) / 2, (bb.n0 + bb.n1) / 2, Math.max(bb.x1 - bb.x0, bb.n1 - bb.n0) / 2, tmp)) {
         if (m.bb.x1 < bb.x0 || m.bb.x0 > bb.x1 || m.bb.n1 < bb.n0 || m.bb.n0 > bb.n1) continue;
-        if (G.pointInRing(b.cx, b.cn, m.ring) || G.pointInRing(m.cx, m.cn, b.ring)) return true;
+        if (G.pointInRing(b.cx, b.cn, m.ring) || G.pointInRing(m.cx, m.cn, b.ring)) return m;
       }
-      return false;
+      return null;
     };
-    const kept = buildings.filter((b) => !covered(b));
+    const kept = buildings.filter((b) => {
+      const m = coverer(b);
+      if (m) m.replaced.push(b);
+      return !m;
+    });
     buildings.length = 0;
     for (const b of kept) buildings.push(b);
     for (const b of lod2) { delete b.bb; buildings.push(b); }
@@ -241,7 +249,7 @@ export function buildMap(src, settings) {
   const tx = [], tn = [];
   for (let k = 0; k < src.trees.count; k++) {
     const x = src.trees.xs[k], n = src.trees.ns[k];
-    if (inZone(x, n)) { tx.push(x * s); tn.push(n * s); }
+    if (inZone(x, n) && !underObjet(x * s, n * s)) { tx.push(x * s); tn.push(n * s); }
   }
   const furniture = src.furniture.filter((f) => inZone(f.x, f.n)).map((f) => ({ ...f, x: f.x * s, n: f.n * s }));
   // District names: the hand-placed ones, then the data's own; a data name
@@ -279,7 +287,7 @@ export function buildMap(src, settings) {
     water, waterMulti, greens, grounds,
     streets, roads,
     buildings, trees: { xs: Float32Array.from(tx), ns: Float32Array.from(tn), count: tx.length }, furniture, quartiers, styleNear,
-    landmarks, spawns, signs, races,
+    landmarks, spawns, signs, races, objets,
   };
 }
 
@@ -608,15 +616,29 @@ function profile(r, terrain, waterAt, s, done, spec, onStreet, highways) {
   }
   if (spec && spec.peak) {
     // A named bridge with a known silhouette (Jacques-Cartier over the
-    // river and Île Sainte-Hélène): a parabola from its first wet span to
-    // its last, peaking at `peak` metres.
-    let i0 = -1, i1 = -1;
-    for (let i = 0; i < m - 1; i++) if (wt[i]) { if (i0 < 0) i0 = i; i1 = i + 1; }
-    if (i0 >= 0) {
+    // river, Île Sainte-Hélène and the seaway): one parabola per channel,
+    // peaking at `peak` metres, and between two channels the deck `island`
+    // metres over the land, where the island's ramps meet it. A single
+    // parabola from the first wet span to the last put the top of the bridge
+    // on the island, 30 m over its ramps.
+    const runs = [];
+    for (let i = 0; i < m - 1; i++) {
+      if (!wt[i]) continue;
+      const last = runs[runs.length - 1];
+      // A pier, a dike or a quay a few metres wide does not split a channel.
+      if (last && cum[i] - cum[last[1]] < 120 * s) last[1] = i + 1;
+      else runs.push([i, i + 1]);
+    }
+    for (const [i0, i1] of runs) {
       for (let k = i0; k <= i1; k++) {
         const t = (cum[k] - cum[i0]) / ((cum[i1] - cum[i0]) || 1);
         const y = g[k] + spec.peak * s * (1 - (2 * t - 1) ** 2) + 8 * s;
         target[k] = Math.max(target[k] ?? -Infinity, y);
+      }
+    }
+    if (spec.island) {
+      for (let r0 = 0; r0 + 1 < runs.length; r0++) {
+        for (let k = runs[r0][1] + 1; k < runs[r0 + 1][0]; k++) target[k] = g[k] + spec.island * s;
       }
     }
   }
@@ -661,8 +683,10 @@ function profile(r, terrain, waterAt, s, done, spec, onStreet, highways) {
     let best = null;
     for (const o of done) {
       // A street's lifted piece continues as the street at both ends: it
-      // lands on the next piece of a street, never on a highway it crosses.
-      if (r.street && !o.street) continue;
+      // lands on the next piece of a street, never on a highway it crosses —
+      // unless the data joins them there (a node they share: the ramps of
+      // Île Sainte-Hélène end on the Jacques-Cartier deck).
+      if (r.street && !o.street && !sharesNode(o.path, x, n, 0.3 * s)) continue;
       const hit = nearestOnPath(o.path, x, n, 1.2 * s + o.width / 2);
       if (hit && (!best || hit.d < best.d)) best = hit;
     }
@@ -912,6 +936,12 @@ function meetLiftedStreets(roads, s, reprofile) {
   }
 }
 
+/** Whether a vertex of `path` is at (x, n): a node two ways share. */
+function sharesNode(path, x, n, tol) {
+  for (const p of path) if (Math.abs(p[0] - x) <= tol && Math.abs(p[1] - n) <= tol) return true;
+  return false;
+}
+
 function nearestOnPath(path, x, n, reach) {
   let best = null;
   for (let i = 0; i + 1 < path.length; i++) {
@@ -963,13 +993,14 @@ function area(multi) {
  * one per footprint, the first carrying the group's mesh, each with the
  * height of the mesh over it (for collisions and the plex details).
  */
-function cityModels(groups, inZone, s, plots) {
+function cityModels(groups, inZone, s, plots, underObjet) {
   const out = [];
   for (const g of groups) {
     const c0 = centroid(g.rings[0]);
     if (!inZone(c0[0], c0[1])) continue;
     const cx0 = c0[0] * s, cn0 = c0[1] * s;
     if (plots.some((p) => Math.hypot(cx0 - p.x, cn0 - p.n) < p.r)) continue;
+    if (g.rings.some((r) => { const c = centroid(r); return underObjet(c[0] * s, c[1] * s, r.map(([x, n]) => [x * s, n * s])); })) continue;
     const verts = new Float32Array(g.verts.length);
     for (let i = 0; i < verts.length; i++) verts[i] = g.verts[i] * s;
     const mesh = { verts, roof: g.roof, wall: g.wall, rings: g.rings.map((r) => r.map(([x, n]) => [x * s, n * s])) };
@@ -992,7 +1023,7 @@ function cityModels(groups, inZone, s, plots) {
       const top = tops[k];
       out.push({
         id: `lod2-${out.length}`, ring, cx: c[0], cn: c[1], h: top > 0 ? top : g.h * s, minH: 0, floors: 0,
-        kind: '', roof: '', part: false, name: '', lod2: k === 0 ? mesh : null, lod2Rings: mesh.rings, lod2At: [cx0, cn0],
+        kind: '', roof: '', part: false, name: '', lod2: k === 0 ? mesh : null, lod2Rings: mesh.rings, lod2At: [cx0, cn0], replaced: [],
       });
     });
   }

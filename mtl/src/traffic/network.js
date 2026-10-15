@@ -199,7 +199,12 @@ export function buildNetwork(layout) {
   return net;
 }
 
-function makeEdge(id, L, a, b, pts, len, s) {
+/**
+ * Lanes of a way and their lateral offsets (metres left of the axis, per
+ * direction): the traffic drives on them, and parked cars (map/props.js) keep
+ * clear of them.
+ */
+export function laneLayout(L, s) {
   const w = L.width, h = w / 2;
   let lanes, offsets;
   if (L.oneway) {
@@ -219,6 +224,12 @@ function makeEdge(id, L, a, b, pts, len, s) {
     lanes = [n, n];
     offsets = [side, side];
   }
+  return { lanes, offsets };
+}
+
+function makeEdge(id, L, a, b, pts, len, s) {
+  const w = L.width;
+  const { lanes, offsets } = laneLayout(L, s);
   return {
     id, a: a.id, b: b.id, pts, len, plen: len, cls: L.cls, rank: L.rank, width: w,
     street: L.street || null, road: L.road || null,
